@@ -11,6 +11,7 @@ const dbUsername = process.env.DB_USERNAME
 const dbPassword = process.env.DB_PASSWORD
 const dbName = process.env.DB_NAME
 const dbSynchronize = process.env.DB_SYNCHRONIZE === 'true'
+const dbSsl = process.env.DB_SSL === 'true'
 
 if (!dbHost || Number.isNaN(dbPort) || !dbUsername || !dbPassword || !dbName) {
   throw new Error('Database env vars are not fully configured')
@@ -28,7 +29,8 @@ if (!dbHost || Number.isNaN(dbPort) || !dbUsername || !dbPassword || !dbName) {
       password: dbPassword,
       database: dbName,
       autoLoadEntities: true,
-      synchronize: dbSynchronize
+      synchronize: dbSynchronize,
+      ssl: dbSsl ? { rejectUnauthorized: false } : false
     }),
     BoardModule
   ],
