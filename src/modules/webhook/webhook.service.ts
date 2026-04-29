@@ -73,20 +73,12 @@ export class WebhookService {
     const value = payload?.entry?.[0]?.changes?.[0]?.value
     if (!value) return { status: 'ignored' }
 
-    console.log('value?.statuses?.length', value?.statuses?.length)
-    if (value?.statuses?.length) {
-      console.log('Received status update, ignoring for now')
-      return { status: 'ignored_status' }
-    }
-
     const message = value?.messages?.[0]
     if (!message) {
-      console.log('No message found in payload, ignoring')
       return { status: 'ignored_no_message' }
     }
 
     if (message?.type !== 'text') {
-      console.log('Received non-text message, ignoring')
       return { status: 'ignored_non_text' }
     }
 
@@ -95,17 +87,17 @@ export class WebhookService {
     const from = message?.from
     const text = message?.text?.body?.trim()
     const inboundMessageId = message?.id
+
     const isFromAd = message?.referral?.source_type === 'ad'
     const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
     const welcomeMessage = message?.referral?.welcome_message?.text
 
     if (!from || !text) {
-      console.log('Missing required data in message, ignoring')
       return { status: 'ignored_missing_data' }
     }
 
     if (!displayPhoneNumber) {
-      this.logger.warn('Webhook payload missing metadata.display_phone_number')
+      this.logger.warn('Missing display_phone_number')
       return { status: 'ignored_missing_board_phone' }
     }
 
@@ -118,14 +110,7 @@ export class WebhookService {
     })
 
     if (!board) {
-      this.logger.warn(
-        `No active board found for display_phone_number: ${displayPhoneNumber}`
-      )
-      return {
-        status: 'board_not_found',
-        message: 'Board not found for incoming WhatsApp number',
-        displayPhoneNumber
-      }
+      return { status: 'board_not_found' }
     }
 
     const firstColumn = await this.boardColumnRepo.findOne({
@@ -134,12 +119,7 @@ export class WebhookService {
     })
 
     if (!firstColumn) {
-      this.logger.warn(`Board ${board.id} has no columns configured`)
-      return {
-        status: 'board_without_columns',
-        message: 'Board has no columns to receive leads',
-        boardId: board.id
-      }
+      return { status: 'board_without_columns' }
     }
 
     let lead = await this.leadRepo.findOne({
@@ -150,13 +130,21 @@ export class WebhookService {
       }
     })
 
-    // idempotência simples: se já processou essa mensagem, ignora
+    // idempotência
     if (lead?.lastInboundMessageId === inboundMessageId) {
-      this.logger.log(`Inbound message already processed: ${inboundMessageId}`)
       return { status: 'ignored_duplicate_message' }
     }
 
-    // PRIMEIRO CONTATO: cria o lead e faz a primeira pergunta
+    /**
+     * 🔴 REGRA PRINCIPAL
+     * Só permite criar lead se vier de anúncio
+     */
+    if (!lead && !isFromAd) {
+      this.logger.log('Ignoring first contact not from ad')
+      return { status: 'ignored_non_ad_first_contact' }
+    }
+
+    // PRIMEIRO CONTATO (via anúncio)
     if (!lead) {
       const reply = 'Olá! 👋 \nComo podemos te chamar?'
 
@@ -182,9 +170,7 @@ export class WebhookService {
         phone: from,
         source: leadSource,
         companyName: welcomeMessage,
-        initialContext: undefined,
         temperature: LeadTemperature.WARM,
-        outcome: null,
         state: LeadState.ACTIVE,
         lastInboundMessageId: inboundMessageId ?? undefined,
         lastAutoReplyMessageId: response?.data?.messages?.[0]?.id ?? undefined,
@@ -194,12 +180,11 @@ export class WebhookService {
 
       lead = await this.leadRepo.save(leadDraft)
 
-      this.logger.log('Lead created:', lead)
-
       return { status: 'created_and_replied', leadId: lead.id }
     }
 
-    let reply = 'Recebi sua mensagem 😊 Em breve seguimos com seu atendimento.'
+    // CONTINUAÇÃO DA CONVERSA (já virou lead)
+    let reply = 'Recebi sua mensagem 😊'
 
     if (lead.name === 'Lead sem nome') {
       lead.name = text
@@ -207,7 +192,7 @@ export class WebhookService {
     } else if (!lead.initialContext?.trim()) {
       lead.initialContext = text
       reply =
-        'Perfeito! Seu atendimento foi iniciado com sucesso. Em breve alguém da nossa equipe entrará em contato com você 😊'
+        'Perfeito! Seu atendimento foi iniciado. Em breve alguém falará com você 😊'
     }
 
     const response = await this.sendWhatsAppMessage(from, reply, phoneNumberId)
@@ -218,17 +203,6 @@ export class WebhookService {
 
     await this.leadRepo.save(lead)
 
-    this.logger.log('Lead updated:', {
-      id: lead.id,
-      name: lead.name,
-      companyName: lead.companyName,
-      phone: lead.phone,
-      email: lead.email,
-      initialContext: lead.initialContext,
-      lastInboundMessageId: lead.lastInboundMessageId,
-      lastAutoReplyMessageId: lead.lastAutoReplyMessageId
-    })
-
     return { status: 'updated_and_replied', leadId: lead.id }
   }
 
@@ -237,15 +211,13 @@ export class WebhookService {
     reply: string,
     phoneNumberId?: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
-    const response = await axios.post<WhatsAppSendMessageResponse>(
+    return axios.post(
       `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
         to,
         type: 'text',
-        text: {
-          body: reply
-        }
+        text: { body: reply }
       },
       {
         headers: {
@@ -254,7 +226,5 @@ export class WebhookService {
         }
       }
     )
-
-    return response
   }
 }
