@@ -139,10 +139,10 @@ export class WebhookService {
      * 🔴 REGRA PRINCIPAL
      * Só permite criar lead se vier de anúncio
      */
-    if (!lead && !isFromAd) {
-      this.logger.log('Ignoring first contact not from ad')
-      return { status: 'ignored_non_ad_first_contact' }
-    }
+    // if (!lead && !isFromAd) {
+    //   this.logger.log('Ignoring first contact not from ad')
+    //   return { status: 'ignored_non_ad_first_contact' }
+    // }
 
     // PRIMEIRO CONTATO (via anúncio)
     if (!lead) {
