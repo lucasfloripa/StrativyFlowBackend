@@ -70,6 +70,11 @@ export class WebhookService {
       JSON.stringify(payload)
     )
 
+    this.logger.debug(
+      'Received WhatsApp webhook payload:',
+      JSON.stringify(payload)
+    )
+
     const value = payload?.entry?.[0]?.changes?.[0]?.value
     if (!value) return { status: 'ignored' }
 
