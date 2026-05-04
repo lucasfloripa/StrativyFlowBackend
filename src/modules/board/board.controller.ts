@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 
 import { BoardService } from './board.service'
 import { CreateBoardDto } from './dtos/create-board.dto'
+import { Board } from './entities/board.entity'
 
 type AuthenticatedRequest = Request & {
   user: {
@@ -27,16 +28,18 @@ type AuthenticatedRequest = Request & {
 export class BoardController {
   constructor(private readonly boardService: BoardService) {}
 
+  @Get()
+  async findAllFromAuthenticatedUser(
+    @Req() req: AuthenticatedRequest
+  ): Promise<Board[]> {
+    const userId = req.user.userId ?? req.user.id
+    return await this.boardService.findAllByUser(userId)
+  }
+
   @Post()
   create(@Body() dto: CreateBoardDto, @Req() req: AuthenticatedRequest) {
     const userId = req.user.userId ?? req.user.id
     return this.boardService.create(userId, dto)
-  }
-
-  @Get('full')
-  findFullFromAuthenticatedUser(@Req() req: AuthenticatedRequest) {
-    const userId = req.user.userId ?? req.user.id
-    return this.boardService.findFullByUser(userId)
   }
 
   @Get(':id/full')

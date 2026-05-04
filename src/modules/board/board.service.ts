@@ -86,17 +86,11 @@ export class BoardService {
     return board
   }
 
-  async findFullByUser(userId: string) {
-    const board = await this.boardRepo.findOne({
+  async findAllByUser(userId: string): Promise<Board[]> {
+    return this.boardRepo.find({
       where: { userId, isArchived: false },
-      order: { createdAt: 'DESC' }
+      order: { createdAt: 'ASC' }
     })
-
-    if (!board) {
-      throw new NotFoundException('Board not found for user')
-    }
-
-    return this.findFull(userId, board.id)
   }
 
   private buildLeadFollowUpSummary(
