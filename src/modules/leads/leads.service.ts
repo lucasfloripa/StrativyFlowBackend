@@ -14,7 +14,7 @@ import { CreateLeadDto } from './dtos/create-lead.dto'
 import { MoveLeadDto } from './dtos/move-lead.dto'
 import { UpdateLeadDto } from './dtos/update-lead.dto'
 import { LeadFollowUp } from './entities/lead-followup.entity'
-import { Lead, LeadState } from './entities/lead.entity'
+import { Lead, LeadState, LeadTemperature } from './entities/lead.entity'
 
 @Injectable()
 export class LeadsService {
@@ -102,6 +102,10 @@ export class LeadsService {
 
     if (onEnter.resetLastActivityAt) {
       lead.lastActivityAt = eventAt
+    }
+
+    if (onEnter.setTemperature) {
+      lead.temperature = onEnter.setTemperature as LeadTemperature
     }
 
     return lead

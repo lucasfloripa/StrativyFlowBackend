@@ -2,12 +2,15 @@ import { Type } from 'class-transformer'
 import {
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
   ValidateNested
 } from 'class-validator'
+
+import { LeadTemperature } from '../../leads/entities/lead.entity'
 
 export class ColumnOnEnterCreateFollowUpDto {
   @IsString()
@@ -37,4 +40,8 @@ export class ColumnOnEnterAutomationDto {
   @IsOptional()
   @IsBoolean()
   resetLastActivityAt?: boolean
+
+  @IsOptional()
+  @IsEnum(LeadTemperature)
+  setTemperature?: LeadTemperature
 }

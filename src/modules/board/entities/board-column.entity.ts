@@ -8,7 +8,7 @@ import {
   OneToMany
 } from 'typeorm'
 
-import { Lead } from '../../leads/entities/lead.entity'
+import { Lead, LeadTemperature } from '../../leads/entities/lead.entity'
 
 import { Board } from './board.entity'
 
@@ -22,6 +22,7 @@ export interface BoardColumnOnEnterAutomation {
   favoriteLead?: boolean
   markAllFollowUpsAsDone?: boolean
   resetLastActivityAt?: boolean
+  setTemperature?: LeadTemperature
 }
 
 @Entity('board_columns')
