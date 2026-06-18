@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator'
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator'
 
 export class CreateBoardDto {
   @IsString()
@@ -10,4 +10,8 @@ export class CreateBoardDto {
   @IsNotEmpty()
   @MaxLength(30)
   boardPhone: string
+
+  @IsString()
+  @IsOptional()
+  phoneNumberId?: string
 }

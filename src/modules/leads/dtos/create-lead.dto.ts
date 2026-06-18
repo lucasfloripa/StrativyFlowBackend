@@ -9,6 +9,7 @@ import {
 
 import {
   LeadOutcome,
+  LeadRuntimeMode,
   LeadState,
   LeadTemperature
 } from '../entities/lead.entity'
@@ -65,4 +66,8 @@ export class CreateLeadDto {
   @IsOptional()
   @IsEnum(LeadState)
   state?: LeadState
+
+  @IsOptional()
+  @IsEnum(LeadRuntimeMode)
+  runtimeMode?: LeadRuntimeMode
 }

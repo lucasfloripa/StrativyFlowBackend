@@ -19,7 +19,12 @@ export class WebhookController {
   @Post('whatsapp')
   @HttpCode(200)
   async handleWhatsAppWebhook(@Body() body: any) {
-    return await this.webhookService.handleIncomingMessage(body)
+    const webhookVersion = process.env.WEBHOOK_VERSION
+
+    if (webhookVersion === 'v1')
+      return await this.webhookService.handleIncomingMessage(body)
+    if (webhookVersion === 'v2')
+      return await this.webhookService.handleIncomingMessageV2(body)
   }
 
   @Get('whatsapp')

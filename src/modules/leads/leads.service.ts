@@ -2,9 +2,11 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
+import axios from 'axios'
 import { DataSource, EntityManager, Repository } from 'typeorm'
 
 import { BoardColumn } from '../board/entities/board-column.entity'
@@ -14,12 +16,32 @@ import { CreateLeadDto } from './dtos/create-lead.dto'
 import { MoveLeadDto } from './dtos/move-lead.dto'
 import { UpdateLeadDto } from './dtos/update-lead.dto'
 import { LeadFollowUp } from './entities/lead-followup.entity'
-import { Lead, LeadState, LeadTemperature } from './entities/lead.entity'
+import { Lead, LeadRuntimeMode, LeadState } from './entities/lead.entity'
+import {
+  Message,
+  MessageDirection,
+  MessageType
+} from './entities/message.entity'
+
+type WhatsAppSendMessageResponse = {
+  messaging_product: string
+  contacts: {
+    input: string
+    wa_id: string
+  }[]
+  messages: {
+    id: string
+  }[]
+}
 
 @Injectable()
 export class LeadsService {
+  private readonly logger = new Logger(LeadsService.name)
+
   constructor(
     @InjectRepository(Lead) private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(Message)
+    private readonly messageRepo: Repository<Message>,
     @InjectRepository(Board) private readonly boardRepo: Repository<Board>,
     @InjectRepository(BoardColumn)
     private readonly columnRepo: Repository<BoardColumn>,
@@ -105,7 +127,7 @@ export class LeadsService {
     }
 
     if (onEnter.setTemperature) {
-      lead.temperature = onEnter.setTemperature as LeadTemperature
+      lead.temperature = onEnter.setTemperature
     }
 
     return lead
@@ -137,6 +159,7 @@ export class LeadsService {
       temperature: dto.temperature ?? null,
       outcome: dto.outcome ?? null,
       state: dto.state ?? LeadState.ACTIVE,
+      runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION,
       movedAt: new Date(),
       lastActivityAt: new Date()
     })
@@ -162,6 +185,111 @@ export class LeadsService {
 
     await this.assertBoardOwnership(userId, lead.boardId)
     return lead
+  }
+
+  async getLeadMessages(userId: string, leadId: string) {
+    await this.findOne(userId, leadId)
+
+    const messages = await this.messageRepo.find({
+      where: { leadId },
+      order: { createdAt: 'ASC' }
+    })
+
+    return messages.map((message) => ({
+      id: message.id,
+      direction: message.direction,
+      content: message.content ?? null,
+      type: message.type,
+      createdAt: message.createdAt
+    }))
+  }
+
+  async sendLeadMessage(
+    userId: string,
+    leadId: string,
+    body: { content: string }
+  ) {
+    const lead = await this.findOne(userId, leadId)
+    const board = await this.boardRepo.findOne({ where: { id: lead.boardId } })
+
+    if (!board) throw new NotFoundException('Board not found')
+
+    const phoneNumberId = board.phoneNumberId ?? undefined
+
+    if (!lead.phone?.trim()) {
+      throw new BadRequestException('Lead phone is missing')
+    }
+
+    if (!board.boardPhone?.trim()) {
+      throw new BadRequestException('Board phone is missing')
+    }
+
+    if (!phoneNumberId) {
+      throw new BadRequestException('Board phoneNumberId is not configured')
+    }
+
+    const content = body.content?.trim()
+
+    if (!content) {
+      throw new BadRequestException('Message content is required')
+    }
+
+    const response = await this.sendWhatsAppMessage(
+      lead.phone,
+      content,
+      phoneNumberId
+    )
+
+    lead.lastActivityAt = new Date()
+    await this.leadRepo.save(lead)
+
+    const savedMessage = await this.messageRepo.save(
+      this.messageRepo.create({
+        leadId: lead.id,
+        direction: MessageDirection.OUTBOUND,
+        content,
+        type: MessageType.TEXT,
+        whatsappMessageId: response.data.messages[0]?.id ?? null,
+        metadata: {
+          whatsappResponse: response.data
+        }
+      })
+    )
+
+    return {
+      success: true,
+      message: {
+        id: savedMessage.id,
+        leadId: savedMessage.leadId,
+        direction: savedMessage.direction,
+        content: savedMessage.content,
+        type: savedMessage.type,
+        whatsappMessageId: savedMessage.whatsappMessageId,
+        createdAt: savedMessage.createdAt
+      }
+    }
+  }
+
+  private async sendWhatsAppMessage(
+    to: string,
+    reply: string,
+    phoneNumberId?: string
+  ): Promise<{ data: WhatsAppSendMessageResponse }> {
+    return axios.post(
+      `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'text',
+        text: { body: reply }
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
   }
 
   async update(userId: string, id: string, dto: UpdateLeadDto) {
@@ -329,6 +457,27 @@ export class LeadsService {
   async toggleFavorite(userId: string, id: string, isFavorite: boolean) {
     const lead = await this.findOne(userId, id)
     lead.isFavorite = isFavorite
+    return this.leadRepo.save(lead)
+  }
+
+  async updateRuntimeMode(
+    userId: string,
+    id: string,
+    runtimeMode: LeadRuntimeMode
+  ) {
+    const lead = await this.findOne(userId, id)
+
+    if (lead.runtimeMode !== runtimeMode) {
+      lead.runtimeMode = runtimeMode
+      lead.lastActivityAt = new Date()
+
+      if (runtimeMode === LeadRuntimeMode.HUMAN) {
+        this.logger.log(`Lead ${lead.id} switched to HUMAN mode`)
+      } else {
+        this.logger.log(`Lead ${lead.id} switched to AUTOMATION mode`)
+      }
+    }
+
     return this.leadRepo.save(lead)
   }
 

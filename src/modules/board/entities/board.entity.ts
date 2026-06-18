@@ -20,6 +20,9 @@ export class Board {
   @Column()
   boardPhone: string
 
+  @Column({ type: 'varchar', nullable: true })
+  phoneNumberId?: string | null
+
   @Column()
   userId: string
 

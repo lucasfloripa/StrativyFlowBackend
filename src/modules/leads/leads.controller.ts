@@ -17,6 +17,7 @@ import { ArchiveLeadStateDto } from './dtos/archive-lead-state.dto'
 import { CreateLeadDto } from './dtos/create-lead.dto'
 import { MoveLeadDto } from './dtos/move-lead.dto'
 import { UpdateLeadDto } from './dtos/update-lead.dto'
+import { UpdateRuntimeModeDto } from './dtos/update-runtime-mode.dto'
 import { LeadsService } from './leads.service'
 
 type AuthenticatedRequest = Request & {
@@ -43,6 +44,22 @@ export class LeadsController {
   findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     const userId = req.user.id
     return this.leadsService.findOne(userId, id)
+  }
+
+  @Get(':id/messages')
+  getMessages(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const userId = req.user.id
+    return this.leadsService.getLeadMessages(userId, id)
+  }
+
+  @Post(':id/messages')
+  sendMessage(
+    @Param('id') id: string,
+    @Body() body: { content: string },
+    @Req() req: AuthenticatedRequest
+  ) {
+    const userId = req.user.id
+    return this.leadsService.sendLeadMessage(userId, id, body)
   }
 
   @Patch(':id')
@@ -83,6 +100,16 @@ export class LeadsController {
   ) {
     const userId = req.user.id
     return this.leadsService.toggleFavorite(userId, id, body.isFavorite)
+  }
+
+  @Patch(':id/runtime-mode')
+  updateRuntimeMode(
+    @Param('id') id: string,
+    @Body() body: UpdateRuntimeModeDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    const userId = req.user.id
+    return this.leadsService.updateRuntimeMode(userId, id, body.runtimeMode)
   }
 
   @Delete(':id')

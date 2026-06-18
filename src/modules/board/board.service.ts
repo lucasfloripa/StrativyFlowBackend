@@ -55,6 +55,7 @@ export class BoardService {
       const board = boardRepository.create({
         name: dto.name.trim(),
         boardPhone: dto.boardPhone.trim(),
+        phoneNumberId: dto.phoneNumberId ?? null,
         userId,
         isActive: true,
         isArchived: false

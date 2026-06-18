@@ -1,11 +1,42 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { randomUUID } from 'crypto'
+
+import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
 import { Repository } from 'typeorm'
 
+import { AutomationTriggerDispatcher } from '../automation/flow/automation-trigger.dispatcher'
+import {
+  AutomationTriggerContext,
+  AutomationTriggerType
+} from '../automation/flow/automation-trigger.types'
 import { BoardColumn } from '../board/entities/board-column.entity'
 import { Board } from '../board/entities/board.entity'
-import { Lead, LeadState, LeadTemperature } from '../leads/entities/lead.entity'
+import { LeadRecord } from '../leads/entities/lead-record.entity'
+import {
+  Lead,
+  LeadFlowState,
+  LeadRuntimeMode,
+  LeadState,
+  LeadTemperature
+} from '../leads/entities/lead.entity'
+import {
+  Message,
+  MessageDirection,
+  MessageStatus,
+  MessageType
+} from '../leads/entities/message.entity'
+
+import { classifyConversation } from './flow/conversation-classifier'
+import { ConversationContextBuilder } from './flow/conversation-context.builder'
+import { canRunAutomation } from './flow/conversation-policy'
+import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
+import { LeadFlowEngine } from './flow/lead-flow.engine'
+import {
+  LeadFlowActionContext,
+  LeadFlowProcessResult
+} from './flow/lead-flow.types'
+import { canTransitionMessageStatus } from './message-status.policy'
 
 type WhatsAppSendMessageResponse = {
   messaging_product: string
@@ -18,6 +49,15 @@ type WhatsAppSendMessageResponse = {
   }[]
 }
 
+type WhatsAppMessageStatusType = 'sent' | 'delivered' | 'read'
+
+type WhatsAppMessageStatus = {
+  id?: string
+  status?: string
+  timestamp?: string
+  recipient_id?: string
+}
+
 type WhatsAppWebhookPayload = {
   entry?: Array<{
     changes?: Array<{
@@ -26,10 +66,11 @@ type WhatsAppWebhookPayload = {
           display_phone_number?: string
           phone_number_id?: string
         }
-        statuses?: unknown[]
+        statuses?: WhatsAppMessageStatus[]
         messages?: Array<{
           type?: string
           from?: string
+          timestamp?: string
           text?: {
             body?: string
           }
@@ -53,16 +94,135 @@ type WhatsAppWebhookPayload = {
   }>
 }
 
+type WhatsAppInboundMessage = {
+  type?: string
+  from?: string
+  timestamp?: string
+  text?: {
+    body?: string
+  }
+  id?: string
+  referral?: {
+    source_type?: string
+    source_id?: string
+    source_url?: string
+    welcome_message?: {
+      text?: string
+    }
+  }
+}
+
 @Injectable()
 export class WebhookService {
   constructor(
     @InjectRepository(Lead) private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(LeadRecord)
+    private readonly leadRecordRepo: Repository<LeadRecord>,
     @InjectRepository(Board) private readonly boardRepo: Repository<Board>,
     @InjectRepository(BoardColumn)
-    private readonly boardColumnRepo: Repository<BoardColumn>
+    private readonly boardColumnRepo: Repository<BoardColumn>,
+    @InjectRepository(Message)
+    private readonly messageRepo: Repository<Message>,
+    private readonly conversationContextBuilder: ConversationContextBuilder,
+    private readonly leadFlowEngine: LeadFlowEngine,
+    private readonly leadFlowActionExecutor: LeadFlowActionExecutor,
+    private readonly automationTriggerDispatcher: AutomationTriggerDispatcher
   ) {}
 
   private readonly logger = new Logger(WebhookService.name)
+
+  private readonly validFlowTransitions: Record<
+    LeadFlowState,
+    LeadFlowState[]
+  > = {
+    [LeadFlowState.NEW]: [LeadFlowState.ASKING_NAME],
+    [LeadFlowState.ASKING_NAME]: [LeadFlowState.ASKING_CONTEXT],
+    [LeadFlowState.ASKING_CONTEXT]: [LeadFlowState.IN_CONVERSATION],
+    [LeadFlowState.IN_CONVERSATION]: []
+  }
+
+  async handleIncomingMessageV2(payload: WhatsAppWebhookPayload) {
+    const value = payload?.entry?.[0]?.changes?.[0]?.value
+    const message = value?.messages?.[0]
+
+    if (!message) {
+      this.logger.warn(
+        'Stopping webhook V2 lead tracking: webhook event has no inbound messages'
+      )
+      return { status: 'ignored_no_message' }
+    }
+
+    const phoneNumber = message?.from?.trim()
+    const businessPhoneNumber = value?.metadata?.display_phone_number?.trim()
+    const metaPhoneNumberId = value?.metadata?.phone_number_id?.trim()
+
+    if (phoneNumber && businessPhoneNumber && metaPhoneNumberId) {
+      return await this.trackLeadContact({
+        phoneNumber,
+        businessPhoneNumber,
+        metaPhoneNumberId
+      })
+    }
+
+    this.logger.warn(
+      `Skipping lead tracking due to missing metadata. phoneNumber=${phoneNumber ?? 'unknown'} businessPhoneNumber=${businessPhoneNumber ?? 'unknown'} metaPhoneNumberId=${metaPhoneNumberId ?? 'unknown'}`
+    )
+
+    return { status: 'ignored_missing_data' }
+  }
+
+  private async trackLeadContact(params: {
+    phoneNumber: string
+    businessPhoneNumber: string
+    metaPhoneNumberId: string
+  }) {
+    const { phoneNumber, businessPhoneNumber, metaPhoneNumberId } = params
+    const now = new Date()
+
+    try {
+      const existingLeadRecord = await this.leadRecordRepo.findOne({
+        where: { phoneNumber, businessPhoneNumber }
+      })
+
+      if (!existingLeadRecord) {
+        await this.leadRecordRepo.save(
+          this.leadRecordRepo.create({
+            phoneNumber,
+            businessPhoneNumber,
+            metaPhoneNumberId,
+            firstContactAt: now,
+            lastContactAt: now,
+            contactCount: 1
+          })
+        )
+
+        this.logger.log(
+          `LeadRecord created for phone ${phoneNumber} on business phone ${businessPhoneNumber}`
+        )
+        return { status: 'created' }
+      }
+
+      existingLeadRecord.metaPhoneNumberId = metaPhoneNumberId
+      existingLeadRecord.lastContactAt = now
+      existingLeadRecord.contactCount =
+        (existingLeadRecord.contactCount ?? 0) + 1
+
+      await this.leadRecordRepo.save(existingLeadRecord)
+
+      this.logger.log(
+        `LeadRecord updated for phone ${phoneNumber}. contactCount=${existingLeadRecord.contactCount}`
+      )
+      return {
+        status: 'updated',
+        contactCount: existingLeadRecord.contactCount
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist LeadRecord for phone ${phoneNumber}: ${error instanceof Error ? error.message : 'unknown error'}`
+      )
+      return { status: 'error' }
+    }
+  }
 
   async handleIncomingMessage(payload: WhatsAppWebhookPayload) {
     this.logger.debug(
@@ -70,145 +230,569 @@ export class WebhookService {
       JSON.stringify(payload)
     )
 
-    this.logger.debug(
-      'Received WhatsApp webhook payload:',
-      JSON.stringify(payload)
-    )
+    let inboundMessageId: string | undefined
+    let from: string | undefined
 
-    const value = payload?.entry?.[0]?.changes?.[0]?.value
-    if (!value) return { status: 'ignored' }
-
-    const message = value?.messages?.[0]
-    if (!message) {
-      return { status: 'ignored_no_message' }
-    }
-
-    if (message?.type !== 'text') {
-      return { status: 'ignored_non_text' }
-    }
-
-    const displayPhoneNumber = value?.metadata?.display_phone_number
-    const phoneNumberId = value?.metadata?.phone_number_id
-    const from = message?.from
-    const text = message?.text?.body?.trim()
-    const inboundMessageId = message?.id
-
-    const isFromAd = message?.referral?.source_type === 'ad'
-    const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
-    const welcomeMessage = message?.referral?.welcome_message?.text
-
-    if (!from || !text) {
-      return { status: 'ignored_missing_data' }
-    }
-
-    if (!displayPhoneNumber) {
-      this.logger.warn('Missing display_phone_number')
-      return { status: 'ignored_missing_board_phone' }
-    }
-
-    const board = await this.boardRepo.findOne({
-      where: {
-        boardPhone: displayPhoneNumber,
-        isActive: true,
-        isArchived: false
+    try {
+      const entry = payload?.entry?.[0]
+      if (!entry) {
+        this.logger.warn(
+          'Stopping webhook processing: missing entry in WhatsApp payload'
+        )
+        return { status: 'ignored_missing_entry' }
       }
-    })
 
-    if (!board) {
-      return { status: 'board_not_found' }
-    }
-
-    const firstColumn = await this.boardColumnRepo.findOne({
-      where: { boardId: board.id },
-      order: { isDefault: 'DESC', position: 'ASC' }
-    })
-
-    if (!firstColumn) {
-      return { status: 'board_without_columns' }
-    }
-
-    let lead = await this.leadRepo.findOne({
-      where: {
-        boardId: board.id,
-        phone: from,
-        state: LeadState.ACTIVE
+      const change = entry.changes?.[0]
+      if (!change) {
+        this.logger.warn(
+          'Stopping webhook processing: missing change in WhatsApp payload'
+        )
+        return { status: 'ignored_missing_change' }
       }
-    })
 
-    // idempotência
-    if (lead?.lastInboundMessageId === inboundMessageId) {
-      return { status: 'ignored_duplicate_message' }
-    }
+      const value = change.value
+      if (!value) {
+        this.logger.warn(
+          'Stopping webhook processing: missing value in WhatsApp payload'
+        )
+        return { status: 'ignored_missing_value' }
+      }
 
-    /**
-     * 🔴 REGRA PRINCIPAL
-     * Só permite criar lead se vier de anúncio
-     */
-    // if (!lead && !isFromAd) {
-    //   this.logger.log('Ignoring first contact not from ad')
-    //   return { status: 'ignored_non_ad_first_contact' }
-    // }
+      const statuses = value.statuses
+      if (statuses?.length) {
+        return await this.handleMessageStatuses(statuses)
+      }
 
-    // PRIMEIRO CONTATO (via anúncio)
-    if (!lead) {
-      const reply = 'Olá! 👋 \nComo podemos te chamar?'
+      const messages = value.messages
+      if (!messages?.length) {
+        this.logger.warn(
+          'Stopping webhook processing: webhook event has no inbound messages'
+        )
+        return { status: 'ignored_no_message' }
+      }
 
-      const response = await this.sendWhatsAppMessage(
-        from,
-        reply,
-        phoneNumberId
+      const message = messages[0]
+
+      const displayPhoneNumber = value?.metadata?.display_phone_number
+      const phoneNumberId = value?.metadata?.phone_number_id
+      from = message?.from?.trim()
+      inboundMessageId = message?.id?.trim()
+      const text = message?.text?.body?.trim() ?? null
+      const isFromAd = message?.referral?.source_type === 'ad'
+      const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
+      const welcomeMessage = message?.referral?.welcome_message?.text
+
+      this.logger.log(
+        `[1] Payload parsed. Inbound WhatsApp message received from ${from ?? 'unknown'} with id ${inboundMessageId ?? 'unknown'} and type ${message?.type ?? 'unknown'}`
       )
 
-      const leadsCountInColumn = await this.leadRepo.count({
+      if (!from || !inboundMessageId) {
+        this.logger.warn(
+          'Stopping webhook processing: inbound event is missing sender or message id'
+        )
+        return { status: 'ignored_missing_data' }
+      }
+
+      const existingInboundMessage = await this.messageRepo.findOne({
+        where: { whatsappMessageId: inboundMessageId }
+      })
+
+      if (existingInboundMessage) {
+        this.logger.warn(
+          `Duplicate inbound message ignored. whatsappMessageId=${inboundMessageId} from=${from}`
+        )
+        return {
+          status: 'ignored_duplicate_message',
+          inboundMessageId
+        }
+      }
+
+      this.logger.log(
+        `New inbound message accepted. whatsappMessageId=${inboundMessageId} from=${from}`
+      )
+
+      if (message?.type !== 'text') {
+        this.logger.warn(
+          `Stopping webhook processing: inbound message ${inboundMessageId} has unsupported type ${message?.type ?? 'unknown'}`
+        )
+        return { status: 'ignored_non_text' }
+      }
+
+      if (!text) {
+        this.logger.warn(
+          `Stopping webhook processing: inbound text message ${inboundMessageId} has empty body`
+        )
+        return { status: 'ignored_missing_text' }
+      }
+
+      if (!displayPhoneNumber) {
+        this.logger.warn(
+          `Stopping webhook processing: inbound message ${inboundMessageId} is missing display_phone_number`
+        )
+        return { status: 'ignored_missing_board_phone' }
+      }
+
+      this.logger.log(
+        `[2] Board lookup started for phone ${displayPhoneNumber}`
+      )
+
+      const board = await this.boardRepo.findOne({
+        where: {
+          boardPhone: displayPhoneNumber,
+          isActive: true,
+          isArchived: false
+        }
+      })
+
+      if (!board) {
+        this.logger.warn(
+          `Stopping webhook processing: board not found for phone ${displayPhoneNumber}`
+        )
+        return { status: 'board_not_found' }
+      }
+
+      this.logger.log(`[3] Board found: ${board.id}`)
+
+      const firstColumn = await this.boardColumnRepo.findOne({
+        where: { boardId: board.id },
+        order: { isDefault: 'DESC', position: 'ASC' }
+      })
+
+      if (!firstColumn) {
+        this.logger.warn(
+          `Stopping webhook processing: board ${board.id} has no available columns`
+        )
+        return { status: 'board_without_columns' }
+      }
+
+      this.logger.log(`[4] First column found: ${firstColumn.id}`)
+      this.logger.log(
+        `[5] Lead lookup started for board ${board.id} and phone ${from}`
+      )
+
+      let lead = await this.leadRepo.findOne({
         where: {
           boardId: board.id,
-          columnId: firstColumn.id,
+          phone: from,
           state: LeadState.ACTIVE
         }
       })
 
-      const leadDraft = this.leadRepo.create({
+      this.logger.log(
+        lead
+          ? `[6] Lead found for inbound message ${inboundMessageId}: ${lead.id}`
+          : `[6] No lead found for inbound message ${inboundMessageId} from ${from}`
+      )
+
+      // idempotência
+      if (lead?.lastInboundMessageId === inboundMessageId) {
+        this.logger.warn(
+          `Stopping webhook processing: inbound message ${inboundMessageId} is a duplicate for lead ${lead.id}`
+        )
+        return { status: 'ignored_duplicate_message' }
+      }
+
+      // PRIMEIRO CONTATO (via anúncio)
+      if (!lead) {
+        const leadsCountInColumn = await this.leadRepo.count({
+          where: {
+            boardId: board.id,
+            columnId: firstColumn.id,
+            state: LeadState.ACTIVE
+          }
+        })
+
+        const leadDraft = this.leadRepo.create({
+          boardId: board.id,
+          columnId: firstColumn.id,
+          position: leadsCountInColumn,
+          name: 'Lead sem nome',
+          flowState: LeadFlowState.ASKING_NAME,
+          phone: from,
+          source: leadSource,
+          companyName: welcomeMessage,
+          temperature: LeadTemperature.WARM,
+          state: LeadState.ACTIVE,
+          runtimeMode: LeadRuntimeMode.AUTOMATION,
+          lastInboundMessageId: inboundMessageId ?? undefined,
+          movedAt: new Date(),
+          lastActivityAt: new Date()
+        })
+
+        this.logger.log(
+          `[7] Persisting inbound message ${inboundMessageId} for new lead draft on board ${board.id}`
+        )
+
+        this.logger.log('[10] Saving lead for newly created inbound contact')
+        lead = await this.leadRepo.save(leadDraft)
+
+        const automationTriggerContext: AutomationTriggerContext = {
+          triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
+          leadId: lead.id,
+          boardId: board.id,
+          inboundMessageId: inboundMessageId ?? undefined,
+          correlationId: randomUUID(),
+          metadata: {
+            source: 'webhook',
+            from,
+            messageText: text,
+            phoneNumberId
+          }
+        }
+
+        await this.automationTriggerDispatcher.dispatch(
+          automationTriggerContext
+        )
+
+        lead = await this.leadRepo.findOneOrFail({
+          where: {
+            id: lead.id
+          }
+        })
+
+        await this.persistMessage({
+          leadId: lead.id,
+          message
+        })
+
+        const reply = 'Olá! 👋 \nComo podemos te chamar?'
+
+        const response = await this.sendWhatsAppMessage(
+          from,
+          reply,
+          phoneNumberId
+        )
+
+        lead.lastAutoReplyMessageId =
+          response?.data?.messages?.[0]?.id ?? undefined
+
+        this.logger.log('[10] Saving lead after first auto-reply dispatch')
+        await this.leadRepo.save(lead)
+
+        return { status: 'created_and_replied', leadId: lead.id }
+      }
+
+      this.logger.log(
+        `[7] Persisting inbound message ${inboundMessageId} for lead ${lead.id}`
+      )
+
+      const automationTriggerContext: AutomationTriggerContext = {
+        triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
+        leadId: lead.id,
         boardId: board.id,
-        columnId: firstColumn.id,
-        position: leadsCountInColumn,
-        name: 'Lead sem nome',
-        phone: from,
-        source: leadSource,
-        companyName: welcomeMessage,
-        temperature: LeadTemperature.WARM,
-        state: LeadState.ACTIVE,
-        lastInboundMessageId: inboundMessageId ?? undefined,
-        lastAutoReplyMessageId: response?.data?.messages?.[0]?.id ?? undefined,
-        movedAt: new Date(),
-        lastActivityAt: new Date()
+        inboundMessageId: inboundMessageId ?? undefined,
+        correlationId: randomUUID(),
+        metadata: {
+          source: 'webhook',
+          from,
+          messageText: text,
+          phoneNumberId
+        }
+      }
+
+      await this.automationTriggerDispatcher.dispatch(automationTriggerContext)
+
+      lead = await this.leadRepo.findOneOrFail({
+        where: {
+          id: lead.id
+        }
       })
 
-      lead = await this.leadRepo.save(leadDraft)
+      await this.persistMessage({
+        leadId: lead.id,
+        message
+      })
 
-      return { status: 'created_and_replied', leadId: lead.id }
+      // CONTINUAÇÃO DA CONVERSA (já virou lead)
+
+      this.logger.log(
+        `[8] Runtime mode decision for lead ${lead.id}: ${lead.runtimeMode}`
+      )
+
+      const conversationContext = await this.conversationContextBuilder.build({
+        lead
+      })
+
+      const conversationType = classifyConversation(conversationContext)
+      this.logger.debug(
+        `Conversation type classified: leadId=${lead.id} conversationType=${conversationType}`
+      )
+
+      const shouldRunAutomation = canRunAutomation({
+        lead,
+        conversationType
+      })
+
+      if (!shouldRunAutomation) {
+        this.logger.warn(
+          `Stopping webhook processing: lead ${lead.id} is in HUMAN runtime mode, automation will be skipped`
+        )
+
+        lead.lastInboundMessageId = inboundMessageId ?? undefined
+        lead.lastActivityAt = new Date()
+
+        this.logger.log(
+          '[10] Saving lead after HUMAN runtime mode inbound update'
+        )
+        await this.leadRepo.save(lead)
+
+        return { status: 'updated_human_mode_skipped', leadId: lead.id }
+      }
+
+      this.logger.log(
+        `[9] Executing FlowEngine for lead ${lead.id} with inbound message ${inboundMessageId}`
+      )
+
+      const flowResult: LeadFlowProcessResult =
+        await this.leadFlowEngine.process({
+          lead,
+          messageText: text,
+          conversationContext
+        })
+
+      const actionContext: LeadFlowActionContext = {
+        trigger: 'webhook',
+        boardId: board.id,
+        phoneNumberId,
+        inboundMessageId: inboundMessageId ?? undefined,
+        correlationId: randomUUID()
+      }
+
+      await this.leadFlowActionExecutor.execute({
+        context: actionContext,
+        lead,
+        actions: flowResult.actions,
+        transitionLeadFlowState: ({ lead: transitionLead, to }) =>
+          this.transitionLeadFlowState({
+            lead: transitionLead,
+            to
+          }),
+        sendWhatsAppMessage: async ({ context, to, content }) => {
+          const response = await this.sendWhatsAppMessage(
+            to,
+            content,
+            context.phoneNumberId
+          )
+          const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
+
+          lead.lastAutoReplyMessageId = whatsappMessageId ?? undefined
+
+          return {
+            whatsappMessageId
+          }
+        },
+        persistOutboundMessage: async ({
+          context,
+          leadId,
+          content,
+          whatsappMessageId
+        }) =>
+          this.persistOutboundMessage({
+            correlationId: context.correlationId,
+            leadId,
+            content,
+            whatsappMessageId
+          })
+      })
+
+      lead.lastInboundMessageId = inboundMessageId ?? undefined
+      lead.movedAt = new Date()
+
+      this.logger.log('[10] Saving lead after FlowEngine execution')
+      await this.leadRepo.save(lead)
+
+      return { status: 'updated_and_replied', leadId: lead.id }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'unknown error'
+      const errorStack = error instanceof Error ? error.stack : undefined
+
+      this.logger.error(
+        `Webhook inbound processing failed. inboundMessageId=${inboundMessageId ?? 'unknown'} phone=${from ?? 'unknown'} error=${errorMessage}`,
+        errorStack
+      )
+
+      return {
+        status: 'error',
+        inboundMessageId,
+        from
+      }
+    }
+  }
+
+  private async handleMessageStatuses(statuses: WhatsAppMessageStatus[]) {
+    let processedCount = 0
+
+    for (const messageStatus of statuses) {
+      const status = messageStatus?.status?.trim()
+
+      if (!this.isSupportedWhatsAppStatus(status)) {
+        this.logger.debug(
+          `Ignoring unsupported WhatsApp status event. status=${status ?? 'unknown'} whatsappMessageId=${messageStatus?.id ?? 'unknown'}`
+        )
+        continue
+      }
+
+      const whatsappMessageId = messageStatus?.id?.trim()
+      if (!whatsappMessageId) {
+        this.logger.warn(
+          `WhatsApp status update ignored due to missing message id. status=${status}`
+        )
+        continue
+      }
+
+      const message = await this.messageRepo.findOne({
+        where: { whatsappMessageId }
+      })
+
+      if (!message) {
+        this.logger.warn(
+          `Message not found for WhatsApp status update. whatsappMessageId=${whatsappMessageId} status=${status}`
+        )
+        continue
+      }
+
+      this.logger.log(
+        `Message found for status update. messageId=${message.id} whatsappMessageId=${whatsappMessageId}`
+      )
+
+      const previousStatus = message.status ?? null
+      const newStatus = this.resolveWhatsAppMessageStatus(status)
+
+      if (!canTransitionMessageStatus(previousStatus, newStatus)) {
+        this.logger.warn(
+          `Skipping WhatsApp status regression. messageId=${message.id} whatsappMessageId=${whatsappMessageId} previousStatus=${previousStatus ?? 'null'} nextStatus=${newStatus}`
+        )
+        continue
+      }
+
+      message.status = newStatus
+      await this.messageRepo.save(message)
+
+      processedCount += 1
+      this.logger.log(
+        `Message status updated. messageId=${message.id} whatsappMessageId=${whatsappMessageId} previousStatus=${previousStatus ?? 'null'} newStatus=${newStatus} status=${status} timestamp=${messageStatus?.timestamp ?? 'unknown'} recipientId=${messageStatus?.recipient_id ?? 'unknown'}`
+      )
     }
 
-    // CONTINUAÇÃO DA CONVERSA (já virou lead)
-    let reply = 'Recebi sua mensagem 😊'
+    return {
+      status: 'processed_status_updates',
+      processedCount
+    }
+  }
 
-    if (lead.name === 'Lead sem nome') {
-      lead.name = text
-      reply = 'Como podemos te ajudar ?'
-    } else if (!lead.initialContext?.trim()) {
-      lead.initialContext = text
-      reply =
-        'Perfeito! Seu atendimento foi iniciado. Em breve alguém falará com você 😊'
+  private async persistMessage(params: {
+    leadId: string
+    message: WhatsAppInboundMessage
+  }): Promise<void> {
+    const { leadId, message } = params
+
+    try {
+      const whatsappMessageId = message?.id
+
+      if (whatsappMessageId) {
+        const alreadyExists = await this.messageRepo.findOne({
+          where: { whatsappMessageId }
+        })
+
+        if (alreadyExists) {
+          this.logger.debug(
+            `Inbound WhatsApp message ${whatsappMessageId} already persisted for lead ${leadId}`
+          )
+          return
+        }
+      }
+
+      const inboundMessage = this.messageRepo.create({
+        leadId,
+        direction: MessageDirection.INBOUND,
+        content: message?.text?.body ?? null,
+        type: this.resolveMessageType(message?.type),
+        whatsappMessageId: whatsappMessageId ?? null,
+        metadata: message as Record<string, unknown>,
+        externalTimestamp: this.parseWhatsAppTimestamp(message?.timestamp)
+      })
+
+      await this.messageRepo.save(inboundMessage)
+      this.logger.log(
+        `Inbound WhatsApp message persisted for lead ${leadId} with id ${whatsappMessageId ?? 'unknown'}`
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist inbound WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
+      )
+    }
+  }
+
+  private async persistOutboundMessage(params: {
+    correlationId?: string
+    leadId: string
+    content: string
+    whatsappMessageId?: string | null
+  }) {
+    const { correlationId, leadId, content, whatsappMessageId } = params
+
+    try {
+      if (correlationId) {
+        this.logger.debug(
+          `[${correlationId}] Persisting outbound message for lead ${leadId}`
+        )
+      }
+
+      await this.messageRepo.save(
+        this.messageRepo.create({
+          leadId,
+          direction: MessageDirection.OUTBOUND,
+          content,
+          type: MessageType.TEXT,
+          whatsappMessageId: whatsappMessageId ?? null
+        })
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Failed to persist outbound WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
+      )
+    }
+  }
+
+  private async transitionLeadFlowState(params: {
+    lead: Lead
+    to: LeadFlowState
+  }) {
+    const { lead, to } = params
+
+    const currentState = lead.flowState
+    const allowedTransitions = this.validFlowTransitions[currentState] ?? []
+
+    if (!allowedTransitions.includes(to)) {
+      throw new BadRequestException(
+        `Invalid lead flow transition from ${currentState} to ${to}`
+      )
     }
 
-    const response = await this.sendWhatsAppMessage(from, reply, phoneNumberId)
+    lead.flowState = to
+    lead.lastActivityAt = new Date()
 
-    lead.lastInboundMessageId = inboundMessageId ?? undefined
-    lead.lastAutoReplyMessageId = response?.data?.messages?.[0]?.id ?? undefined
-    lead.movedAt = new Date()
+    await this.handleFlowStateEntered({
+      lead,
+      state: to
+    })
+  }
 
-    await this.leadRepo.save(lead)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  private async handleFlowStateEntered(params: {
+    lead: Lead
+    state: LeadFlowState
+  }) {
+    const { lead, state } = params
 
-    return { status: 'updated_and_replied', leadId: lead.id }
+    switch (state) {
+      case LeadFlowState.IN_CONVERSATION:
+        this.logger.log(`Lead ${lead.id} transitioned to ${state}`)
+        break
+      default:
+        break
+    }
   }
 
   private async sendWhatsAppMessage(
@@ -231,5 +815,49 @@ export class WebhookService {
         }
       }
     )
+  }
+
+  private resolveMessageType(type?: string): MessageType {
+    switch (type) {
+      case MessageType.IMAGE:
+        return MessageType.IMAGE
+      case MessageType.AUDIO:
+        return MessageType.AUDIO
+      case MessageType.VIDEO:
+        return MessageType.VIDEO
+      case MessageType.DOCUMENT:
+        return MessageType.DOCUMENT
+      case MessageType.TEXT:
+      default:
+        return MessageType.TEXT
+    }
+  }
+
+  private isSupportedWhatsAppStatus(
+    status?: string
+  ): status is WhatsAppMessageStatusType {
+    return status === 'sent' || status === 'delivered' || status === 'read'
+  }
+
+  private resolveWhatsAppMessageStatus(
+    status: WhatsAppMessageStatusType
+  ): MessageStatus {
+    switch (status) {
+      case 'sent':
+        return MessageStatus.SENT
+      case 'delivered':
+        return MessageStatus.DELIVERED
+      case 'read':
+        return MessageStatus.READ
+    }
+  }
+
+  private parseWhatsAppTimestamp(timestamp?: string): Date | null {
+    if (!timestamp) return null
+
+    const numericTimestamp = Number(timestamp)
+    if (Number.isNaN(numericTimestamp)) return null
+
+    return new Date(numericTimestamp * 1000)
   }
 }

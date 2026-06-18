@@ -26,6 +26,18 @@ export enum LeadState {
   ARCHIVED = 'archived'
 }
 
+export enum LeadFlowState {
+  NEW = 'NEW',
+  ASKING_NAME = 'ASKING_NAME',
+  ASKING_CONTEXT = 'ASKING_CONTEXT',
+  IN_CONVERSATION = 'IN_CONVERSATION'
+}
+
+export enum LeadRuntimeMode {
+  HUMAN = 'HUMAN',
+  AUTOMATION = 'AUTOMATION'
+}
+
 @Entity('leads')
 @Index(['boardId', 'phone'])
 @Index(['boardId', 'columnId', 'position'])
@@ -95,6 +107,20 @@ export class Lead {
     default: LeadState.ACTIVE
   })
   state: LeadState
+
+  @Column({
+    type: 'enum',
+    enum: LeadFlowState,
+    default: LeadFlowState.NEW
+  })
+  flowState: LeadFlowState
+
+  @Column({
+    type: 'enum',
+    enum: LeadRuntimeMode,
+    default: LeadRuntimeMode.AUTOMATION
+  })
+  runtimeMode: LeadRuntimeMode
 
   @Column({ default: false })
   isFavorite: boolean
