@@ -92,9 +92,6 @@ export class AutomationActionExecutor {
 
           break
         }
-        case AutomationActionType.MOVE_COLUMN:
-          this.logger.log('Executing automation action MOVE_COLUMN')
-          break
         case AutomationActionType.CREATE_FOLLOWUP:
           this.logger.log('Executing automation action CREATE_FOLLOWUP')
           break

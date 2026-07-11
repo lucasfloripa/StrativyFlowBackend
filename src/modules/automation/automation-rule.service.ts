@@ -25,7 +25,6 @@ export class AutomationRuleService {
     }
 
     const rule = this.automationRuleRepo.create({
-      boardId: dto.boardId,
       name: dto.name,
       triggerType: dto.triggerType,
       conditions: dto.conditions ?? {},
@@ -36,13 +35,9 @@ export class AutomationRuleService {
     return await this.automationRuleRepo.save(rule)
   }
 
-  async findAll(boardId: string): Promise<AutomationRule[]> {
-    if (!boardId?.trim()) {
-      throw new BadRequestException('boardId is required')
-    }
-
+  async findAll(): Promise<AutomationRule[]> {
     return await this.automationRuleRepo.find({
-      where: { boardId },
+      where: { isActive: true },
       order: { createdAt: 'DESC' }
     })
   }
@@ -71,7 +66,6 @@ export class AutomationRuleService {
 
     const rule = await this.findOne(id)
 
-    if (dto.boardId !== undefined) rule.boardId = dto.boardId
     if (dto.name !== undefined) rule.name = dto.name
     if (dto.triggerType !== undefined) rule.triggerType = dto.triggerType
     if (dto.actions !== undefined) rule.actions = dto.actions

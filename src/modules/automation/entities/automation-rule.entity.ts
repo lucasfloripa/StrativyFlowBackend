@@ -20,9 +20,6 @@ export class AutomationRule {
   id!: string
 
   @Column()
-  boardId!: string
-
-  @Column()
   name!: string
 
   @Column({ default: true })

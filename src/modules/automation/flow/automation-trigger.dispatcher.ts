@@ -15,7 +15,7 @@ export class AutomationTriggerDispatcher {
 
   async dispatch(context: AutomationTriggerContext): Promise<void> {
     this.logger.log(
-      `Executing automation trigger ${context.triggerType} for lead ${context.leadId} on board ${context.boardId} [correlationId=${context.correlationId}]`
+      `Executing automation trigger ${context.triggerType} for lead ${context.leadId} [correlationId=${context.correlationId}]`
     )
 
     const resolvedActions = await this.automationActionResolver.resolve(context)

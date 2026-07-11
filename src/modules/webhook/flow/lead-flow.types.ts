@@ -32,7 +32,6 @@ export type LeadFlowAction =
 
 export type LeadFlowActionContext = {
   trigger: 'webhook'
-  boardId: string
   phoneNumberId?: string
   inboundMessageId?: string
   correlationId: string

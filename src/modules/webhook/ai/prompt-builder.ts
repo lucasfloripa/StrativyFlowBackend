@@ -11,8 +11,6 @@ export function buildPrompt(params: BuildPromptParams): string {
   return [
     `Lead name: ${memory.leadName ?? ''}`,
     '',
-    `Initial context: ${memory.initialContext ?? ''}`,
-    '',
     `Message count: ${memory.messageCount}`,
     '',
     'Conversation History:',

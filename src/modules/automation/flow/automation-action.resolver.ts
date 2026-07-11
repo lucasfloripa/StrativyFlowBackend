@@ -114,7 +114,6 @@ export class AutomationActionResolver {
   ): Promise<AutomationAction[]> {
     const matchedRules = await this.automationRuleRepo.find({
       where: {
-        boardId: context.boardId,
         triggerType: context.triggerType,
         isActive: true
       }
@@ -135,7 +134,7 @@ export class AutomationActionResolver {
     )
 
     this.logger.log(
-      `Automation rules matched: ${conditionMatchedRules.length} for board ${context.boardId} and trigger ${context.triggerType}`
+      `Automation rules matched: ${conditionMatchedRules.length} for trigger ${context.triggerType}`
     )
     this.logger.log(`Automation actions resolved: ${resolvedActions.length}`)
 

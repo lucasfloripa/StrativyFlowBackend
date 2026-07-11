@@ -10,15 +10,11 @@ import {
   AutomationTriggerContext,
   AutomationTriggerType
 } from '../automation/flow/automation-trigger.types'
-import { BoardColumn } from '../board/entities/board-column.entity'
-import { Board } from '../board/entities/board.entity'
-import { LeadRecord } from '../leads/entities/lead-record.entity'
 import {
   Lead,
   LeadFlowState,
   LeadRuntimeMode,
-  LeadState,
-  LeadTemperature
+  LeadState
 } from '../leads/entities/lead.entity'
 import {
   Message,
@@ -26,6 +22,8 @@ import {
   MessageStatus,
   MessageType
 } from '../leads/entities/message.entity'
+import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { classifyConversation } from './flow/conversation-classifier'
 import { ConversationContextBuilder } from './flow/conversation-context.builder'
@@ -58,7 +56,7 @@ type WhatsAppMessageStatus = {
   recipient_id?: string
 }
 
-type WhatsAppWebhookPayload = {
+export type WhatsAppWebhookPayload = {
   entry?: Array<{
     changes?: Array<{
       value?: {
@@ -116,17 +114,15 @@ type WhatsAppInboundMessage = {
 export class WebhookService {
   constructor(
     @InjectRepository(Lead) private readonly leadRepo: Repository<Lead>,
-    @InjectRepository(LeadRecord)
-    private readonly leadRecordRepo: Repository<LeadRecord>,
-    @InjectRepository(Board) private readonly boardRepo: Repository<Board>,
-    @InjectRepository(BoardColumn)
-    private readonly boardColumnRepo: Repository<BoardColumn>,
     @InjectRepository(Message)
     private readonly messageRepo: Repository<Message>,
+    @InjectRepository(UserInformations)
+    private readonly userInformationsRepo: Repository<UserInformations>,
     private readonly conversationContextBuilder: ConversationContextBuilder,
     private readonly leadFlowEngine: LeadFlowEngine,
     private readonly leadFlowActionExecutor: LeadFlowActionExecutor,
-    private readonly automationTriggerDispatcher: AutomationTriggerDispatcher
+    private readonly automationTriggerDispatcher: AutomationTriggerDispatcher,
+    private readonly rabbitPublisherService: RabbitPublisherService
   ) {}
 
   private readonly logger = new Logger(WebhookService.name)
@@ -139,89 +135,6 @@ export class WebhookService {
     [LeadFlowState.ASKING_NAME]: [LeadFlowState.ASKING_CONTEXT],
     [LeadFlowState.ASKING_CONTEXT]: [LeadFlowState.IN_CONVERSATION],
     [LeadFlowState.IN_CONVERSATION]: []
-  }
-
-  async handleIncomingMessageV2(payload: WhatsAppWebhookPayload) {
-    const value = payload?.entry?.[0]?.changes?.[0]?.value
-    const message = value?.messages?.[0]
-
-    if (!message) {
-      this.logger.warn(
-        'Stopping webhook V2 lead tracking: webhook event has no inbound messages'
-      )
-      return { status: 'ignored_no_message' }
-    }
-
-    const phoneNumber = message?.from?.trim()
-    const businessPhoneNumber = value?.metadata?.display_phone_number?.trim()
-    const metaPhoneNumberId = value?.metadata?.phone_number_id?.trim()
-
-    if (phoneNumber && businessPhoneNumber && metaPhoneNumberId) {
-      return await this.trackLeadContact({
-        phoneNumber,
-        businessPhoneNumber,
-        metaPhoneNumberId
-      })
-    }
-
-    this.logger.warn(
-      `Skipping lead tracking due to missing metadata. phoneNumber=${phoneNumber ?? 'unknown'} businessPhoneNumber=${businessPhoneNumber ?? 'unknown'} metaPhoneNumberId=${metaPhoneNumberId ?? 'unknown'}`
-    )
-
-    return { status: 'ignored_missing_data' }
-  }
-
-  private async trackLeadContact(params: {
-    phoneNumber: string
-    businessPhoneNumber: string
-    metaPhoneNumberId: string
-  }) {
-    const { phoneNumber, businessPhoneNumber, metaPhoneNumberId } = params
-    const now = new Date()
-
-    try {
-      const existingLeadRecord = await this.leadRecordRepo.findOne({
-        where: { phoneNumber, businessPhoneNumber }
-      })
-
-      if (!existingLeadRecord) {
-        await this.leadRecordRepo.save(
-          this.leadRecordRepo.create({
-            phoneNumber,
-            businessPhoneNumber,
-            metaPhoneNumberId,
-            firstContactAt: now,
-            lastContactAt: now,
-            contactCount: 1
-          })
-        )
-
-        this.logger.log(
-          `LeadRecord created for phone ${phoneNumber} on business phone ${businessPhoneNumber}`
-        )
-        return { status: 'created' }
-      }
-
-      existingLeadRecord.metaPhoneNumberId = metaPhoneNumberId
-      existingLeadRecord.lastContactAt = now
-      existingLeadRecord.contactCount =
-        (existingLeadRecord.contactCount ?? 0) + 1
-
-      await this.leadRecordRepo.save(existingLeadRecord)
-
-      this.logger.log(
-        `LeadRecord updated for phone ${phoneNumber}. contactCount=${existingLeadRecord.contactCount}`
-      )
-      return {
-        status: 'updated',
-        contactCount: existingLeadRecord.contactCount
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to persist LeadRecord for phone ${phoneNumber}: ${error instanceof Error ? error.message : 'unknown error'}`
-      )
-      return { status: 'error' }
-    }
   }
 
   async handleIncomingMessage(payload: WhatsAppWebhookPayload) {
@@ -280,7 +193,6 @@ export class WebhookService {
       const text = message?.text?.body?.trim() ?? null
       const isFromAd = message?.referral?.source_type === 'ad'
       const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
-      const welcomeMessage = message?.referral?.welcome_message?.text
 
       this.logger.log(
         `[1] Payload parsed. Inbound WhatsApp message received from ${from ?? 'unknown'} with id ${inboundMessageId ?? 'unknown'} and type ${message?.type ?? 'unknown'}`
@@ -329,50 +241,37 @@ export class WebhookService {
         this.logger.warn(
           `Stopping webhook processing: inbound message ${inboundMessageId} is missing display_phone_number`
         )
-        return { status: 'ignored_missing_board_phone' }
+        return { status: 'ignored_missing_business_phone' }
       }
 
-      this.logger.log(
-        `[2] Board lookup started for phone ${displayPhoneNumber}`
-      )
-
-      const board = await this.boardRepo.findOne({
+      const userInformations = await this.userInformationsRepo.findOne({
         where: {
-          boardPhone: displayPhoneNumber,
-          isActive: true,
-          isArchived: false
+          phoneNumber: displayPhoneNumber
         }
       })
 
-      if (!board) {
+      if (!userInformations) {
         this.logger.warn(
-          `Stopping webhook processing: board not found for phone ${displayPhoneNumber}`
+          `Stopping webhook processing: no UserInformations found for business phone ${displayPhoneNumber}`
         )
-        return { status: 'board_not_found' }
+        return { status: 'ignored_missing_user_informations' }
       }
 
-      this.logger.log(`[3] Board found: ${board.id}`)
-
-      const firstColumn = await this.boardColumnRepo.findOne({
-        where: { boardId: board.id },
-        order: { isDefault: 'DESC', position: 'ASC' }
-      })
-
-      if (!firstColumn) {
-        this.logger.warn(
-          `Stopping webhook processing: board ${board.id} has no available columns`
-        )
-        return { status: 'board_without_columns' }
+      if (
+        phoneNumberId?.trim() &&
+        userInformations.phoneNumberId !== phoneNumberId
+      ) {
+        userInformations.phoneNumberId = phoneNumberId
+        await this.userInformationsRepo.save(userInformations)
       }
 
-      this.logger.log(`[4] First column found: ${firstColumn.id}`)
       this.logger.log(
-        `[5] Lead lookup started for board ${board.id} and phone ${from}`
+        `[2] Lead lookup started for user ${userInformations.userId} and phone ${from}`
       )
 
       let lead = await this.leadRepo.findOne({
         where: {
-          boardId: board.id,
+          userInformationsId: userInformations.id,
           phone: from,
           state: LeadState.ACTIVE
         }
@@ -394,24 +293,12 @@ export class WebhookService {
 
       // PRIMEIRO CONTATO (via anúncio)
       if (!lead) {
-        const leadsCountInColumn = await this.leadRepo.count({
-          where: {
-            boardId: board.id,
-            columnId: firstColumn.id,
-            state: LeadState.ACTIVE
-          }
-        })
-
         const leadDraft = this.leadRepo.create({
-          boardId: board.id,
-          columnId: firstColumn.id,
-          position: leadsCountInColumn,
+          userInformationsId: userInformations.id,
           name: 'Lead sem nome',
           flowState: LeadFlowState.ASKING_NAME,
           phone: from,
           source: leadSource,
-          companyName: welcomeMessage,
-          temperature: LeadTemperature.WARM,
           state: LeadState.ACTIVE,
           runtimeMode: LeadRuntimeMode.AUTOMATION,
           lastInboundMessageId: inboundMessageId ?? undefined,
@@ -420,16 +307,33 @@ export class WebhookService {
         })
 
         this.logger.log(
-          `[7] Persisting inbound message ${inboundMessageId} for new lead draft on board ${board.id}`
+          `[7] Persisting inbound message ${inboundMessageId} for new lead draft`
         )
 
         this.logger.log('[10] Saving lead for newly created inbound contact')
         lead = await this.leadRepo.save(leadDraft)
 
+        await this.rabbitPublisherService.publish('lead.created', {
+          leadId: lead.id,
+          userId: userInformations.userId,
+          organizationId: null,
+          userInformationsId: lead.userInformationsId,
+          leadName: lead.name,
+          description: lead.name,
+          source: lead.source ?? null,
+          createdAt: lead.createdAt
+        })
+
+        await this.notifyNewLeadToConfiguredWhatsAppNumbers({
+          leadId: lead.id,
+          phoneNumberId,
+          notificationWhatsAppNumbers:
+            userInformations.notificationWhatsAppNumbers
+        })
+
         const automationTriggerContext: AutomationTriggerContext = {
           triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
           leadId: lead.id,
-          boardId: board.id,
           inboundMessageId: inboundMessageId ?? undefined,
           correlationId: randomUUID(),
           metadata: {
@@ -452,6 +356,8 @@ export class WebhookService {
 
         await this.persistMessage({
           leadId: lead.id,
+          leadName: lead.name,
+          userId: userInformations.userId,
           message
         })
 
@@ -479,7 +385,6 @@ export class WebhookService {
       const automationTriggerContext: AutomationTriggerContext = {
         triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
         leadId: lead.id,
-        boardId: board.id,
         inboundMessageId: inboundMessageId ?? undefined,
         correlationId: randomUUID(),
         metadata: {
@@ -500,6 +405,8 @@ export class WebhookService {
 
       await this.persistMessage({
         leadId: lead.id,
+        leadName: lead.name,
+        userId: userInformations.userId,
         message
       })
 
@@ -543,16 +450,14 @@ export class WebhookService {
         `[9] Executing FlowEngine for lead ${lead.id} with inbound message ${inboundMessageId}`
       )
 
-      const flowResult: LeadFlowProcessResult =
-        await this.leadFlowEngine.process({
-          lead,
-          messageText: text,
-          conversationContext
-        })
+      const flowResult: LeadFlowProcessResult = this.leadFlowEngine.process({
+        lead,
+        messageText: text,
+        conversationContext
+      })
 
       const actionContext: LeadFlowActionContext = {
         trigger: 'webhook',
-        boardId: board.id,
         phoneNumberId,
         inboundMessageId: inboundMessageId ?? undefined,
         correlationId: randomUUID()
@@ -683,9 +588,11 @@ export class WebhookService {
 
   private async persistMessage(params: {
     leadId: string
+    leadName?: string
+    userId: string
     message: WhatsAppInboundMessage
   }): Promise<void> {
-    const { leadId, message } = params
+    const { leadId, leadName, userId, message } = params
 
     try {
       const whatsappMessageId = message?.id
@@ -714,6 +621,16 @@ export class WebhookService {
       })
 
       await this.messageRepo.save(inboundMessage)
+
+      await this.rabbitPublisherService.publish('message.received', {
+        messageId: inboundMessage.id,
+        leadId,
+        leadName: leadName ?? null,
+        userId,
+        organizationId: null,
+        createdAt: inboundMessage.createdAt
+      })
+
       this.logger.log(
         `Inbound WhatsApp message persisted for lead ${leadId} with id ${whatsappMessageId ?? 'unknown'}`
       )
@@ -815,6 +732,58 @@ export class WebhookService {
         }
       }
     )
+  }
+
+  private async notifyNewLeadToConfiguredWhatsAppNumbers(params: {
+    leadId: string
+    phoneNumberId?: string
+    notificationWhatsAppNumbers?: string[]
+  }) {
+    const { leadId, phoneNumberId, notificationWhatsAppNumbers } = params
+
+    const recipients = Array.from(
+      new Set(
+        (notificationWhatsAppNumbers ?? [])
+          .map((number) => number.trim())
+          .filter((number) => number.length > 0)
+      )
+    )
+
+    if (!recipients.length) {
+      return
+    }
+
+    if (!phoneNumberId?.trim()) {
+      this.logger.warn(
+        `Skipping new lead notification dispatch for lead ${leadId}: missing phone_number_id`
+      )
+      return
+    }
+
+    const notificationMessage = 'Tem novo Lead no Flow!'
+    const results = await Promise.allSettled(
+      recipients.map((recipient) =>
+        this.sendWhatsAppMessage(recipient, notificationMessage, phoneNumberId)
+      )
+    )
+
+    const successCount = results.filter(
+      (result) => result.status === 'fulfilled'
+    ).length
+
+    if (successCount > 0) {
+      this.logger.log(
+        `New lead notification sent for lead ${leadId}. success=${successCount}/${recipients.length}`
+      )
+    }
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Failed to send new lead notification for lead ${leadId} to ${recipients[index]}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
+        )
+      }
+    })
   }
 
   private resolveMessageType(type?: string): MessageType {

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards
 } from '@nestjs/common'
@@ -15,7 +16,6 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 
 import { ArchiveLeadStateDto } from './dtos/archive-lead-state.dto'
 import { CreateLeadDto } from './dtos/create-lead.dto'
-import { MoveLeadDto } from './dtos/move-lead.dto'
 import { UpdateLeadDto } from './dtos/update-lead.dto'
 import { UpdateRuntimeModeDto } from './dtos/update-runtime-mode.dto'
 import { LeadsService } from './leads.service'
@@ -31,6 +31,22 @@ type AuthenticatedRequest = Request & {
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
+  @Post('rabbit/publish-test')
+  publishRabbitTest(
+    @Body() body: { routingKey?: string; payload?: unknown },
+    @Req() req: AuthenticatedRequest
+  ): Promise<{ success: boolean; routingKey: string }> {
+    const userId = req.user.id
+
+    return this.leadsService.publishRabbitTestMessage(userId, body)
+  }
+
+  @Get()
+  list(@Req() req: AuthenticatedRequest) {
+    const userId = req.user.id
+    return this.leadsService.listByUser(userId)
+  }
+
   @Post()
   create(
     @Body() createLeadDto: CreateLeadDto,
@@ -38,6 +54,16 @@ export class LeadsController {
   ) {
     const userId = req.user.id
     return this.leadsService.create(userId, createLeadDto)
+  }
+
+  @Get('search')
+  search(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: Record<string, string | string[] | undefined>
+  ) {
+    const userId = req.user.id
+
+    return this.leadsService.searchByUser(userId, query)
   }
 
   @Get(':id')
@@ -50,6 +76,16 @@ export class LeadsController {
   getMessages(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     const userId = req.user.id
     return this.leadsService.getLeadMessages(userId, id)
+  }
+
+  @Get(':id/followups')
+  getFollowUps(
+    @Param('id') id: string,
+    @Query() query: Record<string, string | string[] | undefined>,
+    @Req() req: AuthenticatedRequest
+  ) {
+    const userId = req.user.id
+    return this.leadsService.getLeadFollowUps(userId, id, query)
   }
 
   @Post(':id/messages')
@@ -70,16 +106,6 @@ export class LeadsController {
   ) {
     const userId = req.user.id
     return this.leadsService.update(userId, id, dto)
-  }
-
-  @Patch(':id/move')
-  move(
-    @Param('id') id: string,
-    @Body() dto: MoveLeadDto,
-    @Req() req: AuthenticatedRequest
-  ) {
-    const userId = req.user.id
-    return this.leadsService.moveLead(userId, id, dto)
   }
 
   @Patch(':id/archive')

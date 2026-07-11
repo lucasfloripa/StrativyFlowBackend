@@ -17,6 +17,7 @@ const corsOrigins = corsOriginEnv
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
+
   app.useGlobalPipes(
     new ValidationPipe({
       exceptionFactory: (errors) => {
@@ -42,6 +43,7 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization']
   })
+
   await app.listen(appPort)
 }
 void bootstrap()

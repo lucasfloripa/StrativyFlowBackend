@@ -8,18 +8,7 @@ import {
   OneToMany
 } from 'typeorm'
 
-import { LeadFollowUp } from './lead-followup.entity'
-
-export enum LeadTemperature {
-  HOT = 'hot',
-  WARM = 'warm',
-  COLD = 'cold'
-}
-
-export enum LeadOutcome {
-  WON = 'won',
-  LOST = 'lost'
-}
+import { Negotiation } from '../../negotiation/entities/negotiation.entity'
 
 export enum LeadState {
   ACTIVE = 'active',
@@ -38,27 +27,25 @@ export enum LeadRuntimeMode {
   AUTOMATION = 'AUTOMATION'
 }
 
+export enum LeadQualification {
+  QUALIFY = 'qualify',
+  NOT_QUALIFY = 'not qualify'
+}
+
 @Entity('leads')
-@Index(['boardId', 'phone'])
-@Index(['boardId', 'columnId', 'position'])
+@Index(['userInformationsId', 'phone'])
 export class Lead {
   @PrimaryGeneratedColumn('uuid')
-  id: string
+  id!: string
+
+  @Column({ nullable: true })
+  userInformationsId?: string
 
   @Column()
-  boardId: string
+  name!: string
 
   @Column()
-  columnId: string
-
-  @Column({ type: 'int', default: 0 })
-  position: number
-
-  @Column()
-  name: string
-
-  @Column()
-  phone: string
+  phone!: string
 
   @Column({ nullable: true })
   email?: string
@@ -66,17 +53,15 @@ export class Lead {
   @Column({ nullable: true })
   source?: string
 
-  @Column({ nullable: true })
-  companyName?: string
+  @Column({
+    type: 'enum',
+    enum: LeadQualification,
+    nullable: true
+  })
+  leadQualification?: LeadQualification | null
 
-  @Column({ type: 'text', nullable: true })
-  notes?: string
-
-  @Column({ type: 'text', nullable: true })
-  initialContext?: string
-
-  @OneToMany(() => LeadFollowUp, (followup) => followup.lead)
-  followUps: LeadFollowUp[]
+  @OneToMany(() => Negotiation, (negotiation) => negotiation.lead)
+  negotiations!: Negotiation[]
 
   @Column({ nullable: true })
   lastInboundMessageId?: string
@@ -92,42 +77,30 @@ export class Lead {
 
   @Column({
     type: 'varchar',
-    nullable: true
-  })
-  temperature?: LeadTemperature | null
-
-  @Column({
-    type: 'varchar',
-    nullable: true
-  })
-  outcome?: LeadOutcome | null
-
-  @Column({
-    type: 'varchar',
     default: LeadState.ACTIVE
   })
-  state: LeadState
+  state!: LeadState
 
   @Column({
     type: 'enum',
     enum: LeadFlowState,
     default: LeadFlowState.NEW
   })
-  flowState: LeadFlowState
+  flowState!: LeadFlowState
 
   @Column({
     type: 'enum',
     enum: LeadRuntimeMode,
     default: LeadRuntimeMode.AUTOMATION
   })
-  runtimeMode: LeadRuntimeMode
+  runtimeMode!: LeadRuntimeMode
 
   @Column({ default: false })
-  isFavorite: boolean
+  isFavorite!: boolean
 
   @CreateDateColumn()
-  createdAt: Date
+  createdAt!: Date
 
   @UpdateDateColumn()
-  updatedAt: Date
+  updatedAt!: Date
 }

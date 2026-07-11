@@ -5,8 +5,7 @@ import {
   Get,
   Param,
   Patch,
-  Post,
-  Query
+  Post
 } from '@nestjs/common'
 
 import { AutomationRuleService } from './automation-rule.service'
@@ -18,8 +17,8 @@ export class AutomationRuleController {
   constructor(private readonly automationRuleService: AutomationRuleService) {}
 
   @Get()
-  async findAll(@Query('boardId') boardId: string) {
-    return await this.automationRuleService.findAll(boardId)
+  async findAll() {
+    return await this.automationRuleService.findAll()
   }
 
   @Get(':id')

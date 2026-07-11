@@ -31,16 +31,16 @@ export enum MessageStatus {
 @Index('idx_messages_lead_id', ['leadId'])
 export class Message {
   @PrimaryGeneratedColumn('uuid')
-  id: string
+  id!: string
 
   @Column()
-  leadId: string
+  leadId!: string
 
   @Column({
     type: 'enum',
     enum: MessageDirection
   })
-  direction: MessageDirection
+  direction!: MessageDirection
 
   @Column({ type: 'text', nullable: true })
   content?: string | null
@@ -53,7 +53,7 @@ export class Message {
     enum: MessageType,
     default: MessageType.TEXT
   })
-  type: MessageType
+  type!: MessageType
 
   @Column({ type: 'varchar', nullable: true, unique: true })
   whatsappMessageId?: string | null
@@ -69,8 +69,8 @@ export class Message {
   metadata?: Record<string, unknown> | null
 
   @CreateDateColumn()
-  createdAt: Date
+  createdAt!: Date
 
   @UpdateDateColumn()
-  updatedAt: Date
+  updatedAt!: Date
 }

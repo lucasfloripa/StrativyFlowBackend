@@ -1,10 +1,12 @@
-import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator'
-
 import {
-  LeadOutcome,
-  LeadState,
-  LeadTemperature
-} from '../entities/lead.entity'
+  IsDateString,
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString
+} from 'class-validator'
+
+import { LeadQualification, LeadState } from '../entities/lead.entity'
 
 export class UpdateLeadDto {
   @IsOptional()
@@ -24,26 +26,19 @@ export class UpdateLeadDto {
   source?: string
 
   @IsOptional()
-  @IsString()
-  companyName?: string
+  @IsEnum(LeadQualification)
+  leadQualification?: LeadQualification | null
 
   @IsOptional()
   @IsString()
-  notes?: string
+  value?: string
 
   @IsOptional()
-  @IsString()
-  initialContext?: string
-
-  @IsOptional()
-  @IsEnum(LeadTemperature)
-  temperature?: LeadTemperature
-
-  @IsOptional()
-  @IsEnum(LeadOutcome)
-  outcome?: LeadOutcome
+  @IsDateString()
+  closedAt?: string
 
   @IsOptional()
   @IsEnum(LeadState)
   state?: LeadState
+
 }

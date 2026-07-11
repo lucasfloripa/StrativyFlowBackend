@@ -16,10 +16,6 @@ import { AutomationTriggerType } from '../flow/automation-trigger.types'
 export class CreateAutomationRuleDto {
   @IsString()
   @IsNotEmpty()
-  boardId!: string
-
-  @IsString()
-  @IsNotEmpty()
   name!: string
 
   @IsEnum(AutomationTriggerType)

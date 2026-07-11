@@ -1,36 +1,26 @@
 import {
+  IsDateString,
   IsEnum,
   IsEmail,
   IsNotEmpty,
   IsOptional,
-  IsString,
-  IsUUID
+  IsString
 } from 'class-validator'
 
 import {
-  LeadOutcome,
+  LeadQualification,
   LeadRuntimeMode,
-  LeadState,
-  LeadTemperature
+  LeadState
 } from '../entities/lead.entity'
 
 export class CreateLeadDto {
-  @IsUUID()
+  @IsString()
   @IsNotEmpty()
-  boardId: string
-
-  // opcional: se não vier, cai na 1ª coluna do board
-  @IsOptional()
-  @IsUUID()
-  columnId?: string
+  name!: string
 
   @IsString()
   @IsNotEmpty()
-  name: string
-
-  @IsString()
-  @IsNotEmpty()
-  phone: string
+  phone!: string
 
   @IsOptional()
   @IsEmail()
@@ -44,24 +34,16 @@ export class CreateLeadDto {
   source?: string
 
   @IsOptional()
-  @IsString()
-  companyName?: string
+  @IsEnum(LeadQualification)
+  leadQualification?: LeadQualification | null
 
   @IsOptional()
   @IsString()
-  notes?: string
+  value?: string
 
   @IsOptional()
-  @IsString()
-  initialContext?: string
-
-  @IsOptional()
-  @IsEnum(LeadTemperature)
-  temperature?: LeadTemperature
-
-  @IsOptional()
-  @IsEnum(LeadOutcome)
-  outcome?: LeadOutcome
+  @IsDateString()
+  closedAt?: string
 
   @IsOptional()
   @IsEnum(LeadState)

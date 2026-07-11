@@ -8,7 +8,7 @@ import {
   Res
 } from '@nestjs/common'
 
-import { WebhookService } from './webhook.service'
+import { WebhookService, type WhatsAppWebhookPayload } from './webhook.service'
 
 import type { Response } from 'express'
 
@@ -18,13 +18,8 @@ export class WebhookController {
 
   @Post('whatsapp')
   @HttpCode(200)
-  async handleWhatsAppWebhook(@Body() body: any) {
-    const webhookVersion = process.env.WEBHOOK_VERSION
-
-    if (webhookVersion === 'v1')
-      return await this.webhookService.handleIncomingMessage(body)
-    if (webhookVersion === 'v2')
-      return await this.webhookService.handleIncomingMessageV2(body)
+  async handleWhatsAppWebhook(@Body() body: WhatsAppWebhookPayload) {
+    return await this.webhookService.handleIncomingMessage(body)
   }
 
   @Get('whatsapp')

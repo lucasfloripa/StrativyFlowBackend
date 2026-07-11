@@ -7,16 +7,20 @@ import {
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
-import { DataSource, EntityManager, Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
-import { BoardColumn } from '../board/entities/board-column.entity'
-import { Board } from '../board/entities/board.entity'
+import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
+import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { CreateLeadDto } from './dtos/create-lead.dto'
-import { MoveLeadDto } from './dtos/move-lead.dto'
 import { UpdateLeadDto } from './dtos/update-lead.dto'
-import { LeadFollowUp } from './entities/lead-followup.entity'
-import { Lead, LeadRuntimeMode, LeadState } from './entities/lead.entity'
+import {
+  Lead,
+  LeadQualification,
+  LeadRuntimeMode,
+  LeadState
+} from './entities/lead.entity'
 import {
   Message,
   MessageDirection,
@@ -37,158 +41,322 @@ type WhatsAppSendMessageResponse = {
 @Injectable()
 export class LeadsService {
   private readonly logger = new Logger(LeadsService.name)
+  private static readonly SEARCHABLE_FILTERS = new Set([
+    'id',
+    'name',
+    'phone',
+    'email',
+    'source',
+    'leadQualification',
+    'state',
+    'runtimeMode',
+    'flowState',
+    'isFavorite'
+  ])
 
   constructor(
     @InjectRepository(Lead) private readonly leadRepo: Repository<Lead>,
     @InjectRepository(Message)
     private readonly messageRepo: Repository<Message>,
-    @InjectRepository(Board) private readonly boardRepo: Repository<Board>,
-    @InjectRepository(BoardColumn)
-    private readonly columnRepo: Repository<BoardColumn>,
-    private readonly dataSource: DataSource
+    @InjectRepository(FollowUp)
+    private readonly followUpRepo: Repository<FollowUp>,
+    @InjectRepository(UserInformations)
+    private readonly userInformationsRepo: Repository<UserInformations>,
+    private readonly rabbitPublisherService: RabbitPublisherService
   ) {}
 
-  private async assertBoardOwnership(userId: string, boardId: string) {
-    const board = await this.boardRepo.findOne({ where: { id: boardId } })
-    if (!board) throw new NotFoundException('Board not found')
-    if (board.userId !== userId)
-      throw new ForbiddenException('Board does not belong to user')
-    if (board.isArchived) throw new BadRequestException('Board is archived')
-    return board
-  }
+  async publishRabbitTestMessage(
+    userId: string,
+    body?: { routingKey?: string; payload?: unknown }
+  ): Promise<{ success: boolean; routingKey: string }> {
+    const routingKey = body?.routingKey ?? 'strativy.flow.test'
 
-  private async getFirstColumnId(boardId: string) {
-    const first = await this.columnRepo.findOne({
-      where: { boardId },
-      order: { position: 'ASC', createdAt: 'ASC' }
+    await this.rabbitPublisherService.publish(routingKey, {
+      userId,
+      triggeredAt: new Date().toISOString(),
+      payload: body?.payload ?? {}
     })
-    if (!first) throw new BadRequestException('Board has no columns')
-    return first.id
+
+    return {
+      success: true,
+      routingKey
+    }
   }
 
-  private async getNextPosition(boardId: string, columnId: string) {
-    const max = await this.leadRepo
-      .createQueryBuilder('l')
-      .select('MAX(l.position)', 'max')
-      .where('l.boardId = :boardId', { boardId })
-      .andWhere('l.columnId = :columnId', { columnId })
-      .andWhere('l.state != :archivedState', {
-        archivedState: LeadState.ARCHIVED
-      })
-      .getRawOne<{ max: string | null }>()
-    const maxPos = max?.max ? Number(max.max) : -1
-    return maxPos + 1
+  private async findUserInformationsIds(userId: string): Promise<string[]> {
+    const mappings = await this.userInformationsRepo.find({
+      where: { userId },
+      select: ['id']
+    })
+
+    return mappings.map((mapping) => mapping.id)
   }
 
-  private async executeOnEnterAutomation(
-    manager: EntityManager,
-    lead: Lead,
-    column: BoardColumn,
-    eventAt: Date
+  private async findDefaultUserInformationsId(userId: string): Promise<string> {
+    const mapping = await this.userInformationsRepo.findOne({
+      where: { userId },
+      order: { createdAt: 'ASC' }
+    })
+
+    if (!mapping) {
+      throw new BadRequestException(
+        'User has no phone mapping configured for leads'
+      )
+    }
+
+    return mapping.id
+  }
+
+  async searchByUser(
+    userId: string,
+    filters: Record<string, string | string[] | undefined>
   ) {
-    const onEnter = column.onEnter
-    if (!onEnter) return lead
+    const userInformationsIds = await this.findUserInformationsIds(userId)
 
-    const followUpRepository = manager.getRepository(LeadFollowUp)
-
-    if (onEnter.markAllFollowUpsAsDone) {
-      await followUpRepository
-        .createQueryBuilder()
-        .update(LeadFollowUp)
-        .set({
-          status: 'done',
-          completedAt: eventAt
-        })
-        .where('"leadId" = :leadId', { leadId: lead.id })
-        .andWhere('"status" != :doneStatus', { doneStatus: 'done' })
-        .execute()
+    if (!userInformationsIds.length) {
+      return []
     }
 
-    if (onEnter.createFollowUp) {
-      const followUp = followUpRepository.create({
-        leadId: lead.id,
-        value: onEnter.createFollowUp.value,
-        dueAt: onEnter.createFollowUp.dueAt
-          ? new Date(onEnter.createFollowUp.dueAt)
-          : eventAt,
-        status: 'pending',
-        completedAt: null
+    const queryBuilder = this.leadRepo
+      .createQueryBuilder('lead')
+      .addSelect(
+        (subQuery) =>
+          subQuery
+            .select(
+              "TO_CHAR(MAX(message.\"createdAt\" AT TIME ZONE 'America/Sao_Paulo'), 'YYYY-MM-DD HH24:MI:SS.MS')"
+            )
+            .from(Message, 'message')
+            .where('message."leadId" = lead.id::text')
+            .andWhere('message.direction IN (:...messageDirections)'),
+        'lastMessageAt'
+      )
+      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+        userInformationsIds
       })
+      .setParameter('messageDirections', [
+        MessageDirection.INBOUND,
+        MessageDirection.OUTBOUND
+      ])
 
-      await followUpRepository.save(followUp)
+    for (const [key, rawValue] of Object.entries(filters)) {
+      if (!LeadsService.SEARCHABLE_FILTERS.has(key)) {
+        continue
+      }
+
+      const value = Array.isArray(rawValue) ? rawValue[0] : rawValue
+      if (typeof value === 'undefined') {
+        continue
+      }
+
+      const normalized = value.trim()
+      if (!normalized) {
+        continue
+      }
+
+      if (key === 'isFavorite') {
+        if (normalized !== 'true' && normalized !== 'false') {
+          throw new BadRequestException('isFavorite must be true or false')
+        }
+
+        queryBuilder.andWhere('lead."isFavorite" = :isFavorite', {
+          isFavorite: normalized === 'true'
+        })
+        continue
+      }
+
+      if (key === 'name') {
+        queryBuilder.andWhere('lead.name ILIKE :name', {
+          name: `%${normalized}%`
+        })
+        continue
+      }
+
+      queryBuilder.andWhere(`lead."${key}" = :${key}`, {
+        [key]: normalized
+      })
     }
 
-    if (onEnter.favoriteLead) {
-      lead.isFavorite = true
+    const { entities, raw } = await queryBuilder
+      .orderBy('lead."createdAt"', 'DESC')
+      .getRawAndEntities()
+    const rawRows = raw as Array<{ lastMessageAt: string | null }>
+
+    return entities.map((lead, index) => ({
+      ...lead,
+      nextFollowUpDueAt: null,
+      lastMessageAt: rawRows[index]?.lastMessageAt ?? null
+    }))
+  }
+
+  async listByUser(userId: string) {
+    const userInformationsIds = await this.findUserInformationsIds(userId)
+    if (!userInformationsIds.length) {
+      return []
     }
 
-    if (onEnter.resetLastActivityAt) {
-      lead.lastActivityAt = eventAt
+    const leads = await this.leadRepo.find({
+      where: {
+        userInformationsId: In(userInformationsIds)
+      },
+      order: {
+        createdAt: 'DESC'
+      }
+    })
+
+    if (!leads.length) {
+      return []
     }
 
-    if (onEnter.setTemperature) {
-      lead.temperature = onEnter.setTemperature
+    const leadIds = leads.map((lead) => lead.id)
+
+    const lastMessageRows = await this.messageRepo
+      .createQueryBuilder('message')
+      .select('message."leadId"', 'leadId')
+      .addSelect(
+        "TO_CHAR(MAX(message.\"createdAt\" AT TIME ZONE 'America/Sao_Paulo'), 'YYYY-MM-DD HH24:MI:SS.MS')",
+        'lastMessageAt'
+      )
+      .where('message."leadId" IN (:...leadIds)', { leadIds })
+      .groupBy('message."leadId"')
+      .getRawMany<{ leadId: string; lastMessageAt: string | null }>()
+
+    const lastMessageAtMap = new Map<string, string | null>(
+      lastMessageRows.map((row) => [row.leadId, row.lastMessageAt])
+    )
+
+    const nextFollowUpRows = await this.followUpRepo
+      .createQueryBuilder('followup')
+      .innerJoin('followup.negotiation', 'negotiation')
+      .select('negotiation."leadId"', 'leadId')
+      .addSelect('followup."negotiationId"', 'negotiationId')
+      .addSelect('followup."dueAt"', 'nextFollowUpDueAt')
+      .where('negotiation."leadId" IN (:...leadIds)', { leadIds })
+      .andWhere('"followup"."status" = :pendingStatus', {
+        pendingStatus: FollowUpStatus.PENDING
+      })
+      .orderBy('negotiation."leadId"', 'ASC')
+      .addOrderBy('followup."dueAt"', 'ASC')
+      .getRawMany<{
+        leadId: string
+        negotiationId: string
+        nextFollowUpDueAt: string | null
+      }>()
+
+    const nextFollowUpMap = new Map<
+      string,
+      { dueAt: string | null; negotiationId: string | null }
+    >()
+
+    for (const row of nextFollowUpRows) {
+      if (!nextFollowUpMap.has(row.leadId)) {
+        nextFollowUpMap.set(row.leadId, {
+          dueAt: row.nextFollowUpDueAt,
+          negotiationId: row.negotiationId ?? null
+        })
+      }
     }
 
-    return lead
+    const nextFollowUpByLeadId = (leadId: string) =>
+      nextFollowUpMap.get(leadId) ?? { dueAt: null, negotiationId: null }
+
+    return leads.map((lead) => {
+      const nextFollowUp = nextFollowUpByLeadId(lead.id)
+
+      return {
+        ...lead,
+        nextFollowUpDueAt: nextFollowUp.dueAt,
+        nextFollowUpNegotiationId: nextFollowUp.negotiationId,
+        topFollowUpStatus: null,
+        lastMessageAt: lastMessageAtMap.get(lead.id) ?? null,
+        hasFollowUpOverdue: false,
+        hasFollowUpToday: false,
+        hasFollowUpScheduled: false,
+        hasAnyFollowUp: false
+      }
+    })
   }
 
   async create(userId: string, dto: CreateLeadDto) {
-    await this.assertBoardOwnership(userId, dto.boardId)
-
-    const columnId = dto.columnId ?? (await this.getFirstColumnId(dto.boardId))
-
-    const column = await this.columnRepo.findOne({
-      where: { id: columnId, boardId: dto.boardId }
-    })
-    if (!column) throw new NotFoundException('Column not found in this board')
-
-    const position = await this.getNextPosition(dto.boardId, columnId)
-
+    const userInformationsId = await this.findDefaultUserInformationsId(userId)
+    const nextLeadQualification = this.normalizeLeadQualification(
+      dto.leadQualification
+    )
     const lead = this.leadRepo.create({
-      boardId: dto.boardId,
-      columnId,
-      position,
+      userInformationsId,
       name: dto.name,
       phone: dto.phone,
       email: dto.email,
       source: dto.source,
-      companyName: dto.companyName,
-      notes: dto.notes,
-      initialContext: dto.initialContext,
-      temperature: dto.temperature ?? null,
-      outcome: dto.outcome ?? null,
+      leadQualification: nextLeadQualification,
       state: dto.state ?? LeadState.ACTIVE,
       runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION,
       movedAt: new Date(),
       lastActivityAt: new Date()
     })
-    const savedLead = await this.leadRepo.save(lead)
 
-    await this.dataSource.transaction(async (manager) => {
-      const leadRepository = manager.getRepository(Lead)
-      const txLead = await leadRepository.findOne({
-        where: { id: savedLead.id }
-      })
-      if (!txLead) throw new NotFoundException('Lead not found')
+    const createdLead = await this.leadRepo.save(lead)
 
-      await this.executeOnEnterAutomation(manager, txLead, column, new Date())
-      await leadRepository.save(txLead)
+    await this.rabbitPublisherService.publish('lead.created', {
+      leadId: createdLead.id,
+      userId,
+      organizationId: null,
+      userInformationsId: createdLead.userInformationsId,
+      leadName: createdLead.name,
+      description: createdLead.name,
+      source: createdLead.source ?? null,
+      createdAt: createdLead.createdAt
     })
 
-    return this.leadRepo.findOneOrFail({ where: { id: savedLead.id } })
+    return createdLead
   }
 
-  async findOne(userId: string, id: string) {
+  private async findOneEntity(userId: string, id: string): Promise<Lead> {
     const lead = await this.leadRepo.findOne({ where: { id } })
     if (!lead) throw new NotFoundException('Lead not found')
 
-    await this.assertBoardOwnership(userId, lead.boardId)
+    if (!lead.userInformationsId) {
+      throw new ForbiddenException('Lead has no user informations')
+    }
+
+    const ownershipMapping = await this.userInformationsRepo.findOne({
+      where: {
+        id: lead.userInformationsId,
+        userId
+      }
+    })
+
+    if (!ownershipMapping) {
+      throw new ForbiddenException('Lead does not belong to user')
+    }
+
     return lead
   }
 
+  async findOne(userId: string, id: string) {
+    const lead = await this.findOneEntity(userId, id)
+
+    const messageSummary = await this.messageRepo
+      .createQueryBuilder('message')
+      .select('COUNT(message.id)', 'totalMessages')
+      .addSelect(
+        "TO_CHAR(MAX(message.\"createdAt\" AT TIME ZONE 'America/Sao_Paulo'), 'YYYY-MM-DD HH24:MI:SS.MS')",
+        'lastMessageAt'
+      )
+      .where('message."leadId" = :leadId', { leadId: lead.id })
+      .andWhere('message.direction IN (:...messageDirections)', {
+        messageDirections: [MessageDirection.INBOUND, MessageDirection.OUTBOUND]
+      })
+      .getRawOne<{ totalMessages: string; lastMessageAt: string | null }>()
+
+    return {
+      ...lead,
+      lastMessageAt: messageSummary?.lastMessageAt ?? null,
+      totalMessages: Number(messageSummary?.totalMessages ?? 0)
+    }
+  }
+
   async getLeadMessages(userId: string, leadId: string) {
-    await this.findOne(userId, leadId)
+    await this.findOneEntity(userId, leadId)
 
     const messages = await this.messageRepo.find({
       where: { leadId },
@@ -204,28 +372,105 @@ export class LeadsService {
     }))
   }
 
+  async getLeadFollowUps(
+    userId: string,
+    leadId: string,
+    query: Record<string, string | string[] | undefined>
+  ) {
+    const lead = await this.findOneEntity(userId, leadId)
+
+    const page = Math.max(
+      1,
+      Number(Array.isArray(query.page) ? query.page[0] : query.page) || 1
+    )
+    const limit = Math.max(
+      1,
+      Number(Array.isArray(query.limit) ? query.limit[0] : query.limit) || 13
+    )
+    const statusFocusValue = Array.isArray(query.statusFocus)
+      ? query.statusFocus[0]
+      : query.statusFocus
+    const dateOrderValue = Array.isArray(query.dateOrder)
+      ? query.dateOrder[0]
+      : query.dateOrder
+
+    const statusFocus = this.normalizeFollowUpStatusFocus(statusFocusValue)
+    const dateOrder = dateOrderValue === 'desc' ? 'DESC' : 'ASC'
+
+    const followUps = await this.followUpRepo
+      .createQueryBuilder('followUp')
+      .innerJoin('followUp.negotiation', 'negotiation')
+      .where('negotiation."leadId" = :leadId', { leadId: lead.id })
+      .getMany()
+
+    const items = [...followUps].sort((firstFollowUp, secondFollowUp) => {
+      const firstPriority = this.getFollowUpPriority(firstFollowUp, statusFocus)
+      const secondPriority = this.getFollowUpPriority(
+        secondFollowUp,
+        statusFocus
+      )
+
+      if (firstPriority !== secondPriority) {
+        return firstPriority - secondPriority
+      }
+
+      const firstDueAt = new Date(firstFollowUp.dueAt).getTime()
+      const secondDueAt = new Date(secondFollowUp.dueAt).getTime()
+
+      if (firstDueAt !== secondDueAt) {
+        return dateOrder === 'ASC'
+          ? firstDueAt - secondDueAt
+          : secondDueAt - firstDueAt
+      }
+
+      const firstCreatedAt = new Date(firstFollowUp.createdAt).getTime()
+      const secondCreatedAt = new Date(secondFollowUp.createdAt).getTime()
+
+      return secondCreatedAt - firstCreatedAt
+    })
+
+    const totalItems = items.length
+    const paginatedItems = items.slice(
+      (page - 1) * limit,
+      (page - 1) * limit + limit
+    )
+
+    const totalPages = Math.max(1, Math.ceil(totalItems / limit))
+
+    return {
+      items: paginatedItems,
+      page,
+      limit,
+      totalItems,
+      totalPages
+    }
+  }
+
   async sendLeadMessage(
     userId: string,
     leadId: string,
     body: { content: string }
   ) {
-    const lead = await this.findOne(userId, leadId)
-    const board = await this.boardRepo.findOne({ where: { id: lead.boardId } })
-
-    if (!board) throw new NotFoundException('Board not found')
-
-    const phoneNumberId = board.phoneNumberId ?? undefined
+    const lead = await this.findOneEntity(userId, leadId)
 
     if (!lead.phone?.trim()) {
       throw new BadRequestException('Lead phone is missing')
     }
 
-    if (!board.boardPhone?.trim()) {
-      throw new BadRequestException('Board phone is missing')
-    }
+    const userInformations = lead.userInformationsId
+      ? await this.userInformationsRepo.findOne({
+          where: { id: lead.userInformationsId }
+        })
+      : null
 
-    if (!phoneNumberId) {
-      throw new BadRequestException('Board phoneNumberId is not configured')
+    const phoneNumberId =
+      userInformations?.phoneNumberId?.trim() ||
+      process.env.WHATSAPP_PHONE_NUMBER_ID
+
+    if (!phoneNumberId?.trim()) {
+      throw new BadRequestException(
+        'WhatsApp phoneNumberId is not configured for this lead'
+      )
     }
 
     const content = body.content?.trim()
@@ -270,10 +515,45 @@ export class LeadsService {
     }
   }
 
+  private getFollowUpPriority(
+    followUp: FollowUp,
+    focus: 'overdue' | 'today' | 'scheduled' | 'completed'
+  ): number {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+
+    const dueAt = new Date(followUp.dueAt)
+    const dueAtDay = new Date(dueAt)
+    dueAtDay.setHours(0, 0, 0, 0)
+
+    const derivedStatus =
+      String(followUp.status).trim().toLowerCase() === 'done'
+        ? 'completed'
+        : dueAtDay < today
+          ? 'overdue'
+          : dueAtDay.getTime() === today.getTime()
+            ? 'today'
+            : 'scheduled'
+
+    const orderedStatusesByFocus: Record<
+      'overdue' | 'today' | 'scheduled' | 'completed',
+      Array<'overdue' | 'today' | 'scheduled' | 'completed'>
+    > = {
+      overdue: ['overdue', 'today', 'scheduled', 'completed'],
+      today: ['today', 'scheduled', 'completed', 'overdue'],
+      scheduled: ['scheduled', 'completed', 'overdue', 'today'],
+      completed: ['completed', 'overdue', 'today', 'scheduled']
+    }
+
+    const orderedStatuses = orderedStatusesByFocus[focus]
+
+    return orderedStatuses.indexOf(derivedStatus)
+  }
+
   private async sendWhatsAppMessage(
     to: string,
     reply: string,
-    phoneNumberId?: string
+    phoneNumberId: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
     return axios.post(
       `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
@@ -293,43 +573,30 @@ export class LeadsService {
   }
 
   async update(userId: string, id: string, dto: UpdateLeadDto) {
-    const lead = await this.findOne(userId, id)
+    const lead = await this.findOneEntity(userId, id)
     let shouldRefreshLastActivityAt = false
+    const nextLeadQualification = this.normalizeLeadQualification(
+      dto.leadQualification
+    )
 
     if (typeof dto.name !== 'undefined') lead.name = dto.name
     if (typeof dto.phone !== 'undefined') lead.phone = dto.phone
     if (typeof dto.email !== 'undefined') lead.email = dto.email
     if (typeof dto.source !== 'undefined') lead.source = dto.source
-    if (typeof dto.companyName !== 'undefined') {
-      lead.companyName = dto.companyName
-    }
-    if (typeof dto.notes !== 'undefined' && dto.notes !== lead.notes) {
-      lead.notes = dto.notes
-      shouldRefreshLastActivityAt = true
-    }
     if (
-      typeof dto.initialContext !== 'undefined' &&
-      dto.initialContext !== lead.initialContext
+      typeof nextLeadQualification !== 'undefined' &&
+      nextLeadQualification !== lead.leadQualification
     ) {
-      lead.initialContext = dto.initialContext
-      shouldRefreshLastActivityAt = true
-    }
-    if (
-      typeof dto.temperature !== 'undefined' &&
-      dto.temperature !== lead.temperature
-    ) {
-      lead.temperature = dto.temperature
-      shouldRefreshLastActivityAt = true
-    }
-    if (typeof dto.outcome !== 'undefined' && dto.outcome !== lead.outcome) {
-      lead.outcome = dto.outcome
+      lead.leadQualification = nextLeadQualification
       shouldRefreshLastActivityAt = true
     }
     if (typeof dto.state !== 'undefined' && dto.state !== lead.state) {
       lead.state = dto.state
+      if (dto.state === LeadState.ARCHIVED) {
+        lead.isFavorite = false
+      }
       shouldRefreshLastActivityAt = true
     }
-
     if (shouldRefreshLastActivityAt) {
       lead.lastActivityAt = new Date()
     }
@@ -337,125 +604,17 @@ export class LeadsService {
     return this.leadRepo.save(lead)
   }
 
-  async moveLead(userId: string, leadId: string, dto: MoveLeadDto) {
-    const { boardId, toColumnId, toPosition } = dto
-    await this.assertBoardOwnership(userId, boardId)
-
-    return this.dataSource.transaction(async (manager) => {
-      const leadRepository = manager.getRepository(Lead)
-      const columnRepository = manager.getRepository(BoardColumn)
-
-      const lead = await leadRepository.findOne({
-        where: { id: leadId, boardId }
-      })
-      if (!lead) throw new NotFoundException('Lead not found in this board')
-
-      const toColumn = await columnRepository.findOne({
-        where: { id: toColumnId, boardId }
-      })
-      if (!toColumn)
-        throw new NotFoundException(
-          'Destination column not found in this board'
-        )
-
-      const fromColumnId = lead.columnId
-      const fromPosition = lead.position
-      const safeToPosition = Math.max(0, toPosition)
-
-      // mesma coluna (reorder)
-      if (fromColumnId === toColumnId) {
-        if (fromPosition === safeToPosition) return lead
-
-        if (fromPosition < safeToPosition) {
-          await leadRepository
-            .createQueryBuilder()
-            .update(Lead)
-            .set({ position: () => '"position" - 1' })
-            .where('"boardId" = :boardId', { boardId })
-            .andWhere('"columnId" = :columnId', { columnId: toColumnId })
-            .andWhere('"state" != :archivedState', {
-              archivedState: LeadState.ARCHIVED
-            })
-            .andWhere(
-              '"position" > :fromPosition AND "position" <= :toPosition',
-              {
-                fromPosition,
-                toPosition: safeToPosition
-              }
-            )
-            .execute()
-        } else {
-          await leadRepository
-            .createQueryBuilder()
-            .update(Lead)
-            .set({ position: () => '"position" + 1' })
-            .where('"boardId" = :boardId', { boardId })
-            .andWhere('"columnId" = :columnId', { columnId: toColumnId })
-            .andWhere('"state" != :archivedState', {
-              archivedState: LeadState.ARCHIVED
-            })
-            .andWhere(
-              '"position" >= :toPosition AND "position" < :fromPosition',
-              {
-                toPosition: safeToPosition,
-                fromPosition
-              }
-            )
-            .execute()
-        }
-
-        lead.position = safeToPosition
-        lead.movedAt = new Date()
-        return leadRepository.save(lead)
-      }
-
-      // muda de coluna
-      // A) fecha buraco na origem
-      await leadRepository
-        .createQueryBuilder()
-        .update(Lead)
-        .set({ position: () => '"position" - 1' })
-        .where('"boardId" = :boardId', { boardId })
-        .andWhere('"columnId" = :fromColumnId', { fromColumnId })
-        .andWhere('"state" != :archivedState', {
-          archivedState: LeadState.ARCHIVED
-        })
-        .andWhere('"position" > :fromPosition', { fromPosition })
-        .execute()
-
-      // B) abre espaço no destino
-      await leadRepository
-        .createQueryBuilder()
-        .update(Lead)
-        .set({ position: () => '"position" + 1' })
-        .where('"boardId" = :boardId', { boardId })
-        .andWhere('"columnId" = :toColumnId', { toColumnId })
-        .andWhere('"state" != :archivedState', {
-          archivedState: LeadState.ARCHIVED
-        })
-        .andWhere('"position" >= :toPosition', { toPosition: safeToPosition })
-        .execute()
-
-      // C) move
-      lead.columnId = toColumnId
-      lead.position = safeToPosition
-      lead.movedAt = new Date()
-      lead.lastActivityAt = new Date()
-
-      await this.executeOnEnterAutomation(manager, lead, toColumn, new Date())
-
-      return leadRepository.save(lead)
-    })
-  }
-
   async archive(userId: string, id: string, state: LeadState) {
-    const lead = await this.findOne(userId, id)
+    const lead = await this.findOneEntity(userId, id)
     lead.state = state
+    if (state === LeadState.ARCHIVED) {
+      lead.isFavorite = false
+    }
     return this.leadRepo.save(lead)
   }
 
   async toggleFavorite(userId: string, id: string, isFavorite: boolean) {
-    const lead = await this.findOne(userId, id)
+    const lead = await this.findOneEntity(userId, id)
     lead.isFavorite = isFavorite
     return this.leadRepo.save(lead)
   }
@@ -465,7 +624,7 @@ export class LeadsService {
     id: string,
     runtimeMode: LeadRuntimeMode
   ) {
-    const lead = await this.findOne(userId, id)
+    const lead = await this.findOneEntity(userId, id)
 
     if (lead.runtimeMode !== runtimeMode) {
       lead.runtimeMode = runtimeMode
@@ -482,50 +641,69 @@ export class LeadsService {
   }
 
   async remove(userId: string, id: string) {
-    // soft delete padrão
-    return this.archive(userId, id, LeadState.ARCHIVED)
+    const lead = await this.findOneEntity(userId, id)
+
+    return this.leadRepo.manager.transaction(async (manager) => {
+      await manager.delete(Message, { leadId: lead.id })
+      return manager.delete(Lead, { id: lead.id })
+    })
+  }
+
+  private normalizeFollowUpStatusFocus(
+    value: string | undefined
+  ): 'overdue' | 'today' | 'scheduled' | 'completed' {
+    if (value === 'today' || value === 'scheduled' || value === 'completed') {
+      return value
+    }
+
+    return 'overdue'
+  }
+
+  private normalizeLeadQualification(
+    value: unknown
+  ): LeadQualification | null | undefined {
+    if (typeof value === 'undefined') {
+      return undefined
+    }
+
+    if (value === null) {
+      return null
+    }
+
+    if (
+      value === LeadQualification.QUALIFY ||
+      value === LeadQualification.NOT_QUALIFY
+    ) {
+      return value
+    }
+
+    return undefined
   }
 
   async upsertFromWhatsapp(
     userId: string,
     dto: CreateLeadDto & { lastMessage?: string }
   ) {
-    await this.assertBoardOwnership(userId, dto.boardId)
-
-    // normaliza phone (opcional, mas ajuda)
     const phone = (dto.phone ?? '').trim()
     if (!phone) throw new BadRequestException('phone is required')
 
-    // tenta achar lead existente no board pelo phone
+    const userInformationsId = await this.findDefaultUserInformationsId(userId)
+
     const existing = await this.leadRepo.findOne({
       where: {
-        boardId: dto.boardId,
+        userInformationsId,
         phone,
         state: LeadState.ACTIVE
       }
     })
 
-    // se existe -> atualiza movedAt + (opcional) name/email
     if (existing) {
       existing.movedAt = new Date()
 
-      // opcional: atualiza nome se vier e for melhor que o atual
       if (dto.name && dto.name !== existing.name) existing.name = dto.name
       if (dto.email && dto.email !== existing.email) existing.email = dto.email
       if (dto.source && dto.source !== existing.source)
         existing.source = dto.source
-      if (
-        dto.initialContext &&
-        dto.initialContext !== existing.initialContext
-      ) {
-        existing.initialContext = dto.initialContext
-      }
-      if (dto.temperature && dto.temperature !== existing.temperature) {
-        existing.temperature = dto.temperature
-      }
-      if (dto.outcome !== undefined && dto.outcome !== existing.outcome) {
-        existing.outcome = dto.outcome
-      }
       if (dto.state && dto.state !== existing.state) {
         existing.state = dto.state
       }
@@ -533,45 +711,32 @@ export class LeadsService {
       return this.leadRepo.save(existing)
     }
 
-    // se não existe -> cria na coluna inicial (ou na dto.columnId se veio)
-    const columnId = dto.columnId ?? (await this.getFirstColumnId(dto.boardId))
-
-    const column = await this.columnRepo.findOne({
-      where: { id: columnId, boardId: dto.boardId }
-    })
-    if (!column) throw new NotFoundException('Column not found in this board')
-
-    const position = await this.getNextPosition(dto.boardId, columnId)
-
     const lead = this.leadRepo.create({
-      boardId: dto.boardId,
-      columnId,
-      position,
+      userInformationsId,
       name: dto.name,
       phone,
       email: dto.email,
       source: dto.source ?? 'whatsapp',
-      notes: dto.notes,
-      initialContext: dto.initialContext ?? dto.lastMessage,
-      temperature: dto.temperature ?? null,
-      outcome: dto.outcome ?? null,
+      leadQualification: this.normalizeLeadQualification(dto.leadQualification),
       state: dto.state ?? LeadState.ACTIVE,
       movedAt: new Date(),
-      lastActivityAt: new Date()
-    })
-    const savedLead = await this.leadRepo.save(lead)
-
-    await this.dataSource.transaction(async (manager) => {
-      const leadRepository = manager.getRepository(Lead)
-      const txLead = await leadRepository.findOne({
-        where: { id: savedLead.id }
-      })
-      if (!txLead) throw new NotFoundException('Lead not found')
-
-      await this.executeOnEnterAutomation(manager, txLead, column, new Date())
-      await leadRepository.save(txLead)
+      lastActivityAt: new Date(),
+      runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION
     })
 
-    return this.leadRepo.findOneOrFail({ where: { id: savedLead.id } })
+    const createdLead = await this.leadRepo.save(lead)
+
+    await this.rabbitPublisherService.publish('lead.created', {
+      leadId: createdLead.id,
+      userId,
+      organizationId: null,
+      userInformationsId: createdLead.userInformationsId,
+      leadName: createdLead.name,
+      description: createdLead.name,
+      source: createdLead.source ?? null,
+      createdAt: createdLead.createdAt
+    })
+
+    return createdLead
   }
 }

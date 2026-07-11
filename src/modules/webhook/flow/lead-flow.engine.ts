@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 
 import { Lead, LeadFlowState } from '../../leads/entities/lead.entity'
-import { AIRuntime } from '../ai/ai-runtime'
 
 import {
   classifyConversation,
@@ -13,15 +12,13 @@ import { LeadFlowActionType, LeadFlowProcessResult } from './lead-flow.types'
 
 @Injectable()
 export class LeadFlowEngine {
-  constructor(private readonly aiRuntime: AIRuntime) {}
-
   private readonly logger = new Logger(LeadFlowEngine.name)
 
-  async process(params: {
+  process(params: {
     lead: Lead
     messageText: string
     conversationContext: ConversationContext
-  }): Promise<LeadFlowProcessResult> {
+  }): LeadFlowProcessResult {
     const { lead, messageText, conversationContext } = params
     const recentMessagesCount = conversationContext.recentMessages.length
     const messageCount = getMessageCount(conversationContext)
@@ -79,12 +76,6 @@ export class LeadFlowEngine {
         return {
           actions: [
             {
-              type: LeadFlowActionType.UPDATE_LEAD,
-              payload: {
-                initialContext: messageText
-              }
-            },
-            {
               type: LeadFlowActionType.TRANSITION_STATE,
               payload: {
                 to: LeadFlowState.IN_CONVERSATION
@@ -100,21 +91,13 @@ export class LeadFlowEngine {
           ]
         }
       case LeadFlowState.IN_CONVERSATION: {
-        const aiResult = await this.aiRuntime.generateReply({
-          conversationContext,
-          latestMessage: messageText
-        })
-
-        this.logger.debug(
-          `FlowEngine AI reply generated: leadId=${lead.id} promptLength=${aiResult.prompt.length} replyLength=${aiResult.reply.length}`
-        )
-
         return {
           actions: [
             {
               type: LeadFlowActionType.SEND_MESSAGE,
               payload: {
-                content: aiResult.reply
+                content:
+                  'Recebi sua mensagem. Nosso time vai seguir com você por aqui.'
               }
             }
           ]

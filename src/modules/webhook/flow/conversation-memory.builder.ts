@@ -12,7 +12,6 @@ export function build(context: ConversationContext): ConversationMemory {
 
   return {
     leadName: context.lead.name ?? undefined,
-    initialContext: context.lead.initialContext ?? undefined,
     messageCount: context.recentMessages.length,
     recentMessages
   }

@@ -5,7 +5,6 @@ export type ConversationMemoryMessage = {
 
 export type ConversationMemory = {
   leadName?: string
-  initialContext?: string
   messageCount: number
   recentMessages: ConversationMemoryMessage[]
 }

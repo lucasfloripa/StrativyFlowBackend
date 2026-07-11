@@ -1,12 +1,14 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
-import { BoardModule } from './modules/board/board.module'
+import { DashboardModule } from './modules/dashboard/dashboard.module'
+import { FollowUpModule } from './modules/followup/followup.module'
 import { LeadsModule } from './modules/leads/leads.module'
+import { NegotiationModule } from './modules/negotiation/negotiation.module'
+import { NotificationModule } from './modules/notification/notification.module'
+import { RabbitModule } from './modules/rabbit/rabbit.module'
+import { UserModule } from './modules/user/user.module'
 import { WebhookModule } from './modules/webhook/webhook.module'
 
 @Module({
@@ -49,9 +51,14 @@ import { WebhookModule } from './modules/webhook/webhook.module'
         }
       }
     }),
+    DashboardModule,
+    FollowUpModule,
     LeadsModule,
-    WebhookModule,
-    BoardModule
+    NegotiationModule,
+    NotificationModule,
+    RabbitModule,
+    UserModule,
+    WebhookModule
   ],
   controllers: [],
   providers: []

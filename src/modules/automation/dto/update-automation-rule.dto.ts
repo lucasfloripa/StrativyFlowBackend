@@ -15,10 +15,6 @@ import { AutomationTriggerType } from '../flow/automation-trigger.types'
 export class UpdateAutomationRuleDto {
   @IsOptional()
   @IsString()
-  boardId?: string
-
-  @IsOptional()
-  @IsString()
   name?: string
 
   @IsOptional()
