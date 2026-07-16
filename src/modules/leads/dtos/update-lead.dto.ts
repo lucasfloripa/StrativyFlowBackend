@@ -2,11 +2,12 @@ import {
   IsDateString,
   IsEmail,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString
 } from 'class-validator'
 
-import { LeadQualification, LeadState } from '../entities/lead.entity'
+import { LeadQualification, LeadSocialLinks, LeadState } from '../entities/lead.entity'
 
 export class UpdateLeadDto {
   @IsOptional()
@@ -24,6 +25,10 @@ export class UpdateLeadDto {
   @IsOptional()
   @IsString()
   source?: string
+
+  @IsOptional()
+  @IsObject()
+  socialLinks?: Partial<Record<LeadSocialLinks, string>> | null
 
   @IsOptional()
   @IsEnum(LeadQualification)

@@ -7,6 +7,8 @@ import {
   UpdateDateColumn
 } from 'typeorm'
 
+import type { NotificationPreferences } from '../../notification/types'
+
 @Entity('user_informations')
 @Index(['phoneNumber'], { unique: true })
 export class UserInformations {
@@ -18,6 +20,9 @@ export class UserInformations {
 
   @Column({ type: 'varchar', nullable: true })
   name?: string | null
+
+  @Column({ type: 'varchar' })
+  email!: string
 
   @Column()
   phoneNumber!: string
@@ -31,9 +36,19 @@ export class UserInformations {
   @Column('text', { array: true, default: '{}' })
   notificationEmails!: string[]
 
-  @CreateDateColumn()
+  @Column({
+    type: 'jsonb',
+    default: {}
+  })
+  notificationPreferences!: NotificationPreferences
+
+  @CreateDateColumn({
+    type: 'timestamptz'
+  })
   createdAt!: Date
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz'
+  })
   updatedAt!: Date
 }

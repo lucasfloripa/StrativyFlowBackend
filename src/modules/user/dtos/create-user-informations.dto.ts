@@ -3,8 +3,11 @@ import {
   IsEmail,
   IsNotEmpty,
   IsOptional,
-  IsString
+  IsString,
+  IsObject
 } from 'class-validator'
+
+import type { NotificationPreferences } from '../../notification/types'
 
 export class CreateUserInformationsDto {
   @IsString()
@@ -14,6 +17,10 @@ export class CreateUserInformationsDto {
   @IsOptional()
   @IsString()
   name?: string
+
+  @IsEmail()
+  @IsNotEmpty()
+  email!: string
 
   @IsString()
   @IsNotEmpty()
@@ -28,4 +35,8 @@ export class CreateUserInformationsDto {
   @IsArray()
   @IsEmail({}, { each: true })
   notificationEmails?: string[]
+
+  @IsOptional()
+  @IsObject()
+  notificationPreferences?: NotificationPreferences
 }

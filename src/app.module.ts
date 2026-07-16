@@ -28,16 +28,6 @@ import { WebhookModule } from './modules/webhook/webhook.module'
         const dbSynchronize = config.get<string>('DB_SYNCHRONIZE') === 'true'
         const dbSsl = config.get<string>('DB_SSL') === 'true'
 
-        console.log(
-          dbHost,
-          dbPort,
-          dbUsername,
-          dbPassword,
-          dbName,
-          dbSynchronize,
-          dbSsl
-        )
-
         return {
           type: 'postgres',
           host: dbHost,

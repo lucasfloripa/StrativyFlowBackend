@@ -32,6 +32,11 @@ export enum LeadQualification {
   NOT_QUALIFY = 'not qualify'
 }
 
+export enum LeadSocialLinks {
+  INSTAGRAM = 'instagram',
+  URL = 'url'
+}
+
 @Entity('leads')
 @Index(['userInformationsId', 'phone'])
 export class Lead {
@@ -54,6 +59,12 @@ export class Lead {
   source?: string
 
   @Column({
+    type: 'jsonb',
+    nullable: true
+  })
+  socialLinks?: Partial<Record<LeadSocialLinks, string>> | null
+
+  @Column({
     type: 'enum',
     enum: LeadQualification,
     nullable: true
@@ -68,9 +79,6 @@ export class Lead {
 
   @Column({ nullable: true })
   lastAutoReplyMessageId?: string
-
-  @Column({ type: 'timestamptz', nullable: true })
-  movedAt?: Date
 
   @Column({ type: 'timestamptz', nullable: true })
   lastActivityAt?: Date
@@ -98,9 +106,13 @@ export class Lead {
   @Column({ default: false })
   isFavorite!: boolean
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz'
+  })
   createdAt!: Date
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz'
+  })
   updatedAt!: Date
 }

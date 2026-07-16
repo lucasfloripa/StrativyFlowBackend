@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
+
 import { CreateNegotiationDto } from './dto/create-negotiation.dto'
 import { NegotiationNoteDto } from './dto/negotiation-note.dto'
 import { UpdateNegotiationDto } from './dto/update-negotiation.dto'
@@ -11,8 +13,34 @@ import { Negotiation, NegotiationNote } from './entities/negotiation.entity'
 export class NegotiationService {
   constructor(
     @InjectRepository(Negotiation)
-    private readonly negotiationRepository: Repository<Negotiation>
+    private readonly negotiationRepository: Repository<Negotiation>,
+    @InjectRepository(FollowUp)
+    private readonly followUpRepository: Repository<FollowUp>
   ) {}
+
+  private createFollowUpDueDate(baseDate: Date, hoursToAdd: number): Date {
+    return new Date(baseDate.getTime() + hoursToAdd * 60 * 60 * 1000)
+  }
+
+  private buildDefaultFollowUps(negotiationId: string, createdAt: Date): FollowUp[] {
+    const followUpConfigs = [
+      { value: 'Follow-up 1', hoursToAdd: 24 },
+      { value: 'Follow-up 2', hoursToAdd: 72 },
+      { value: 'Follow-up 3', hoursToAdd: 24 * 7 },
+      { value: 'Follow-up 4', hoursToAdd: 24 * 14 }
+    ]
+
+    return followUpConfigs.map((followUpConfig) =>
+      this.followUpRepository.create({
+        negotiationId,
+        value: followUpConfig.value,
+        dueAt: this.createFollowUpDueDate(createdAt, followUpConfig.hoursToAdd),
+        status: FollowUpStatus.PENDING,
+        completedAt: null,
+        reminder1hSentAt: null
+      })
+    )
+  }
 
   private normalizeNoteCreatedAt(value?: string): string {
     if (value) {
@@ -43,19 +71,29 @@ export class NegotiationService {
   async create(dto: CreateNegotiationDto): Promise<Negotiation> {
     const normalizedNotes = this.normalizeNotes(dto.notes)
 
-    const negotiation = this.negotiationRepository.create({
-      leadId: dto.leadId,
-      title: dto.title,
-      stage: dto.stage,
-      temperature: dto.temperature,
-      negotiationType: dto.negotiationType,
-      value: dto.value,
-      notes: normalizedNotes,
-      closedAt: dto.closedAt ? new Date(dto.closedAt) : null,
-      stageUpdatedAt: dto.stageUpdatedAt ? new Date(dto.stageUpdatedAt) : null
-    })
+    return await this.negotiationRepository.manager.transaction(async (manager) => {
+      const negotiation = manager.create(Negotiation, {
+        leadId: dto.leadId,
+        title: dto.title,
+        stage: dto.stage,
+        temperature: dto.temperature,
+        negotiationType: dto.negotiationType,
+        value: dto.value,
+        notes: normalizedNotes,
+        closedAt: dto.closedAt ? new Date(dto.closedAt) : null,
+        stageUpdatedAt: dto.stageUpdatedAt ? new Date(dto.stageUpdatedAt) : null
+      })
 
-    return await this.negotiationRepository.save(negotiation)
+      const createdNegotiation = await manager.save(Negotiation, negotiation)
+      const defaultFollowUps = this.buildDefaultFollowUps(
+        createdNegotiation.id,
+        createdNegotiation.createdAt ?? new Date()
+      )
+
+      await manager.save(FollowUp, defaultFollowUps)
+
+      return createdNegotiation
+    })
   }
 
   async findAll(): Promise<Negotiation[]> {

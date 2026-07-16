@@ -109,10 +109,14 @@ export class Negotiation {
   @Column({ type: 'timestamptz', nullable: true })
   stageUpdatedAt?: Date | null
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz'
+  })
   createdAt!: Date
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz'
+  })
   updatedAt!: Date
 
   @AfterLoad()

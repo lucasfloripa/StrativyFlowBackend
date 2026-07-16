@@ -10,6 +10,10 @@ import axios from 'axios'
 import { In, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
+import {
+  Notification,
+  NotificationReferenceType
+} from '../notification/entities/notification.entity'
 import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -19,6 +23,7 @@ import {
   Lead,
   LeadQualification,
   LeadRuntimeMode,
+  LeadSocialLinks,
   LeadState
 } from './entities/lead.entity'
 import {
@@ -281,16 +286,17 @@ export class LeadsService {
     const nextLeadQualification = this.normalizeLeadQualification(
       dto.leadQualification
     )
+    const nextSocialLinks = this.normalizeLeadSocialLinks(dto.socialLinks)
     const lead = this.leadRepo.create({
       userInformationsId,
       name: dto.name,
       phone: dto.phone,
       email: dto.email,
       source: dto.source,
+      socialLinks: nextSocialLinks,
       leadQualification: nextLeadQualification,
       state: dto.state ?? LeadState.ACTIVE,
       runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION,
-      movedAt: new Date(),
       lastActivityAt: new Date()
     })
 
@@ -299,6 +305,7 @@ export class LeadsService {
     await this.rabbitPublisherService.publish('lead.created', {
       leadId: createdLead.id,
       userId,
+      origin: 'app',
       organizationId: null,
       userInformationsId: createdLead.userInformationsId,
       leadName: createdLead.name,
@@ -578,11 +585,15 @@ export class LeadsService {
     const nextLeadQualification = this.normalizeLeadQualification(
       dto.leadQualification
     )
+    const nextSocialLinks = this.normalizeLeadSocialLinks(dto.socialLinks)
 
     if (typeof dto.name !== 'undefined') lead.name = dto.name
     if (typeof dto.phone !== 'undefined') lead.phone = dto.phone
     if (typeof dto.email !== 'undefined') lead.email = dto.email
     if (typeof dto.source !== 'undefined') lead.source = dto.source
+    if (typeof nextSocialLinks !== 'undefined') {
+      lead.socialLinks = nextSocialLinks
+    }
     if (
       typeof nextLeadQualification !== 'undefined' &&
       nextLeadQualification !== lead.leadQualification
@@ -644,6 +655,40 @@ export class LeadsService {
     const lead = await this.findOneEntity(userId, id)
 
     return this.leadRepo.manager.transaction(async (manager) => {
+      const leadFollowUps = await this.followUpRepo
+        .createQueryBuilder('followup')
+        .innerJoin('followup.negotiation', 'negotiation')
+        .select('followup.id', 'id')
+        .where('negotiation."leadId" = :leadId', { leadId: lead.id })
+        .getRawMany<{ id: string }>()
+
+      await manager
+        .createQueryBuilder()
+        .delete()
+        .from(Notification)
+        .where('"referenceId" = :leadId', { leadId: lead.id })
+        .andWhere('"referenceType" IN (:...referenceTypes)', {
+          referenceTypes: [
+            NotificationReferenceType.LEAD,
+            NotificationReferenceType.MESSAGE
+          ]
+        })
+        .execute()
+
+      const followUpIds = leadFollowUps.map((followUp) => followUp.id)
+
+      if (followUpIds.length) {
+        await manager
+          .createQueryBuilder()
+          .delete()
+          .from(Notification)
+          .where('"referenceType" = :referenceType', {
+            referenceType: NotificationReferenceType.FOLLOW_UP
+          })
+          .andWhere('"referenceId" IN (:...followUpIds)', { followUpIds })
+          .execute()
+      }
+
       await manager.delete(Message, { leadId: lead.id })
       return manager.delete(Lead, { id: lead.id })
     })
@@ -680,6 +725,37 @@ export class LeadsService {
     return undefined
   }
 
+  private normalizeLeadSocialLinks(
+    value: unknown
+  ): Partial<Record<LeadSocialLinks, string>> | null | undefined {
+    if (typeof value === 'undefined') {
+      return undefined
+    }
+
+    if (value === null) {
+      return null
+    }
+
+    if (typeof value !== 'object') {
+      return undefined
+    }
+
+    const source = value as Record<string, unknown>
+    const normalized: Partial<Record<LeadSocialLinks, string>> = {}
+
+    const instagram = source[LeadSocialLinks.INSTAGRAM]
+    if (typeof instagram === 'string') {
+      normalized[LeadSocialLinks.INSTAGRAM] = instagram
+    }
+
+    const url = source[LeadSocialLinks.URL]
+    if (typeof url === 'string') {
+      normalized[LeadSocialLinks.URL] = url
+    }
+
+    return normalized
+  }
+
   async upsertFromWhatsapp(
     userId: string,
     dto: CreateLeadDto & { lastMessage?: string }
@@ -698,12 +774,17 @@ export class LeadsService {
     })
 
     if (existing) {
-      existing.movedAt = new Date()
-
       if (dto.name && dto.name !== existing.name) existing.name = dto.name
       if (dto.email && dto.email !== existing.email) existing.email = dto.email
       if (dto.source && dto.source !== existing.source)
         existing.source = dto.source
+      const nextSocialLinks = this.normalizeLeadSocialLinks(dto.socialLinks)
+      if (
+        typeof nextSocialLinks !== 'undefined' &&
+        nextSocialLinks !== existing.socialLinks
+      ) {
+        existing.socialLinks = nextSocialLinks
+      }
       if (dto.state && dto.state !== existing.state) {
         existing.state = dto.state
       }
@@ -717,9 +798,9 @@ export class LeadsService {
       phone,
       email: dto.email,
       source: dto.source ?? 'whatsapp',
+      socialLinks: this.normalizeLeadSocialLinks(dto.socialLinks),
       leadQualification: this.normalizeLeadQualification(dto.leadQualification),
       state: dto.state ?? LeadState.ACTIVE,
-      movedAt: new Date(),
       lastActivityAt: new Date(),
       runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION
     })
@@ -729,6 +810,7 @@ export class LeadsService {
     await this.rabbitPublisherService.publish('lead.created', {
       leadId: createdLead.id,
       userId,
+      origin: 'whatsapp',
       organizationId: null,
       userInformationsId: createdLead.userInformationsId,
       leadName: createdLead.name,

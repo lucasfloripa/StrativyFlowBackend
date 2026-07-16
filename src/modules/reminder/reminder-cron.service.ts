@@ -1,0 +1,225 @@
+import { Injectable, Logger } from '@nestjs/common'
+import { Cron } from '@nestjs/schedule'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Between, In, Repository } from 'typeorm'
+
+import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
+import { MailService } from '../mail/mail.service'
+import { UserInformations } from '../user/entities/user-informations.entity'
+
+type ReminderRecipientGroup = {
+  recipients: Set<string>
+  items: Array<{
+    leadName: string
+    followUpValue: string
+    dueAt: Date
+  }>
+}
+
+export type ReminderDispatchSummary = {
+  source: 'cron' | 'manual'
+  pendingFollowUpsDueToday: number
+  usersGrouped: number
+  usersNotified: number
+  followUpsIncluded: number
+}
+
+@Injectable()
+export class ReminderCronService {
+  private readonly logger = new Logger(ReminderCronService.name)
+
+  constructor(
+    @InjectRepository(FollowUp)
+    private readonly followUpRepository: Repository<FollowUp>,
+    @InjectRepository(UserInformations)
+    private readonly userInformationsRepository: Repository<UserInformations>,
+    private readonly mailService: MailService
+  ) {}
+
+  @Cron('0 6 * * *')
+  async sendDailyFollowUpReminders(): Promise<void> {
+    await this.dispatchDailyFollowUpReminders('cron')
+  }
+
+  async dispatchDailyFollowUpReminders(
+    source: 'cron' | 'manual' = 'cron'
+  ): Promise<ReminderDispatchSummary> {
+    this.logger.log(`Starting daily follow-up reminder dispatch via ${source}`)
+
+    const startOfDay = new Date()
+    startOfDay.setHours(0, 0, 0, 0)
+
+    const endOfDay = new Date(startOfDay)
+    endOfDay.setDate(endOfDay.getDate() + 1)
+
+    const followUps = await this.followUpRepository.find({
+      where: {
+        status: FollowUpStatus.PENDING,
+        dueAt: Between(startOfDay, endOfDay)
+      },
+      relations: {
+        negotiation: {
+          lead: true
+        }
+      },
+      order: {
+        dueAt: 'ASC'
+      }
+    })
+
+    if (!followUps.length) {
+      this.logger.log('No pending follow-ups due today for reminder dispatch')
+      return {
+        source,
+        pendingFollowUpsDueToday: 0,
+        usersGrouped: 0,
+        usersNotified: 0,
+        followUpsIncluded: 0
+      }
+    }
+
+    const userInformationsIds = Array.from(
+      new Set(
+        followUps
+          .map((followUp) => followUp.negotiation?.lead?.userInformationsId)
+          .filter(
+            (value): value is string =>
+              typeof value === 'string' && Boolean(value.trim())
+          )
+      )
+    )
+
+    if (!userInformationsIds.length) {
+      this.logger.warn(
+        'Skipping reminder dispatch because no user informations were found'
+      )
+      return {
+        source,
+        pendingFollowUpsDueToday: followUps.length,
+        usersGrouped: 0,
+        usersNotified: 0,
+        followUpsIncluded: 0
+      }
+    }
+
+    const userInformationsList = await this.userInformationsRepository.find({
+      where: {
+        id: In(userInformationsIds)
+      }
+    })
+
+    const userInformationsById = new Map(
+      userInformationsList.map((userInformations) => [
+        userInformations.id,
+        userInformations
+      ])
+    )
+
+    const groupedByUser = new Map<string, ReminderRecipientGroup>()
+
+    for (const followUp of followUps) {
+      const lead = followUp.negotiation?.lead
+      const userInformationsId = lead?.userInformationsId?.trim()
+
+      if (!lead || !userInformationsId) {
+        continue
+      }
+
+      const userInformations = userInformationsById.get(userInformationsId)
+      const userId = userInformations?.userId?.trim()
+
+      if (!userInformations || !userId) {
+        continue
+      }
+
+      const existingGroup = groupedByUser.get(userId) ?? {
+        recipients: new Set<string>(),
+        items: []
+      }
+
+      for (const email of userInformations.notificationEmails) {
+        const normalizedEmail = email.trim().toLowerCase()
+
+        if (normalizedEmail) {
+          existingGroup.recipients.add(normalizedEmail)
+        }
+      }
+
+      existingGroup.items.push({
+        leadName: lead.name,
+        followUpValue: followUp.value,
+        dueAt: followUp.dueAt
+      })
+
+      groupedByUser.set(userId, existingGroup)
+    }
+
+    let usersNotified = 0
+    let followUpsIncluded = 0
+
+    for (const [userId, group] of groupedByUser.entries()) {
+      const recipients = Array.from(group.recipients)
+
+      if (!recipients.length) {
+        this.logger.warn(
+          `Skipping daily follow-up reminder for user ${userId} because notificationEmails is empty`
+        )
+        continue
+      }
+
+      await this.mailService.send({
+        from: 'Strativy Flow <no-reply@strativyflow.com>',
+        to: recipients,
+        subject: 'Lembrete de follow-ups do dia',
+        html: this.buildReminderHtml(group.items)
+      })
+
+      usersNotified += 1
+      followUpsIncluded += group.items.length
+
+      this.logger.log(
+        `Sent daily follow-up reminder to user ${userId} with ${group.items.length} follow-up(s)`
+      )
+    }
+
+    this.logger.log(`Finished daily follow-up reminder dispatch via ${source}`)
+
+    return {
+      source,
+      pendingFollowUpsDueToday: followUps.length,
+      usersGrouped: groupedByUser.size,
+      usersNotified,
+      followUpsIncluded
+    }
+  }
+
+  private buildReminderHtml(
+    items: Array<{ leadName: string; followUpValue: string; dueAt: Date }>
+  ): string {
+    const listItems = items
+      .map((item) => {
+        const dueAtLabel = item.dueAt.toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+
+        return `<li><strong>${this.escapeHtml(item.leadName)}</strong> - ${this.escapeHtml(item.followUpValue)} (${dueAtLabel})</li>`
+      })
+      .join('')
+
+    return [
+      '<h2>Follow-ups do dia</h2>',
+      '<p>Segue a lista de follow-ups pendentes para hoje:</p>',
+      `<ul>${listItems}</ul>`
+    ].join('')
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+  }
+}

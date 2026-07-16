@@ -22,6 +22,7 @@ import {
   MessageStatus,
   MessageType
 } from '../leads/entities/message.entity'
+import { NotificationChannel, NotificationType } from '../notification/enums'
 import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -302,7 +303,6 @@ export class WebhookService {
           state: LeadState.ACTIVE,
           runtimeMode: LeadRuntimeMode.AUTOMATION,
           lastInboundMessageId: inboundMessageId ?? undefined,
-          movedAt: new Date(),
           lastActivityAt: new Date()
         })
 
@@ -316,6 +316,7 @@ export class WebhookService {
         await this.rabbitPublisherService.publish('lead.created', {
           leadId: lead.id,
           userId: userInformations.userId,
+          origin: 'webhook',
           organizationId: null,
           userInformationsId: lead.userInformationsId,
           leadName: lead.name,
@@ -328,7 +329,8 @@ export class WebhookService {
           leadId: lead.id,
           phoneNumberId,
           notificationWhatsAppNumbers:
-            userInformations.notificationWhatsAppNumbers
+            userInformations.notificationWhatsAppNumbers,
+          notificationPreferences: userInformations.notificationPreferences
         })
 
         const automationTriggerContext: AutomationTriggerContext = {
@@ -463,6 +465,8 @@ export class WebhookService {
         correlationId: randomUUID()
       }
 
+      const leadNameBeforeFlowExecution = lead.name
+
       await this.leadFlowActionExecutor.execute({
         context: actionContext,
         lead,
@@ -500,8 +504,24 @@ export class WebhookService {
           })
       })
 
+      if (
+        !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
+        this.hasValidLeadName(lead.name)
+      ) {
+        await this.rabbitPublisherService.publish('lead.created', {
+          leadId: lead.id,
+          userId: userInformations.userId,
+          origin: 'webhook',
+          organizationId: null,
+          userInformationsId: lead.userInformationsId,
+          leadName: lead.name,
+          description: lead.name,
+          source: lead.source ?? null,
+          createdAt: lead.createdAt
+        })
+      }
+
       lead.lastInboundMessageId = inboundMessageId ?? undefined
-      lead.movedAt = new Date()
 
       this.logger.log('[10] Saving lead after FlowEngine execution')
       await this.leadRepo.save(lead)
@@ -738,8 +758,24 @@ export class WebhookService {
     leadId: string
     phoneNumberId?: string
     notificationWhatsAppNumbers?: string[]
+    notificationPreferences?: UserInformations['notificationPreferences']
   }) {
-    const { leadId, phoneNumberId, notificationWhatsAppNumbers } = params
+    const {
+      leadId,
+      phoneNumberId,
+      notificationWhatsAppNumbers,
+      notificationPreferences
+    } = params
+
+    const enabledChannels =
+      notificationPreferences?.[NotificationType.NEW_LEAD] ?? []
+
+    if (!enabledChannels.includes(NotificationChannel.WHATSAPP)) {
+      this.logger.log(
+        `Skipping WhatsApp new lead notification because WHATSAPP channel is disabled for lead ${leadId}`
+      )
+      return
+    }
 
     const recipients = Array.from(
       new Set(
@@ -828,5 +864,19 @@ export class WebhookService {
     if (Number.isNaN(numericTimestamp)) return null
 
     return new Date(numericTimestamp * 1000)
+  }
+
+  private hasValidLeadName(leadName?: string | null): boolean {
+    if (!leadName) {
+      return false
+    }
+
+    const normalized = leadName.trim().toLowerCase()
+
+    if (!normalized) {
+      return false
+    }
+
+    return !normalized.includes('sem nome') && !normalized.includes('sem nova')
   }
 }

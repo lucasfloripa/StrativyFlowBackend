@@ -45,9 +45,16 @@ export class FollowUp {
   @Column({ type: 'timestamptz', nullable: true })
   completedAt?: Date | null
 
-  @CreateDateColumn()
+  @Column({ name: 'remider1hSentAt', type: 'timestamptz', nullable: true })
+  reminder1hSentAt?: Date | null
+
+  @CreateDateColumn({
+    type: 'timestamptz'
+  })
   createdAt!: Date
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz'
+  })
   updatedAt!: Date
 }

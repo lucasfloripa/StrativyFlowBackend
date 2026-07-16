@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { MailModule } from '../mail/mail.module'
 import { RabbitModule } from '../rabbit/rabbit.module'
+import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { NotificationConsumer } from './consumers/notification.consumer'
 import { Notification } from './entities/notification.entity'
@@ -12,7 +14,11 @@ import { NotificationService } from './notification.service'
 import { NotificationRepository } from './repositories/notification.repository'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Notification]), RabbitModule],
+  imports: [
+    TypeOrmModule.forFeature([Notification, UserInformations]),
+    MailModule,
+    RabbitModule
+  ],
   controllers: [NotificationController],
   providers: [
     NotificationRepository,

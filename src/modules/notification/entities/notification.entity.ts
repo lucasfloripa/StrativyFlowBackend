@@ -9,12 +9,14 @@ import {
 
 export enum NotificationType {
   LEAD_CREATED = 'LEAD_CREATED',
-  MESSAGE_RECEIVED = 'MESSAGE_RECEIVED'
+  MESSAGE_RECEIVED = 'MESSAGE_RECEIVED',
+  FOLLOW_UP_REMINDER_1H = 'FOLLOW_UP_REMINDER_1H'
 }
 
 export enum NotificationReferenceType {
   LEAD = 'LEAD',
-  MESSAGE = 'MESSAGE'
+  MESSAGE = 'MESSAGE',
+  FOLLOW_UP = 'FOLLOW_UP'
 }
 
 @Entity('notifications')
@@ -57,9 +59,13 @@ export class Notification {
   @Column({ type: 'timestamptz', nullable: true })
   readAt!: Date | null
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz'
+  })
   createdAt!: Date
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz'
+  })
   updatedAt!: Date
 }

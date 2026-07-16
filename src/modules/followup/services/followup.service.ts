@@ -19,7 +19,8 @@ export class FollowUpService {
       value: dto.value,
       dueAt: new Date(dto.dueAt),
       status: dto.status,
-      completedAt: dto.completedAt ? new Date(dto.completedAt) : null
+      completedAt: dto.completedAt ? new Date(dto.completedAt) : null,
+      reminder1hSentAt: null
     })
 
     return await this.followUpRepository.save(followUp)
@@ -43,6 +44,8 @@ export class FollowUpService {
 
   async update(id: string, dto: UpdateFollowUpDto): Promise<FollowUp> {
     const followUp = await this.findOne(id)
+
+    followUp.reminder1hSentAt = null
 
     if (dto.negotiationId !== undefined) {
       followUp.negotiationId = dto.negotiationId

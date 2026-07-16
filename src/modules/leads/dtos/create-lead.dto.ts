@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsEmail,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString
 } from 'class-validator'
@@ -10,6 +11,7 @@ import {
 import {
   LeadQualification,
   LeadRuntimeMode,
+  LeadSocialLinks,
   LeadState
 } from '../entities/lead.entity'
 
@@ -32,6 +34,10 @@ export class CreateLeadDto {
   @IsOptional()
   @IsString()
   source?: string
+
+  @IsOptional()
+  @IsObject()
+  socialLinks?: Partial<Record<LeadSocialLinks, string>> | null
 
   @IsOptional()
   @IsEnum(LeadQualification)

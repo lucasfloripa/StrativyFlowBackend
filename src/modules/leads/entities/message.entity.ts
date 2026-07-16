@@ -68,9 +68,13 @@ export class Message {
   @Column({ type: 'jsonb', nullable: true })
   metadata?: Record<string, unknown> | null
 
-  @CreateDateColumn()
+  @CreateDateColumn({
+    type: 'timestamptz'
+  })
   createdAt!: Date
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({
+    type: 'timestamptz'
+  })
   updatedAt!: Date
 }

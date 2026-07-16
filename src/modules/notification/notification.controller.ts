@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -56,6 +57,29 @@ export class NotificationController {
     return this.notificationService.markAsRead(userId, id)
   }
 
+  @Delete()
+  removeAll(
+    @Req() req: AuthenticatedRequest,
+    @Query('type') type?: string,
+    @Query('referenceId') referenceId?: string
+  ) {
+    const userId = req.user.id
+    const notificationType = this.resolveNotificationType(type)
+
+    return this.notificationService.removeAll(
+      userId,
+      notificationType,
+      referenceId
+    )
+  }
+
+  @Delete(':id')
+  removeOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const userId = req.user.id
+
+    return this.notificationService.removeOne(userId, id)
+  }
+
   private resolveNotificationType(
     value?: string
   ): NotificationType | undefined {
@@ -69,6 +93,10 @@ export class NotificationController {
 
     if (value === 'MESSAGE_RECEIVED') {
       return NotificationType.MESSAGE_RECEIVED
+    }
+
+    if (value === 'FOLLOW_UP_REMINDER_1H') {
+      return NotificationType.FOLLOW_UP_REMINDER_1H
     }
 
     throw new BadRequestException('Invalid notification type')

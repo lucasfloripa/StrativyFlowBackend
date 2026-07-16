@@ -1,6 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Repository } from 'typeorm'
 
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
+import { MailService } from '../../mail/mail.service'
+import { UserInformations } from '../../user/entities/user-informations.entity'
+import {
+  NotificationChannel,
+  NotificationType as PreferenceNotificationType
+} from '../enums'
 import {
   NotificationReferenceType,
   NotificationType
@@ -15,15 +23,19 @@ export class LeadCreatedHandler implements NotificationEventHandler {
 
   private readonly logger = new Logger(LeadCreatedHandler.name)
 
-  constructor(private readonly notificationService: NotificationService) {}
+  constructor(
+    private readonly notificationService: NotificationService,
+    private readonly mailService: MailService,
+    @InjectRepository(UserInformations)
+    private readonly userInformationsRepo: Repository<UserInformations>
+  ) {}
 
   async handle(message: RabbitMessage): Promise<void> {
     const data = this.asRecord(message.data)
     const userId = this.getString(data, 'userId')
     const leadId = this.getString(data, 'leadId')
     const leadName = this.getString(data, 'leadName')
-    const description =
-      this.getString(data, 'description') ?? leadName ?? 'Lead sem nome'
+    const description = this.getString(data, 'description') ?? leadName
 
     if (!userId || !leadId) {
       this.logger.warn(
@@ -32,15 +44,75 @@ export class LeadCreatedHandler implements NotificationEventHandler {
       return
     }
 
-    await this.notificationService.createNotification({
-      organizationId: this.getString(data, 'organizationId') ?? null,
-      userId,
-      type: NotificationType.LEAD_CREATED,
-      title: 'Novo lead criado',
-      description,
-      referenceType: NotificationReferenceType.LEAD,
-      referenceId: leadId
+    const userInformations = await this.userInformationsRepo.findOne({
+      where: { userId },
+      order: { createdAt: 'ASC' }
     })
+
+    const enabledChannels =
+      userInformations?.notificationPreferences?.[
+        PreferenceNotificationType.NEW_LEAD
+      ] ?? []
+
+    this.logger.log(
+      `Processing lead.created for userId=${userId}, leadId=${leadId}, channels=${enabledChannels.join(',') || 'none'}`
+    )
+
+    if (!this.hasValidLeadName(leadName) || !description) {
+      this.logger.log(
+        `Skipping lead.created notification because lead name is not valid yet. leadId=${leadId}`
+      )
+      return
+    }
+
+    if (enabledChannels.includes(NotificationChannel.APP)) {
+      await this.notificationService.createNotification({
+        organizationId: this.getString(data, 'organizationId') ?? null,
+        userId,
+        type: NotificationType.LEAD_CREATED,
+        title: 'Novo lead criado',
+        description,
+        referenceType: NotificationReferenceType.LEAD,
+        referenceId: leadId
+      })
+    } else {
+      this.logger.log(
+        `Skipping in-app lead.created notification because APP channel is disabled for userId=${userId}`
+      )
+    }
+
+    if (enabledChannels.includes(NotificationChannel.EMAIL)) {
+      const recipients = Array.from(
+        new Set(
+          (userInformations?.notificationEmails ?? [])
+            .map((email) => email.trim().toLowerCase())
+            .filter((email) => email.length > 0)
+        )
+      )
+
+      if (recipients.length > 0) {
+        this.logger.log(
+          `Sending NEW_LEAD email notification for userId=${userId} to ${recipients.length} recipient(s)`
+        )
+        await this.mailService.send({
+          from: 'Strativy Flow <no-reply@strativyflow.com>',
+          to: recipients,
+          subject: 'Novo lead criado',
+          html: `<h2>Novo lead criado</h2><p>${this.escapeHtml(description)}</p>`
+        })
+        this.logger.log(
+          `NEW_LEAD email notification sent for userId=${userId}, leadId=${leadId}`
+        )
+      } else {
+        this.logger.warn(
+          `Skipping NEW_LEAD email notification because no notificationEmails are configured for userId=${userId}`
+        )
+      }
+    } else {
+      this.logger.log(
+        `Skipping NEW_LEAD email notification because EMAIL channel is disabled for userId=${userId}`
+      )
+    }
   }
 
   private asRecord(value: unknown): Record<string, unknown> {
@@ -63,5 +135,28 @@ export class LeadCreatedHandler implements NotificationEventHandler {
 
     const normalized = raw.trim()
     return normalized ? normalized : null
+  }
+
+  private hasValidLeadName(leadName: string | null): boolean {
+    if (!leadName) {
+      return false
+    }
+
+    const normalized = leadName.trim().toLowerCase()
+
+    if (!normalized) {
+      return false
+    }
+
+    return !normalized.includes('sem nome') && !normalized.includes('sem nova')
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
   }
 }

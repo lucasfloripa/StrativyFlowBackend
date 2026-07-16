@@ -55,12 +55,7 @@ export class NotificationRepository {
   }
 
   async markAsRead(userId: string, id: string): Promise<Notification | null> {
-    const notification = await this.repository.findOne({
-      where: {
-        id,
-        userId
-      }
-    })
+    const notification = await this.findOneByIdAndUser(userId, id)
 
     if (!notification) {
       return null
@@ -73,6 +68,56 @@ export class NotificationRepository {
     }
 
     return notification
+  }
+
+  async findOneByIdAndUser(
+    userId: string,
+    id: string
+  ): Promise<Notification | null> {
+    return this.repository.findOne({
+      where: {
+        id,
+        userId
+      }
+    })
+  }
+
+  async findByUserTypeAndReferenceId(
+    userId: string,
+    type: NotificationType,
+    referenceId: string
+  ): Promise<Notification | null> {
+    return this.repository.findOne({
+      where: {
+        userId,
+        type,
+        referenceId
+      }
+    })
+  }
+
+  async updateUnreadMessageDescriptions(params: {
+    userId: string
+    referenceId: string
+    description: string
+  }): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(Notification)
+      .set({
+        description: params.description
+      })
+      .where('"userId" = :userId', { userId: params.userId })
+      .andWhere('"type" = :type', {
+        type: NotificationType.MESSAGE_RECEIVED
+      })
+      .andWhere('"referenceId" = :referenceId', {
+        referenceId: params.referenceId
+      })
+      .andWhere('"isRead" = false')
+      .execute()
+
+    return result.affected ?? 0
   }
 
   async markAllAsRead(
@@ -89,6 +134,42 @@ export class NotificationRepository {
       })
       .where('"userId" = :userId', { userId })
       .andWhere('"isRead" = false')
+
+    if (type) {
+      queryBuilder.andWhere('"type" = :type', { type })
+    }
+
+    if (referenceId) {
+      queryBuilder.andWhere('"referenceId" = :referenceId', { referenceId })
+    }
+
+    const result = await queryBuilder.execute()
+
+    return result.affected ?? 0
+  }
+
+  async deleteByIdAndUser(userId: string, id: string): Promise<number> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .delete()
+      .from(Notification)
+      .where('"id" = :id', { id })
+      .andWhere('"userId" = :userId', { userId })
+      .execute()
+
+    return result.affected ?? 0
+  }
+
+  async deleteAll(
+    userId: string,
+    type?: NotificationType,
+    referenceId?: string
+  ): Promise<number> {
+    const queryBuilder = this.repository
+      .createQueryBuilder()
+      .delete()
+      .from(Notification)
+      .where('"userId" = :userId', { userId })
 
     if (type) {
       queryBuilder.andWhere('"type" = :type', { type })

@@ -14,6 +14,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 
 import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
 import { UpdateUserInformationsNotificationsDto } from './dtos/update-user-informations-notifications.dto'
+import { UpdateUserInformationsPreferencesDto } from './dtos/update-user-informations-preferences.dto'
 import { UserService } from './user.service'
 
 type AuthenticatedRequest = Request & {
@@ -44,6 +45,18 @@ export class UserController {
     @Req() req: AuthenticatedRequest
   ) {
     return await this.userService.updateUserInformationsNotificationsByUserId(
+      req.user.id,
+      dto
+    )
+  }
+
+  @Patch('user-informations/:id/preferences')
+  async updateUserInformationsPreferences(
+    @Param('id') _id: string,
+    @Body() dto: UpdateUserInformationsPreferencesDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return await this.userService.updateUserInformationsPreferencesByUserId(
       req.user.id,
       dto
     )
