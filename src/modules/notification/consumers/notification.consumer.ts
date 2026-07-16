@@ -40,6 +40,8 @@ export class NotificationConsumer implements OnModuleInit {
   }
 
   private async handleMessage(message: RabbitMessage): Promise<void> {
+    this.logger.log(`Notification consumer received event=${message.event}`)
+
     const handler = this.handlersByEvent.get(message.event)
 
     if (!handler) {
@@ -48,5 +50,7 @@ export class NotificationConsumer implements OnModuleInit {
     }
 
     await handler.handle(message)
+
+    this.logger.log(`Notification consumer processed event=${message.event}`)
   }
 }

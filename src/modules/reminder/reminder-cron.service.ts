@@ -3,12 +3,16 @@ import { Cron } from '@nestjs/schedule'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Between, In, Repository } from 'typeorm'
 
+import { AutomationMessagingService } from '../automation/services/automation-messaging.service'
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { MailService } from '../mail/mail.service'
+import { NotificationChannel, NotificationType } from '../notification/enums'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 type ReminderRecipientGroup = {
-  recipients: Set<string>
+  emailRecipients: Set<string>
+  whatsappRecipients: Set<string>
+  phoneNumberId: string | null
   items: Array<{
     leadName: string
     followUpValue: string
@@ -33,10 +37,11 @@ export class ReminderCronService {
     private readonly followUpRepository: Repository<FollowUp>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepository: Repository<UserInformations>,
-    private readonly mailService: MailService
+    private readonly mailService: MailService,
+    private readonly automationMessagingService: AutomationMessagingService
   ) {}
 
-  @Cron('0 6 * * *')
+  @Cron('0 0 7 * * *')
   async sendDailyFollowUpReminders(): Promise<void> {
     await this.dispatchDailyFollowUpReminders('cron')
   }
@@ -133,15 +138,34 @@ export class ReminderCronService {
       }
 
       const existingGroup = groupedByUser.get(userId) ?? {
-        recipients: new Set<string>(),
+        emailRecipients: new Set<string>(),
+        whatsappRecipients: new Set<string>(),
+        phoneNumberId: userInformations.phoneNumberId?.trim() || null,
         items: []
       }
 
-      for (const email of userInformations.notificationEmails) {
-        const normalizedEmail = email.trim().toLowerCase()
+      const enabledChannels =
+        userInformations.notificationPreferences?.[
+          NotificationType.DAILY_FOLLOWUP_SUMMARY
+        ] ?? []
 
-        if (normalizedEmail) {
-          existingGroup.recipients.add(normalizedEmail)
+      if (enabledChannels.includes(NotificationChannel.EMAIL)) {
+        for (const email of userInformations.notificationEmails) {
+          const normalizedEmail = email.trim().toLowerCase()
+
+          if (normalizedEmail) {
+            existingGroup.emailRecipients.add(normalizedEmail)
+          }
+        }
+      }
+
+      if (enabledChannels.includes(NotificationChannel.WHATSAPP)) {
+        for (const number of userInformations.notificationWhatsAppNumbers) {
+          const normalizedNumber = number.trim()
+
+          if (normalizedNumber) {
+            existingGroup.whatsappRecipients.add(normalizedNumber)
+          }
         }
       }
 
@@ -158,21 +182,54 @@ export class ReminderCronService {
     let followUpsIncluded = 0
 
     for (const [userId, group] of groupedByUser.entries()) {
-      const recipients = Array.from(group.recipients)
+      const emailRecipients = Array.from(group.emailRecipients)
+      const whatsappRecipients = Array.from(group.whatsappRecipients)
 
-      if (!recipients.length) {
+      if (!emailRecipients.length && !whatsappRecipients.length) {
         this.logger.warn(
-          `Skipping daily follow-up reminder for user ${userId} because notificationEmails is empty`
+          `Skipping daily follow-up reminder for user ${userId} because DAILY_FOLLOWUP_SUMMARY channels are not configured`
         )
         continue
       }
 
-      await this.mailService.send({
-        from: 'Strativy Flow <no-reply@strativyflow.com>',
-        to: recipients,
-        subject: 'Lembrete de follow-ups do dia',
-        html: this.buildReminderHtml(group.items)
-      })
+      if (emailRecipients.length) {
+        await this.mailService.send({
+          from: 'Strativy Flow <no-reply@strativyflow.com>',
+          to: emailRecipients,
+          subject: 'Lembrete de follow-ups do dia',
+          html: this.buildReminderHtml(group.items)
+        })
+      }
+
+      if (whatsappRecipients.length) {
+        const phoneNumberId =
+          group.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()
+
+        if (!phoneNumberId) {
+          this.logger.warn(
+            `Skipping DAILY_FOLLOWUP_SUMMARY WhatsApp for user ${userId} because phoneNumberId is missing`
+          )
+        } else {
+          const message = this.buildReminderWhatsAppMessage(group.items)
+          const whatsappResults = await Promise.allSettled(
+            whatsappRecipients.map((recipient) =>
+              this.automationMessagingService.sendWhatsAppMessage(
+                recipient,
+                message,
+                phoneNumberId
+              )
+            )
+          )
+
+          const successCount = whatsappResults.filter(
+            (result) => result.status === 'fulfilled'
+          ).length
+
+          this.logger.log(
+            `DAILY_FOLLOWUP_SUMMARY WhatsApp dispatch for user ${userId}: success=${successCount}/${whatsappRecipients.length}`
+          )
+        }
+      }
 
       usersNotified += 1
       followUpsIncluded += group.items.length
@@ -212,6 +269,21 @@ export class ReminderCronService {
       '<p>Segue a lista de follow-ups pendentes para hoje:</p>',
       `<ul>${listItems}</ul>`
     ].join('')
+  }
+
+  private buildReminderWhatsAppMessage(
+    items: Array<{ leadName: string; followUpValue: string; dueAt: Date }>
+  ): string {
+    const lines = items.map((item) => {
+      const dueAtLabel = item.dueAt.toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+
+      return `- ${item.leadName}: ${item.followUpValue} (${dueAtLabel})`
+    })
+
+    return ['Follow-ups do dia', ...lines].join('\n')
   }
 
   private escapeHtml(value: string): string {

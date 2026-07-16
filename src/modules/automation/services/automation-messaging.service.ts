@@ -34,21 +34,42 @@ export class AutomationMessagingService {
     content: string,
     phoneNumberId?: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
-    return axios.post(
-      `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to,
-        type: 'text',
-        text: { body: content }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      }
+    this.logger.log(
+      `Sending WhatsApp message via automation service to=${to}, phoneNumberId=${phoneNumberId ?? 'missing'}`
     )
+
+    try {
+      const response = await axios.post<WhatsAppSendMessageResponse>(
+        `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to,
+          type: 'text',
+          text: { body: content }
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+
+      this.logger.log(
+        `WhatsApp message sent via automation service to=${to}, whatsappMessageId=${response.data?.messages?.[0]?.id ?? 'unknown'}`
+      )
+
+      return { data: response.data }
+    } catch (error) {
+      const axiosError = error as { response?: { status?: number; data?: unknown } }
+      this.logger.error(
+        `Failed to send WhatsApp message via automation service to=${to}, status=${axiosError.response?.status ?? 'unknown'}, error=${error instanceof Error ? error.message : String(error)}`
+      )
+      this.logger.error(
+        `WhatsApp API error response for to=${to}: ${JSON.stringify(axiosError.response?.data ?? null)}`
+      )
+      throw error
+    }
   }
 
   async persistOutboundMessage(params: {

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { AutomationModule } from '../automation/automation.module'
 import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead } from '../leads/entities/lead.entity'
 import { MailModule } from '../mail/mail.module'
@@ -13,6 +14,7 @@ import { ReminderCronService } from './reminder-cron.service'
 @Module({
   imports: [
     TypeOrmModule.forFeature([FollowUp, Negotiation, Lead, UserInformations]),
+    AutomationModule,
     MailModule
   ],
   controllers: [ReminderController],

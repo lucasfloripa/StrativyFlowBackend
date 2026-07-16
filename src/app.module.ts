@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
+import { ScheduleModule } from '@nestjs/schedule'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { DashboardModule } from './modules/dashboard/dashboard.module'
@@ -17,6 +18,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
       isGlobal: true,
       envFilePath: `.env.${process.env.NODE_ENV || 'dev'}`
     }),
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
