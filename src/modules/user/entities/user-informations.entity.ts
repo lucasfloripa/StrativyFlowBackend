@@ -21,8 +21,8 @@ export class UserInformations {
   @Column({ type: 'varchar', nullable: true })
   name?: string | null
 
-  @Column({ type: 'varchar' })
-  email!: string
+  @Column({ type: 'varchar', nullable: true })
+  email?: string | null
 
   @Column()
   phoneNumber!: string
