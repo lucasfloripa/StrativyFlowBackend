@@ -15,6 +15,8 @@ import {
 import { FollowUp } from '../../followup/entities/followup.entity'
 import { Lead } from '../../leads/entities/lead.entity'
 
+import { NegotiationAttachment } from './negotiation-attachment.entity'
+
 export enum NegotiationStage {
   NEW = 'NEW',
   CONTACTED = 'CONTACTED',
@@ -64,6 +66,12 @@ export class Negotiation {
 
   @OneToMany(() => FollowUp, (followUp) => followUp.negotiation)
   followUps!: FollowUp[]
+
+  @OneToMany(
+    () => NegotiationAttachment,
+    (attachment) => attachment.negotiation
+  )
+  attachments!: NegotiationAttachment[]
 
   @Column({
     type: 'text',

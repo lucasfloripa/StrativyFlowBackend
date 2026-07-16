@@ -9,6 +9,7 @@ import { LeadsModule } from './modules/leads/leads.module'
 import { NegotiationModule } from './modules/negotiation/negotiation.module'
 import { NotificationModule } from './modules/notification/notification.module'
 import { RabbitModule } from './modules/rabbit/rabbit.module'
+import { StorageModule } from './modules/storage/storage.module'
 import { UserModule } from './modules/user/user.module'
 import { WebhookModule } from './modules/webhook/webhook.module'
 
@@ -49,6 +50,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
     NegotiationModule,
     NotificationModule,
     RabbitModule,
+    StorageModule,
     UserModule,
     WebhookModule
   ],
