@@ -17,7 +17,11 @@ export enum MessageType {
   IMAGE = 'image',
   AUDIO = 'audio',
   VIDEO = 'video',
-  DOCUMENT = 'document'
+  DOCUMENT = 'document',
+  STICKER = 'sticker',
+  LOCATION = 'location',
+  CONTACT = 'contact',
+  REACTION = 'reaction'
 }
 
 export enum MessageStatus {
@@ -57,6 +61,24 @@ export class Message {
 
   @Column({ type: 'varchar', nullable: true, unique: true })
   whatsappMessageId?: string | null
+
+  @Column({ type: 'varchar', nullable: true })
+  metaMediaId?: string | null
+
+  @Column({ type: 'varchar', nullable: true })
+  mediaUrl?: string | null
+
+  @Column({ type: 'varchar', nullable: true })
+  mimeType?: string | null
+
+  @Column({ type: 'bigint', nullable: true })
+  mediaSize?: number | null
+
+  @Column({ type: 'varchar', nullable: true })
+  mediaSha256?: string | null
+
+  @Column({ type: 'varchar', nullable: true })
+  fileName?: string | null
 
   @Column({
     type: 'enum',

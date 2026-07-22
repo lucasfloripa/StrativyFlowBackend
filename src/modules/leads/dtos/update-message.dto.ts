@@ -1,22 +1,37 @@
 import {
   IsEnum,
-  IsNotEmpty,
   IsNumber,
   IsObject,
   IsOptional,
   IsString
 } from 'class-validator'
 
-import { MessageType } from '../entities/message.entity'
+import {
+  MessageDirection,
+  MessageStatus,
+  MessageType
+} from '../entities/message.entity'
 
-export class SendLeadMessageDto {
+export class UpdateMessageDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  content!: string
+  leadId?: string
+
+  @IsOptional()
+  @IsEnum(MessageDirection)
+  direction?: MessageDirection
+
+  @IsOptional()
+  @IsString()
+  content?: string | null
 
   @IsOptional()
   @IsEnum(MessageType)
   type?: MessageType
+
+  @IsOptional()
+  @IsString()
+  whatsappMessageId?: string | null
 
   @IsOptional()
   @IsString()
@@ -41,6 +56,10 @@ export class SendLeadMessageDto {
   @IsOptional()
   @IsString()
   fileName?: string | null
+
+  @IsOptional()
+  @IsEnum(MessageStatus)
+  status?: MessageStatus | null
 
   @IsOptional()
   @IsObject()

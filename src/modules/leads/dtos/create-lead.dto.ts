@@ -36,6 +36,10 @@ export class CreateLeadDto {
   source?: string
 
   @IsOptional()
+  @IsString()
+  location?: string
+
+  @IsOptional()
   @IsObject()
   socialLinks?: Partial<Record<LeadSocialLinks, string>> | null
 

@@ -18,6 +18,7 @@ export enum LeadState {
 export enum LeadFlowState {
   NEW = 'NEW',
   ASKING_NAME = 'ASKING_NAME',
+  ASKING_LOCATION = 'ASKING_LOCATION',
   ASKING_CONTEXT = 'ASKING_CONTEXT',
   IN_CONVERSATION = 'IN_CONVERSATION'
 }
@@ -54,6 +55,9 @@ export class Lead {
 
   @Column({ nullable: true })
   email?: string
+
+  @Column({ nullable: true })
+  location?: string
 
   @Column({ nullable: true })
   source?: string

@@ -1,6 +1,7 @@
 import {
   IsDateString,
   IsEnum,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID
@@ -15,7 +16,19 @@ export class UpdateFollowUpDto {
 
   @IsOptional()
   @IsString()
-  value?: string
+  title?: string
+
+  @IsOptional()
+  @IsString()
+  description?: string
+
+  @IsOptional()
+  @IsUUID()
+  templateId?: string
+
+  @IsOptional()
+  @IsObject()
+  templateVariables?: Record<string, unknown>
 
   @IsOptional()
   @IsDateString()

@@ -4,6 +4,7 @@ import {
   NotFoundException
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
+import { basename } from 'path'
 import { extname } from 'path'
 import { randomUUID } from 'crypto'
 import { Repository } from 'typeorm'
@@ -55,7 +56,7 @@ export class NegotiationAttachmentService {
   ): Promise<NegotiationAttachmentResponseDto> {
     const negotiation = await this.negotiationRepository.findOne({
       where: { id: negotiationId },
-      select: { id: true }
+      select: { id: true, leadId: true }
     })
 
     if (!negotiation) {
@@ -65,7 +66,12 @@ export class NegotiationAttachmentService {
     this.validateUploadFile(file)
 
     const extension = this.extractFileExtension(file.originalname)
-    const key = this.buildStorageKey(negotiationId, extension)
+    const key = this.buildStorageKey(
+      negotiation.leadId,
+      negotiationId,
+      file.originalname,
+      extension
+    )
 
     const uploadResult = await this.storageService.uploadFile(file, { key })
 
@@ -168,8 +174,15 @@ export class NegotiationAttachmentService {
     return extension
   }
 
-  private buildStorageKey(negotiationId: string, extension: string): string {
-    return `negotiations/${negotiationId}/${randomUUID()}.${extension}`
+  private buildStorageKey(
+    leadId: string,
+    negotiationId: string,
+    originalName: string,
+    extension: string
+  ): string {
+    const fileName = basename(originalName).trim() || `${randomUUID()}.${extension}`
+
+    return `leads/${leadId}/negotiations/${negotiationId}/attachments/${fileName}`
   }
 
   private async findAttachmentOrFail(

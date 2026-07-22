@@ -4,7 +4,10 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 import { AutomationModule } from '../automation/automation.module'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
+import { LeadsModule } from '../leads/leads.module'
 import { RabbitModule } from '../rabbit/rabbit.module'
+import { RealtimeModule } from '../realtime/realtime.module'
+import { StorageModule } from '../storage/storage.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { ConversationContextBuilder } from './flow/conversation-context.builder'
@@ -17,7 +20,10 @@ import { WebhookService } from './webhook.service'
   imports: [
     TypeOrmModule.forFeature([Lead, Message, UserInformations]),
     AutomationModule,
-    RabbitModule
+    LeadsModule,
+    RabbitModule,
+    RealtimeModule,
+    StorageModule
   ],
   providers: [
     WebhookService,

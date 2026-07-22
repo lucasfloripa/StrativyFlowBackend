@@ -24,16 +24,35 @@ export class NegotiationService {
 
   private buildDefaultFollowUps(negotiationId: string, createdAt: Date): FollowUp[] {
     const followUpConfigs = [
-      { value: 'Follow-up 1', hoursToAdd: 24 },
-      { value: 'Follow-up 2', hoursToAdd: 72 },
-      { value: 'Follow-up 3', hoursToAdd: 24 * 7 },
-      { value: 'Follow-up 4', hoursToAdd: 24 * 14 }
+      {
+        title: 'Primeiro contato',
+        description: 'Retomar contato inicial com o lead.',
+        hoursToAdd: 24
+      },
+      {
+        title: 'Entender objeções',
+        description: 'Mapear dúvidas e objeções do lead.',
+        hoursToAdd: 72
+      },
+      {
+        title: 'Reforçar valor',
+        description: 'Reforçar os principais benefícios da proposta.',
+        hoursToAdd: 24 * 7
+      },
+      {
+        title: 'Última tentativa',
+        description: 'Realizar última tentativa de avanço da negociação.',
+        hoursToAdd: 24 * 14
+      }
     ]
 
     return followUpConfigs.map((followUpConfig) =>
       this.followUpRepository.create({
         negotiationId,
-        value: followUpConfig.value,
+        title: followUpConfig.title,
+        description: followUpConfig.description,
+        templateId: null,
+        templateVariables: {},
         dueAt: this.createFollowUpDueDate(createdAt, followUpConfig.hoursToAdd),
         status: FollowUpStatus.PENDING,
         completedAt: null,

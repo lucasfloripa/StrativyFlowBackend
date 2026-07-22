@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
 import { RabbitModule } from '../rabbit/rabbit.module'
+import { RealtimeModule } from '../realtime/realtime.module'
+import { StorageModule } from '../storage/storage.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { Lead } from './entities/lead.entity'
@@ -13,7 +15,9 @@ import { LeadsService } from './leads.service'
 @Module({
   imports: [
     TypeOrmModule.forFeature([Lead, Message, UserInformations, FollowUp]),
-    RabbitModule
+    RabbitModule,
+    RealtimeModule,
+    StorageModule
   ],
   controllers: [LeadsController],
   providers: [LeadsService],

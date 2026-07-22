@@ -3,8 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { CreateFollowUpDto } from '../dto/create-followup.dto'
+import { FollowUpResponseDto } from '../dto/followup-response.dto'
 import { UpdateFollowUpDto } from '../dto/update-followup.dto'
 import { FollowUp } from '../entities/followup.entity'
+import { mapFollowUpToResponseDto } from '../mappers/followup-response.mapper'
 
 @Injectable()
 export class FollowUpService {
@@ -13,27 +15,49 @@ export class FollowUpService {
     private readonly followUpRepository: Repository<FollowUp>
   ) {}
 
-  async create(dto: CreateFollowUpDto): Promise<FollowUp> {
+  async create(dto: CreateFollowUpDto): Promise<FollowUpResponseDto> {
     const followUp = this.followUpRepository.create({
       negotiationId: dto.negotiationId,
-      value: dto.value,
+      title: dto.title,
+      description: dto.description ?? null,
+      templateId: dto.templateId ?? null,
+      templateVariables: dto.templateVariables ?? {},
       dueAt: new Date(dto.dueAt),
       status: dto.status,
       completedAt: dto.completedAt ? new Date(dto.completedAt) : null,
       reminder1hSentAt: null
     })
 
-    return await this.followUpRepository.save(followUp)
+    const savedFollowUp = await this.followUpRepository.save(followUp)
+    const reloadedFollowUp = await this.findEntityById(savedFollowUp.id)
+
+    return mapFollowUpToResponseDto(reloadedFollowUp)
   }
 
-  async findAll(): Promise<FollowUp[]> {
-    return await this.followUpRepository.find({
+  async findAll(): Promise<FollowUpResponseDto[]> {
+    const followUps = await this.followUpRepository.find({
+      relations: {
+        template: true
+      },
       order: { createdAt: 'DESC' }
     })
+
+    return followUps.map(mapFollowUpToResponseDto)
   }
 
-  async findOne(id: string): Promise<FollowUp> {
-    const followUp = await this.followUpRepository.findOne({ where: { id } })
+  async findOne(id: string): Promise<FollowUpResponseDto> {
+    const followUp = await this.findEntityById(id)
+
+    return mapFollowUpToResponseDto(followUp)
+  }
+
+  private async findEntityById(id: string): Promise<FollowUp> {
+    const followUp = await this.followUpRepository.findOne({
+      where: { id },
+      relations: {
+        template: true
+      }
+    })
 
     if (!followUp) {
       throw new NotFoundException(`FollowUp ${id} not found`)
@@ -42,8 +66,8 @@ export class FollowUpService {
     return followUp
   }
 
-  async update(id: string, dto: UpdateFollowUpDto): Promise<FollowUp> {
-    const followUp = await this.findOne(id)
+  async update(id: string, dto: UpdateFollowUpDto): Promise<FollowUpResponseDto> {
+    const followUp = await this.findEntityById(id)
 
     followUp.reminder1hSentAt = null
 
@@ -51,8 +75,20 @@ export class FollowUpService {
       followUp.negotiationId = dto.negotiationId
     }
 
-    if (dto.value !== undefined) {
-      followUp.value = dto.value
+    if (dto.title !== undefined) {
+      followUp.title = dto.title
+    }
+
+    if (dto.description !== undefined) {
+      followUp.description = dto.description ?? null
+    }
+
+    if (dto.templateId !== undefined) {
+      followUp.templateId = dto.templateId ?? null
+    }
+
+    if (dto.templateVariables !== undefined) {
+      followUp.templateVariables = dto.templateVariables ?? {}
     }
 
     if (dto.dueAt !== undefined) {
@@ -67,14 +103,17 @@ export class FollowUpService {
       followUp.completedAt = dto.completedAt ? new Date(dto.completedAt) : null
     }
 
-    return await this.followUpRepository.save(followUp)
+    const savedFollowUp = await this.followUpRepository.save(followUp)
+    const reloadedFollowUp = await this.findEntityById(savedFollowUp.id)
+
+    return mapFollowUpToResponseDto(reloadedFollowUp)
   }
 
-  async remove(id: string): Promise<FollowUp> {
-    const followUp = await this.findOne(id)
+  async remove(id: string): Promise<FollowUpResponseDto> {
+    const followUp = await this.findEntityById(id)
 
     await this.followUpRepository.remove(followUp)
 
-    return followUp
+    return mapFollowUpToResponseDto(followUp)
   }
 }

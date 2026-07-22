@@ -22,8 +22,11 @@ import {
   MessageStatus,
   MessageType
 } from '../leads/entities/message.entity'
+import { LeadsService } from '../leads/leads.service'
 import { NotificationChannel, NotificationType } from '../notification/enums'
 import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { RealtimeService } from '../realtime/realtime.service'
+import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { classifyConversation } from './flow/conversation-classifier'
@@ -48,6 +51,15 @@ type WhatsAppSendMessageResponse = {
   }[]
 }
 
+type WhatsAppMediaResponse = {
+  url: string
+  mime_type?: string
+  sha256?: string
+  file_size?: number
+  id: string
+  messaging_product?: string
+}
+
 type WhatsAppMessageStatusType = 'sent' | 'delivered' | 'read'
 
 type WhatsAppMessageStatus = {
@@ -55,6 +67,35 @@ type WhatsAppMessageStatus = {
   status?: string
   timestamp?: string
   recipient_id?: string
+}
+
+type WhatsAppAudioMessage = {
+  id?: string
+  mime_type?: string
+  sha256?: string
+  voice?: boolean
+}
+
+type WhatsAppImageMessage = {
+  id?: string
+  mime_type?: string
+  sha256?: string
+  caption?: string
+}
+
+type WhatsAppVideoMessage = {
+  id?: string
+  mime_type?: string
+  sha256?: string
+  caption?: string
+}
+
+type WhatsAppDocumentMessage = {
+  id?: string
+  filename?: string
+  mime_type?: string
+  sha256?: string
+  caption?: string
 }
 
 export type WhatsAppWebhookPayload = {
@@ -73,6 +114,10 @@ export type WhatsAppWebhookPayload = {
           text?: {
             body?: string
           }
+          audio?: WhatsAppAudioMessage
+          image?: WhatsAppImageMessage
+          video?: WhatsAppVideoMessage
+          document?: WhatsAppDocumentMessage
           id?: string
           referral?: {
             source_type?: string
@@ -100,6 +145,10 @@ type WhatsAppInboundMessage = {
   text?: {
     body?: string
   }
+  audio?: WhatsAppAudioMessage
+  image?: WhatsAppImageMessage
+  video?: WhatsAppVideoMessage
+  document?: WhatsAppDocumentMessage
   id?: string
   referral?: {
     source_type?: string
@@ -123,7 +172,10 @@ export class WebhookService {
     private readonly leadFlowEngine: LeadFlowEngine,
     private readonly leadFlowActionExecutor: LeadFlowActionExecutor,
     private readonly automationTriggerDispatcher: AutomationTriggerDispatcher,
-    private readonly rabbitPublisherService: RabbitPublisherService
+    private readonly rabbitPublisherService: RabbitPublisherService,
+    private readonly storageService: StorageService,
+    private readonly leadsService: LeadsService,
+    private readonly realtimeService: RealtimeService
   ) {}
 
   private readonly logger = new Logger(WebhookService.name)
@@ -133,13 +185,14 @@ export class WebhookService {
     LeadFlowState[]
   > = {
     [LeadFlowState.NEW]: [LeadFlowState.ASKING_NAME],
-    [LeadFlowState.ASKING_NAME]: [LeadFlowState.ASKING_CONTEXT],
+    [LeadFlowState.ASKING_NAME]: [LeadFlowState.ASKING_LOCATION],
+    [LeadFlowState.ASKING_LOCATION]: [LeadFlowState.ASKING_CONTEXT],
     [LeadFlowState.ASKING_CONTEXT]: [LeadFlowState.IN_CONVERSATION],
     [LeadFlowState.IN_CONVERSATION]: []
   }
 
   async handleIncomingMessage(payload: WhatsAppWebhookPayload) {
-    this.logger.debug(
+    this.logger.log(
       'Received WhatsApp webhook payload:',
       JSON.stringify(payload)
     )
@@ -192,6 +245,8 @@ export class WebhookService {
       from = message?.from?.trim()
       inboundMessageId = message?.id?.trim()
       const text = message?.text?.body?.trim() ?? null
+      const resolvedMessageType = this.resolveMessageType(message?.type)
+      const isTextMessage = resolvedMessageType === MessageType.TEXT
       const isFromAd = message?.referral?.source_type === 'ad'
       const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
 
@@ -224,14 +279,7 @@ export class WebhookService {
         `New inbound message accepted. whatsappMessageId=${inboundMessageId} from=${from}`
       )
 
-      if (message?.type !== 'text') {
-        this.logger.warn(
-          `Stopping webhook processing: inbound message ${inboundMessageId} has unsupported type ${message?.type ?? 'unknown'}`
-        )
-        return { status: 'ignored_non_text' }
-      }
-
-      if (!text) {
+      if (isTextMessage && !text) {
         this.logger.warn(
           `Stopping webhook processing: inbound text message ${inboundMessageId} has empty body`
         )
@@ -333,6 +381,15 @@ export class WebhookService {
           notificationPreferences: userInformations.notificationPreferences
         })
 
+        if (!isTextMessage) {
+          return this.processInboundMediaMessage({
+            lead,
+            userId: userInformations.userId,
+            message,
+            inboundMessageId
+          })
+        }
+
         const automationTriggerContext: AutomationTriggerContext = {
           triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
           leadId: lead.id,
@@ -356,12 +413,16 @@ export class WebhookService {
           }
         })
 
-        await this.persistMessage({
+        const persistedMessageResult = await this.persistMessage({
           leadId: lead.id,
           leadName: lead.name,
           userId: userInformations.userId,
           message
         })
+
+        if (persistedMessageResult.wasCreated) {
+          await this.emitMessageCreated(persistedMessageResult.message)
+        }
 
         const reply = 'Olá! 👋 \nComo podemos te chamar?'
 
@@ -384,6 +445,15 @@ export class WebhookService {
         `[7] Persisting inbound message ${inboundMessageId} for lead ${lead.id}`
       )
 
+      if (!isTextMessage) {
+        return this.processInboundMediaMessage({
+          lead,
+          userId: userInformations.userId,
+          message,
+          inboundMessageId
+        })
+      }
+
       const automationTriggerContext: AutomationTriggerContext = {
         triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
         leadId: lead.id,
@@ -405,12 +475,16 @@ export class WebhookService {
         }
       })
 
-      await this.persistMessage({
+      const persistedMessageResult = await this.persistMessage({
         leadId: lead.id,
         leadName: lead.name,
         userId: userInformations.userId,
         message
       })
+
+      if (persistedMessageResult.wasCreated) {
+        await this.emitMessageCreated(persistedMessageResult.message)
+      }
 
       // CONTINUAÇÃO DA CONVERSA (já virou lead)
 
@@ -454,7 +528,7 @@ export class WebhookService {
 
       const flowResult: LeadFlowProcessResult = this.leadFlowEngine.process({
         lead,
-        messageText: text,
+        messageText: text ?? '',
         conversationContext
       })
 
@@ -611,8 +685,72 @@ export class WebhookService {
     leadName?: string
     userId: string
     message: WhatsAppInboundMessage
-  }): Promise<void> {
+  }): Promise<{ message: Message; wasCreated: boolean }> {
     const { leadId, leadName, userId, message } = params
+
+    const resolvedMessageType = this.resolveMessageType(message?.type)
+    let content: string | null = message?.text?.body ?? null
+    let metaMediaId: string | null = null
+    let mimeType: string | null = null
+    let mediaSha256: string | null = null
+    let fileName: string | null = null
+    let metadata: Record<string, unknown> | null = message as Record<
+      string,
+      unknown
+    >
+
+    switch (resolvedMessageType) {
+      case MessageType.AUDIO:
+        content = null
+        metaMediaId = message?.audio?.id ?? null
+        mimeType = message?.audio?.mime_type ?? null
+        mediaSha256 = message?.audio?.sha256 ?? null
+        metadata =
+          (message?.audio as Record<string, unknown> | undefined) ?? null
+        break
+      case MessageType.IMAGE:
+        content = message?.image?.caption ?? null
+        metaMediaId = message?.image?.id ?? null
+        mimeType = message?.image?.mime_type ?? null
+        mediaSha256 = message?.image?.sha256 ?? null
+        metadata =
+          (message?.image as Record<string, unknown> | undefined) ?? null
+        break
+      case MessageType.VIDEO:
+        content = message?.video?.caption ?? null
+        metaMediaId = message?.video?.id ?? null
+        mimeType = message?.video?.mime_type ?? null
+        mediaSha256 = message?.video?.sha256 ?? null
+        metadata =
+          (message?.video as Record<string, unknown> | undefined) ?? null
+        break
+      case MessageType.DOCUMENT:
+        content = message?.document?.caption ?? null
+        metaMediaId = message?.document?.id ?? null
+        mimeType = message?.document?.mime_type ?? null
+        mediaSha256 = message?.document?.sha256 ?? null
+        fileName = message?.document?.filename ?? null
+        metadata =
+          (message?.document as Record<string, unknown> | undefined) ?? null
+        break
+      case MessageType.TEXT:
+      default:
+        break
+    }
+
+    const inboundMessage = this.messageRepo.create({
+      leadId,
+      direction: MessageDirection.INBOUND,
+      content,
+      type: resolvedMessageType,
+      whatsappMessageId: message?.id ?? null,
+      metaMediaId,
+      mimeType,
+      mediaSha256,
+      fileName,
+      metadata,
+      externalTimestamp: this.parseWhatsAppTimestamp(message?.timestamp)
+    })
 
     try {
       const whatsappMessageId = message?.id
@@ -626,38 +764,41 @@ export class WebhookService {
           this.logger.debug(
             `Inbound WhatsApp message ${whatsappMessageId} already persisted for lead ${leadId}`
           )
-          return
+          return {
+            message: alreadyExists,
+            wasCreated: false
+          }
         }
       }
 
-      const inboundMessage = this.messageRepo.create({
-        leadId,
-        direction: MessageDirection.INBOUND,
-        content: message?.text?.body ?? null,
-        type: this.resolveMessageType(message?.type),
-        whatsappMessageId: whatsappMessageId ?? null,
-        metadata: message as Record<string, unknown>,
-        externalTimestamp: this.parseWhatsAppTimestamp(message?.timestamp)
-      })
-
-      await this.messageRepo.save(inboundMessage)
+      const savedMessage = await this.messageRepo.save(inboundMessage)
 
       await this.rabbitPublisherService.publish('message.received', {
-        messageId: inboundMessage.id,
+        messageId: savedMessage.id,
         leadId,
         leadName: leadName ?? null,
         userId,
         organizationId: null,
-        createdAt: inboundMessage.createdAt
+        createdAt: savedMessage.createdAt
       })
 
       this.logger.log(
         `Inbound WhatsApp message persisted for lead ${leadId} with id ${whatsappMessageId ?? 'unknown'}`
       )
+
+      return {
+        message: savedMessage,
+        wasCreated: true
+      }
     } catch (error) {
       this.logger.warn(
         `Failed to persist inbound WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
       )
+
+      return {
+        message: inboundMessage,
+        wasCreated: false
+      }
     }
   }
 
@@ -688,6 +829,112 @@ export class WebhookService {
     } catch (error) {
       this.logger.warn(
         `Failed to persist outbound WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
+      )
+    }
+  }
+
+  private async processInboundMediaMessage(params: {
+    lead: Lead
+    userId: string
+    message: WhatsAppInboundMessage
+    inboundMessageId: string
+  }): Promise<{ status: string; leadId: string }> {
+    const { lead, userId, message, inboundMessageId } = params
+
+    const persistedMessageResult = await this.persistMessage({
+      leadId: lead.id,
+      leadName: lead.name,
+      userId,
+      message
+    })
+
+    const persistedMessage = persistedMessageResult.message
+
+    await this.uploadInboundMedia({
+      message: persistedMessage
+    })
+
+    if (persistedMessageResult.wasCreated) {
+      await this.emitMessageCreated(persistedMessage)
+    }
+
+    lead.lastInboundMessageId = inboundMessageId
+    lead.lastActivityAt = new Date()
+
+    this.logger.log('[10] Saving lead after media message processing')
+    await this.leadRepo.save(lead)
+
+    return { status: 'media_message_processed', leadId: lead.id }
+  }
+
+  private async emitMessageCreated(message: Message): Promise<void> {
+    try {
+      const responseMessage =
+        await this.leadsService.toResponseMessageDto(message)
+
+      this.realtimeService.emitToLead(
+        message.leadId,
+        'message.created',
+        responseMessage
+      )
+
+      this.logger.log(
+        `Realtime event emitted. event=message.created leadId=${message.leadId} messageId=${message.id}`
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Failed to emit realtime event message.created. leadId=${message.leadId} messageId=${message.id} error=${error instanceof Error ? error.message : 'unknown error'}`
+      )
+    }
+  }
+
+  private async uploadInboundMedia(params: {
+    message: Message
+  }): Promise<void> {
+    const { message } = params
+
+    if (!message.id) {
+      this.logger.warn(
+        `Inbound media message has no persisted id. leadId=${message.leadId} whatsappMessageId=${message.whatsappMessageId ?? 'unknown'}`
+      )
+      return
+    }
+
+    if (!message.metaMediaId?.trim()) {
+      this.logger.warn(
+        `Inbound media message has no meta media id. leadId=${message.leadId} messageId=${message.id} whatsappMessageId=${message.whatsappMessageId ?? 'unknown'}`
+      )
+      return
+    }
+
+    try {
+      const mediaInfo = await this.getWhatsAppMediaInfo(message.metaMediaId)
+      const buffer = await this.downloadWhatsAppMedia(mediaInfo.data.url)
+      const mimeType =
+        mediaInfo.data.mime_type?.trim() ||
+        message.mimeType?.trim() ||
+        'application/octet-stream'
+      const extension = this.resolveMediaFileExtension(mimeType)
+      const key = `leads/${message.leadId}/messages/${message.id}.${extension}`
+      const uploadResponse = await this.storageService.uploadFile(
+        {
+          originalname:
+            message.fileName?.trim() || `${message.id}.${extension}`,
+          mimetype: mimeType,
+          size: buffer.length,
+          buffer
+        },
+        { key }
+      )
+
+      message.mediaUrl = uploadResponse.url
+      message.mediaSize = mediaInfo.data.file_size ?? buffer.length
+      message.mimeType = mimeType
+
+      await this.messageRepo.save(message)
+    } catch (error) {
+      this.logger.warn(
+        `Failed to upload inbound media message. leadId=${message.leadId} messageId=${message.id} whatsappMessageId=${message.whatsappMessageId ?? 'unknown'} error=${error instanceof Error ? error.message : 'unknown error'}`
       )
     }
   }
@@ -752,6 +999,29 @@ export class WebhookService {
         }
       }
     )
+  }
+
+  private async getWhatsAppMediaInfo(
+    mediaId: string
+  ): Promise<{ data: WhatsAppMediaResponse }> {
+    return axios.get(`https://graph.facebook.com/v22.0/${mediaId}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    })
+  }
+
+  private async downloadWhatsAppMedia(url: string): Promise<Buffer> {
+    const response = await axios.get<ArrayBuffer>(url, {
+      headers: {
+        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      responseType: 'arraybuffer'
+    })
+
+    return Buffer.from(response.data)
   }
 
   private async notifyNewLeadToConfiguredWhatsAppNumbers(params: {
@@ -835,6 +1105,66 @@ export class WebhookService {
       case MessageType.TEXT:
       default:
         return MessageType.TEXT
+    }
+  }
+
+  private resolveMediaFileExtension(mimeType?: string): string {
+    const normalizedMimeType = mimeType?.trim().toLowerCase()
+
+    if (!normalizedMimeType) {
+      return 'bin'
+    }
+
+    const [rawType] = normalizedMimeType.split(';', 1)
+
+    switch (rawType) {
+      case 'audio/ogg':
+        return 'ogg'
+      case 'audio/mpeg':
+        return 'mp3'
+      case 'audio/mp4':
+        return 'mp4'
+      case 'audio/aac':
+        return 'aac'
+      case 'audio/amr':
+        return 'amr'
+      case 'image/jpeg':
+        return 'jpg'
+      case 'image/png':
+        return 'png'
+      case 'image/webp':
+        return 'webp'
+      case 'image/gif':
+        return 'gif'
+      case 'video/mp4':
+        return 'mp4'
+      case 'application/pdf':
+        return 'pdf'
+      case 'text/plain':
+        return 'txt'
+      case 'text/csv':
+        return 'csv'
+      case 'application/msword':
+        return 'doc'
+      case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+        return 'docx'
+      case 'application/vnd.ms-excel':
+        return 'xls'
+      case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
+        return 'xlsx'
+      case 'application/vnd.ms-powerpoint':
+        return 'ppt'
+      case 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+        return 'pptx'
+      default: {
+        const slashIndex = rawType.indexOf('/')
+
+        if (slashIndex === -1 || slashIndex === rawType.length - 1) {
+          return 'bin'
+        }
+
+        return rawType.slice(slashIndex + 1)
+      }
     }
   }
 

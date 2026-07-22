@@ -2,6 +2,7 @@ import {
   IsDateString,
   IsEnum,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID
@@ -15,7 +16,19 @@ export class CreateFollowUpDto {
 
   @IsString()
   @IsNotEmpty()
-  value!: string
+  title!: string
+
+  @IsOptional()
+  @IsString()
+  description?: string
+
+  @IsOptional()
+  @IsUUID()
+  templateId?: string
+
+  @IsOptional()
+  @IsObject()
+  templateVariables?: Record<string, unknown>
 
   @IsDateString()
   dueAt!: string

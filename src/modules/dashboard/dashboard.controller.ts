@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common'
+import { Controller, Get, Req, UseGuards } from '@nestjs/common'
 import { Request } from 'express'
 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
@@ -17,24 +17,9 @@ export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('dashboard/summary')
-  getDashboardSummary(
-    @Req() req: AuthenticatedRequest,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string
-  ) {
+  getDashboardSummary(@Req() req: AuthenticatedRequest) {
     const userId = req.user.id
 
-    return this.dashboardService.getSummary(userId, startDate, endDate)
-  }
-
-  @Get('dashboard/income')
-  getDashboardIncome(
-    @Req() req: AuthenticatedRequest,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string
-  ) {
-    const userId = req.user.id
-
-    return this.dashboardService.getIncome(userId, startDate, endDate)
+    return this.dashboardService.getSummary(userId)
   }
 }

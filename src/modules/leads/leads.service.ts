@@ -10,14 +10,18 @@ import axios from 'axios'
 import { In, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
+import { mapFollowUpToResponseDto } from '../followup/mappers/followup-response.mapper'
 import {
   Notification,
   NotificationReferenceType
 } from '../notification/entities/notification.entity'
 import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { RealtimeService } from '../realtime/realtime.service'
+import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { CreateLeadDto } from './dtos/create-lead.dto'
+import { ResponseMessageDto } from './dtos/response-message.dto'
 import { UpdateLeadDto } from './dtos/update-lead.dto'
 import {
   Lead,
@@ -52,6 +56,7 @@ export class LeadsService {
     'phone',
     'email',
     'source',
+    'location',
     'leadQualification',
     'state',
     'runtimeMode',
@@ -67,7 +72,9 @@ export class LeadsService {
     private readonly followUpRepo: Repository<FollowUp>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
-    private readonly rabbitPublisherService: RabbitPublisherService
+    private readonly rabbitPublisherService: RabbitPublisherService,
+    private readonly storageService: StorageService,
+    private readonly realtimeService: RealtimeService
   ) {}
 
   async publishRabbitTestMessage(
@@ -293,6 +300,7 @@ export class LeadsService {
       phone: dto.phone,
       email: dto.email,
       source: dto.source,
+      location: dto.location,
       socialLinks: nextSocialLinks,
       leadQualification: nextLeadQualification,
       state: dto.state ?? LeadState.ACTIVE,
@@ -370,13 +378,9 @@ export class LeadsService {
       order: { createdAt: 'ASC' }
     })
 
-    return messages.map((message) => ({
-      id: message.id,
-      direction: message.direction,
-      content: message.content ?? null,
-      type: message.type,
-      createdAt: message.createdAt
-    }))
+    return Promise.all(
+      messages.map((message) => this.toResponseMessageDto(message))
+    )
   }
 
   async getLeadFollowUps(
@@ -406,6 +410,7 @@ export class LeadsService {
 
     const followUps = await this.followUpRepo
       .createQueryBuilder('followUp')
+      .leftJoinAndSelect('followUp.template', 'template')
       .innerJoin('followUp.negotiation', 'negotiation')
       .where('negotiation."leadId" = :leadId', { leadId: lead.id })
       .getMany()
@@ -445,7 +450,7 @@ export class LeadsService {
     const totalPages = Math.max(1, Math.ceil(totalItems / limit))
 
     return {
-      items: paginatedItems,
+      items: paginatedItems.map(mapFollowUpToResponseDto),
       page,
       limit,
       totalItems,
@@ -508,17 +513,98 @@ export class LeadsService {
       })
     )
 
+    const responseMessage = await this.toResponseMessageDto(savedMessage)
+
+    try {
+      this.realtimeService.emitToLead(lead.id, 'message.created', responseMessage)
+
+      this.logger.log(
+        `Realtime event emitted. event=message.created leadId=${lead.id} messageId=${savedMessage.id}`
+      )
+    } catch (error) {
+      this.logger.warn(
+        `Failed to emit realtime event message.created. leadId=${lead.id} messageId=${savedMessage.id} error=${error instanceof Error ? error.message : 'unknown error'}`
+      )
+    }
+
     return {
       success: true,
-      message: {
-        id: savedMessage.id,
-        leadId: savedMessage.leadId,
-        direction: savedMessage.direction,
-        content: savedMessage.content,
-        type: savedMessage.type,
-        whatsappMessageId: savedMessage.whatsappMessageId,
-        createdAt: savedMessage.createdAt
+      message: responseMessage
+    }
+  }
+
+  async toResponseMessageDto(message: Message): Promise<ResponseMessageDto> {
+    const mediaUrl = await this.resolveMessageMediaUrl(message)
+
+    return {
+      id: message.id,
+      leadId: message.leadId,
+      direction: message.direction,
+      content: message.content ?? null,
+      externalTimestamp: message.externalTimestamp?.toISOString() ?? null,
+      type: message.type,
+      whatsappMessageId: message.whatsappMessageId ?? null,
+      mediaUrl,
+      mimeType: message.mimeType ?? null,
+      mediaSize: message.mediaSize ?? null,
+      fileName: message.fileName ?? null,
+      status: message.status ?? null,
+      metadata: message.metadata ?? null,
+      createdAt: message.createdAt.toISOString(),
+      updatedAt: message.updatedAt.toISOString()
+    }
+  }
+
+  private async resolveMessageMediaUrl(message: Message): Promise<string | null> {
+    const mediaKey = this.extractStorageKeyFromMediaUrl(message.mediaUrl)
+
+    if (!mediaKey) {
+      return null
+    }
+
+    try {
+      const response = await this.storageService.generateDownloadPresignedUrl(mediaKey)
+      return response.url
+    } catch (error) {
+      this.logger.warn(
+        `Failed to generate message media download URL. messageId=${message.id} leadId=${message.leadId} error=${error instanceof Error ? error.message : 'unknown error'}`
+      )
+      return null
+    }
+  }
+
+  private extractStorageKeyFromMediaUrl(mediaUrl?: string | null): string | null {
+    if (!mediaUrl?.trim()) {
+      return null
+    }
+
+    try {
+      const bucketName = process.env.R2_BUCKET_NAME?.trim()
+      const parsedUrl = new URL(mediaUrl)
+      const pathSegments = parsedUrl.pathname
+        .split('/')
+        .map((segment) => segment.trim())
+        .filter((segment) => segment.length > 0)
+
+      if (!pathSegments.length) {
+        return null
       }
+
+      if (bucketName) {
+        const bucketIndex = pathSegments.indexOf(bucketName)
+
+        if (bucketIndex >= 0 && bucketIndex < pathSegments.length - 1) {
+          return decodeURIComponent(pathSegments.slice(bucketIndex + 1).join('/'))
+        }
+      }
+
+      if (pathSegments.length > 1) {
+        return decodeURIComponent(pathSegments.slice(1).join('/'))
+      }
+
+      return null
+    } catch {
+      return null
     }
   }
 
@@ -591,6 +677,7 @@ export class LeadsService {
     if (typeof dto.phone !== 'undefined') lead.phone = dto.phone
     if (typeof dto.email !== 'undefined') lead.email = dto.email
     if (typeof dto.source !== 'undefined') lead.source = dto.source
+    if (typeof dto.location !== 'undefined') lead.location = dto.location
     if (typeof nextSocialLinks !== 'undefined') {
       lead.socialLinks = nextSocialLinks
     }

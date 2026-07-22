@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { ScheduleModule } from '@nestjs/schedule'
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { join } from 'path'
 
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { FollowUpModule } from './modules/followup/followup.module'
@@ -9,6 +10,7 @@ import { LeadsModule } from './modules/leads/leads.module'
 import { NegotiationModule } from './modules/negotiation/negotiation.module'
 import { NotificationModule } from './modules/notification/notification.module'
 import { RabbitModule } from './modules/rabbit/rabbit.module'
+import { RealtimeModule } from './modules/realtime/realtime.module'
 import { StorageModule } from './modules/storage/storage.module'
 import { UserModule } from './modules/user/user.module'
 import { WebhookModule } from './modules/webhook/webhook.module'
@@ -39,6 +41,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
           password: dbPassword,
           database: dbName,
           autoLoadEntities: true,
+          migrations: [join(__dirname, '/database/migrations/*{.ts,.js}')],
           synchronize: dbSynchronize,
           ssl: dbSsl ? { rejectUnauthorized: false } : false
         }
@@ -50,6 +53,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
     NegotiationModule,
     NotificationModule,
     RabbitModule,
+    RealtimeModule,
     StorageModule,
     UserModule,
     WebhookModule

@@ -10,10 +10,13 @@ import {
 
 import { Negotiation } from '../../negotiation/entities/negotiation.entity'
 
+import { Template } from './template.entity'
+
 export enum FollowUpStatus {
   PENDING = 'pending',
   DONE = 'done',
-  CANCELED = 'canceled'
+  CANCELED = 'canceled',
+  SKIPPED = 'skipped'
 }
 
 @Entity('followups')
@@ -30,8 +33,27 @@ export class FollowUp {
   @JoinColumn({ name: 'negotiationId' })
   negotiation!: Negotiation
 
-  @Column({ type: 'text' })
-  value!: string
+  @Column({ name: 'value', type: 'text' })
+  title!: string
+
+  @Column({ type: 'text', nullable: true })
+  description?: string | null
+
+  @Column({ nullable: true })
+  templateId?: string | null
+
+  @ManyToOne(() => Template, {
+    nullable: true,
+    onDelete: 'SET NULL'
+  })
+  @JoinColumn({ name: 'templateId' })
+  template?: Template | null
+
+  @Column({
+    type: 'jsonb',
+    default: () => "'{}'::jsonb"
+  })
+  templateVariables!: Record<string, unknown>
 
   @Column({ type: 'timestamptz' })
   dueAt!: Date
@@ -57,4 +79,13 @@ export class FollowUp {
     type: 'timestamptz'
   })
   updatedAt!: Date
+
+  // Backward-compatibility bridge for untouched modules while domain migrates to title.
+  get value(): string {
+    return this.title
+  }
+
+  set value(value: string) {
+    this.title = value
+  }
 }

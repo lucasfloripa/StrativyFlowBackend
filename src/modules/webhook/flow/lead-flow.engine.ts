@@ -61,6 +61,29 @@ export class LeadFlowEngine {
             {
               type: LeadFlowActionType.TRANSITION_STATE,
               payload: {
+                to: LeadFlowState.ASKING_LOCATION
+              }
+            },
+            {
+              type: LeadFlowActionType.SEND_MESSAGE,
+              payload: {
+                content: 'Da onde você fala?'
+              }
+            }
+          ]
+        }
+      case LeadFlowState.ASKING_LOCATION:
+        return {
+          actions: [
+            {
+              type: LeadFlowActionType.UPDATE_LEAD,
+              payload: {
+                location: messageText
+              }
+            },
+            {
+              type: LeadFlowActionType.TRANSITION_STATE,
+              payload: {
                 to: LeadFlowState.ASKING_CONTEXT
               }
             },
