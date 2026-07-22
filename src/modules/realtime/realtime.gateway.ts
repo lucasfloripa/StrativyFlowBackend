@@ -20,6 +20,9 @@ const realtimeCorsOrigins = (process.env.CORS_ORIGIN ?? '')
   .map((value) => value.trim())
   .filter(Boolean)
 
+console.log('Realtime origins:', realtimeCorsOrigins)
+console.log('allowed origins:', realtimeCorsOrigins.join(',') || 'none')
+
 const isAllowedRealtimeOrigin = (origin?: string): boolean => {
   if (!origin) {
     return true
@@ -59,7 +62,9 @@ const isAllowedRealtimeOrigin = (origin?: string): boolean => {
     credentials: true
   }
 })
-export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class RealtimeGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server!: Server
 

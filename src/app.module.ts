@@ -34,9 +34,6 @@ import { WebhookModule } from './modules/webhook/webhook.module'
         const dbSynchronize = config.get<string>('DB_SYNCHRONIZE') === 'true'
         const dbSsl = config.get<string>('DB_SSL') === 'true'
 
-        console.log('NODE_ENV', process.env.NODE_ENV)
-        console.log('CORS_ORIGIN', process.env.CORS_ORIGIN)
-
         return {
           type: 'postgres',
           host: dbHost,
