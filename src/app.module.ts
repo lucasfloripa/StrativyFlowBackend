@@ -1,8 +1,9 @@
+import { join } from 'path'
+
 import { Module } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 import { ScheduleModule } from '@nestjs/schedule'
 import { TypeOrmModule } from '@nestjs/typeorm'
-import { join } from 'path'
 
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { FollowUpModule } from './modules/followup/followup.module'
@@ -32,6 +33,9 @@ import { WebhookModule } from './modules/webhook/webhook.module'
         const dbName = config.get<string>('DB_NAME')
         const dbSynchronize = config.get<string>('DB_SYNCHRONIZE') === 'true'
         const dbSsl = config.get<string>('DB_SSL') === 'true'
+
+        console.log('NODE_ENV', process.env.NODE_ENV)
+        console.log('CORS_ORIGIN', process.env.CORS_ORIGIN)
 
         return {
           type: 'postgres',
