@@ -19,10 +19,6 @@ export class UpdateFollowUpDto {
   title?: string
 
   @IsOptional()
-  @IsString()
-  description?: string
-
-  @IsOptional()
   @IsUUID()
   templateId?: string
 

@@ -19,7 +19,6 @@ export class FollowUpService {
     const followUp = this.followUpRepository.create({
       negotiationId: dto.negotiationId,
       title: dto.title,
-      description: dto.description ?? null,
       templateId: dto.templateId ?? null,
       templateVariables: dto.templateVariables ?? {},
       dueAt: new Date(dto.dueAt),
@@ -77,10 +76,6 @@ export class FollowUpService {
 
     if (dto.title !== undefined) {
       followUp.title = dto.title
-    }
-
-    if (dto.description !== undefined) {
-      followUp.description = dto.description ?? null
     }
 
     if (dto.templateId !== undefined) {

@@ -41,7 +41,9 @@ export class RealtimeGateway
     const rootServer = this.getRootServer(server)
 
     if (!rootServer) {
-      this.logger.warn('Realtime gateway initialization skipped CORS patch because root Socket.IO server was not available')
+      this.logger.warn(
+        'Realtime gateway initialization skipped CORS patch because root Socket.IO server was not available'
+      )
       return
     }
 

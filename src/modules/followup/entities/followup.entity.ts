@@ -36,9 +36,6 @@ export class FollowUp {
   @Column({ name: 'value', type: 'text' })
   title!: string
 
-  @Column({ type: 'text', nullable: true })
-  description?: string | null
-
   @Column({ nullable: true })
   templateId?: string | null
 

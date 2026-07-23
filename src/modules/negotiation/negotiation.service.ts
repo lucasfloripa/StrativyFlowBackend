@@ -26,22 +26,18 @@ export class NegotiationService {
     const followUpConfigs = [
       {
         title: 'Primeiro contato',
-        description: 'Retomar contato inicial com o lead.',
         hoursToAdd: 24
       },
       {
         title: 'Entender objeções',
-        description: 'Mapear dúvidas e objeções do lead.',
         hoursToAdd: 72
       },
       {
         title: 'Reforçar valor',
-        description: 'Reforçar os principais benefícios da proposta.',
         hoursToAdd: 24 * 7
       },
       {
         title: 'Última tentativa',
-        description: 'Realizar última tentativa de avanço da negociação.',
         hoursToAdd: 24 * 14
       }
     ]
@@ -50,7 +46,6 @@ export class NegotiationService {
       this.followUpRepository.create({
         negotiationId,
         title: followUpConfig.title,
-        description: followUpConfig.description,
         templateId: null,
         templateVariables: {},
         dueAt: this.createFollowUpDueDate(createdAt, followUpConfig.hoursToAdd),

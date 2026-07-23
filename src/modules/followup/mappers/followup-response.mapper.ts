@@ -10,7 +10,6 @@ export const mapFollowUpToResponseDto = (
     id: followUp.id,
     negotiationId: followUp.negotiationId,
     title: followUp.title,
-    description: followUp.description ?? null,
     status: followUp.status,
     dueAt: followUp.dueAt.toISOString(),
     completedAt: followUp.completedAt ? followUp.completedAt.toISOString() : null,

@@ -17,7 +17,6 @@ export type FollowUpResponseDto = {
   id: string
   negotiationId: string
   title: string
-  description: string | null
   status: FollowUpStatus
   dueAt: string
   completedAt: string | null
