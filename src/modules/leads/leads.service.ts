@@ -6,7 +6,6 @@ import {
   NotFoundException
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import axios from 'axios'
 import { In, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
@@ -16,7 +15,6 @@ import {
   NotificationReferenceType
 } from '../notification/entities/notification.entity'
 import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
-import { RealtimeService } from '../realtime/realtime.service'
 import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -32,20 +30,8 @@ import {
 } from './entities/lead.entity'
 import {
   Message,
-  MessageDirection,
-  MessageType
+  MessageDirection
 } from './entities/message.entity'
-
-type WhatsAppSendMessageResponse = {
-  messaging_product: string
-  contacts: {
-    input: string
-    wa_id: string
-  }[]
-  messages: {
-    id: string
-  }[]
-}
 
 @Injectable()
 export class LeadsService {
@@ -73,8 +59,7 @@ export class LeadsService {
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
     private readonly rabbitPublisherService: RabbitPublisherService,
-    private readonly storageService: StorageService,
-    private readonly realtimeService: RealtimeService
+    private readonly storageService: StorageService
   ) {}
 
   async publishRabbitTestMessage(
@@ -347,6 +332,14 @@ export class LeadsService {
     return lead
   }
 
+  async findOwnedLeadOrFail(userId: string, id: string): Promise<Lead> {
+    return this.findOneEntity(userId, id)
+  }
+
+  async saveLead(lead: Lead): Promise<Lead> {
+    return this.leadRepo.save(lead)
+  }
+
   async findOne(userId: string, id: string) {
     const lead = await this.findOneEntity(userId, id)
 
@@ -458,81 +451,6 @@ export class LeadsService {
     }
   }
 
-  async sendLeadMessage(
-    userId: string,
-    leadId: string,
-    body: { content: string }
-  ) {
-    const lead = await this.findOneEntity(userId, leadId)
-
-    if (!lead.phone?.trim()) {
-      throw new BadRequestException('Lead phone is missing')
-    }
-
-    const userInformations = lead.userInformationsId
-      ? await this.userInformationsRepo.findOne({
-          where: { id: lead.userInformationsId }
-        })
-      : null
-
-    const phoneNumberId =
-      userInformations?.phoneNumberId?.trim() ||
-      process.env.WHATSAPP_PHONE_NUMBER_ID
-
-    if (!phoneNumberId?.trim()) {
-      throw new BadRequestException(
-        'WhatsApp phoneNumberId is not configured for this lead'
-      )
-    }
-
-    const content = body.content?.trim()
-
-    if (!content) {
-      throw new BadRequestException('Message content is required')
-    }
-
-    const response = await this.sendWhatsAppMessage(
-      lead.phone,
-      content,
-      phoneNumberId
-    )
-
-    lead.lastActivityAt = new Date()
-    await this.leadRepo.save(lead)
-
-    const savedMessage = await this.messageRepo.save(
-      this.messageRepo.create({
-        leadId: lead.id,
-        direction: MessageDirection.OUTBOUND,
-        content,
-        type: MessageType.TEXT,
-        whatsappMessageId: response.data.messages[0]?.id ?? null,
-        metadata: {
-          whatsappResponse: response.data
-        }
-      })
-    )
-
-    const responseMessage = await this.toResponseMessageDto(savedMessage)
-
-    try {
-      this.realtimeService.emitToLead(lead.id, 'message.created', responseMessage)
-
-      this.logger.log(
-        `Realtime event emitted. event=message.created leadId=${lead.id} messageId=${savedMessage.id}`
-      )
-    } catch (error) {
-      this.logger.warn(
-        `Failed to emit realtime event message.created. leadId=${lead.id} messageId=${savedMessage.id} error=${error instanceof Error ? error.message : 'unknown error'}`
-      )
-    }
-
-    return {
-      success: true,
-      message: responseMessage
-    }
-  }
-
   async toResponseMessageDto(message: Message): Promise<ResponseMessageDto> {
     const mediaUrl = await this.resolveMessageMediaUrl(message)
 
@@ -641,28 +559,6 @@ export class LeadsService {
     const orderedStatuses = orderedStatusesByFocus[focus]
 
     return orderedStatuses.indexOf(derivedStatus)
-  }
-
-  private async sendWhatsAppMessage(
-    to: string,
-    reply: string,
-    phoneNumberId: string
-  ): Promise<{ data: WhatsAppSendMessageResponse }> {
-    return axios.post(
-      `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to,
-        type: 'text',
-        text: { body: reply }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    )
   }
 
   async update(userId: string, id: string, dto: UpdateLeadDto) {

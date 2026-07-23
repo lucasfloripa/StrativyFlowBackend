@@ -72,12 +72,6 @@ export class LeadsController {
     return this.leadsService.findOne(userId, id)
   }
 
-  @Get(':id/messages')
-  getMessages(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
-    const userId = req.user.id
-    return this.leadsService.getLeadMessages(userId, id)
-  }
-
   @Get(':id/followups')
   getFollowUps(
     @Param('id') id: string,
@@ -86,16 +80,6 @@ export class LeadsController {
   ) {
     const userId = req.user.id
     return this.leadsService.getLeadFollowUps(userId, id, query)
-  }
-
-  @Post(':id/messages')
-  sendMessage(
-    @Param('id') id: string,
-    @Body() body: { content: string },
-    @Req() req: AuthenticatedRequest
-  ) {
-    const userId = req.user.id
-    return this.leadsService.sendLeadMessage(userId, id, body)
   }
 
   @Patch(':id')
