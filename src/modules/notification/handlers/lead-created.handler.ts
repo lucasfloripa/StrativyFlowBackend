@@ -36,6 +36,7 @@ export class LeadCreatedHandler implements NotificationEventHandler {
     const leadId = this.getString(data, 'leadId')
     const leadName = this.getString(data, 'leadName')
     const description = this.getString(data, 'description') ?? leadName
+    const origin = this.getString(data, 'origin')
 
     if (!userId || !leadId) {
       this.logger.warn(
@@ -55,7 +56,7 @@ export class LeadCreatedHandler implements NotificationEventHandler {
       ] ?? []
 
     this.logger.log(
-      `Processing lead.created for userId=${userId}, leadId=${leadId}, channels=${enabledChannels.join(',') || 'none'}`
+      `Processing lead.created for userId=${userId}, leadId=${leadId}, origin=${origin ?? 'unknown'}, channels=${enabledChannels.join(',') || 'none'}`
     )
 
     if (!this.hasValidLeadName(leadName) || !description) {
@@ -65,7 +66,8 @@ export class LeadCreatedHandler implements NotificationEventHandler {
       return
     }
 
-    if (enabledChannels.includes(NotificationChannel.APP)) {
+    // Only create in-app notification for leads created via webhook
+    if (origin === 'webhook' && enabledChannels.includes(NotificationChannel.APP)) {
       await this.notificationService.createNotification({
         organizationId: this.getString(data, 'organizationId') ?? null,
         userId,
@@ -75,13 +77,17 @@ export class LeadCreatedHandler implements NotificationEventHandler {
         referenceType: NotificationReferenceType.LEAD,
         referenceId: leadId
       })
+    } else if (origin !== 'webhook') {
+      this.logger.log(
+        `Skipping in-app lead.created notification because lead was created via app (origin=${origin ?? 'unknown'}), not webhook. leadId=${leadId}`
+      )
     } else {
       this.logger.log(
         `Skipping in-app lead.created notification because APP channel is disabled for userId=${userId}`
       )
     }
 
-    if (enabledChannels.includes(NotificationChannel.EMAIL)) {
+    if (origin === 'webhook' && enabledChannels.includes(NotificationChannel.EMAIL)) {
       const recipients = Array.from(
         new Set(
           (userInformations?.notificationEmails ?? [])
@@ -108,6 +114,10 @@ export class LeadCreatedHandler implements NotificationEventHandler {
           `Skipping NEW_LEAD email notification because no notificationEmails are configured for userId=${userId}`
         )
       }
+    } else if (origin !== 'webhook') {
+      this.logger.log(
+        `Skipping NEW_LEAD email notification because lead was created via app (origin=${origin ?? 'unknown'}), not webhook. leadId=${leadId}`
+      )
     } else {
       this.logger.log(
         `Skipping NEW_LEAD email notification because EMAIL channel is disabled for userId=${userId}`
