@@ -2,12 +2,15 @@ import { randomUUID } from 'crypto'
 
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 
+import { MessageTemplateService } from '../../followup/services/message-template.service'
+import { WhatsAppTemplateSender } from '../../followup/services/whatsapp-template-sender.service'
 import { StorageService } from '../../storage/storage.service'
 import { MessageType } from '../entities/message.entity'
 import { LeadsService } from '../leads.service'
 
 import { ChatMediaPolicyService } from './chat-media-policy.service'
 import { SendMediaLeadMessageCommand } from './commands/send-media-lead-message.command'
+import { SendTemplateLeadMessageCommand } from './commands/send-template-lead-message.command'
 import { SendTextLeadMessageCommand } from './commands/send-text-lead-message.command'
 import { LeadMessageContextService } from './lead-message-context.service'
 import { LeadMessageDispatchService } from './lead-message-dispatch.service'
@@ -25,7 +28,9 @@ export class LeadMessageApplicationService {
     private readonly leadMessageMetadataService: LeadMessageMetadataService,
     private readonly storageService: StorageService,
     private readonly whatsappOutboundService: WhatsAppOutboundService,
-    private readonly chatMediaPolicyService: ChatMediaPolicyService
+    private readonly chatMediaPolicyService: ChatMediaPolicyService,
+    private readonly messageTemplateService: MessageTemplateService,
+    private readonly whatsAppTemplateSender: WhatsAppTemplateSender
   ) {}
 
   async getLeadMessages(params: { userId: string; leadId: string }) {
@@ -150,5 +155,48 @@ export class LeadMessageApplicationService {
 
       throw error
     }
+  }
+
+  async sendTemplateMessage(command: SendTemplateLeadMessageCommand) {
+    const { lead, destinationPhone } =
+      await this.leadMessageContextService.resolveOutboundContextOrFail(
+        command.userId,
+        command.leadId
+      )
+
+    const template = await this.messageTemplateService.findOne(command.templateId)
+
+    if (!template) {
+      throw new BadRequestException('Template não encontrado')
+    }
+
+    const sendTemplateCommand = {
+      followUpId: randomUUID(),
+      negotiationId: lead.id,
+      leadId: lead.id,
+      templateId: command.templateId,
+      phone: destinationPhone,
+      metaTemplateName: template.metaTemplateName,
+      language: template.language ?? 'pt_BR',
+      templateVariableDefinitions: template.variables ?? [],
+      variables: command.variables
+    }
+
+    await this.whatsAppTemplateSender.sendTemplate(sendTemplateCommand)
+
+    await this.leadMessageContextService.markLeadActivity(lead)
+
+    // Also persist a text message with template source to track it in the chat
+    return this.leadMessageDispatchService.persistAndEmitOutboundMessage({
+      leadId: lead.id,
+      content: template.description ?? null,
+      type: MessageType.TEXT,
+      source: 'template' as any,
+      metadata: {
+        templateId: command.templateId,
+        templateName: template.name,
+        templateVariables: command.variables
+      }
+    })
   }
 }

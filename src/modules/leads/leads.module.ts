@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
+import { FollowUpModule } from '../followup/followup.module'
 import { RabbitModule } from '../rabbit/rabbit.module'
 import { RealtimeModule } from '../realtime/realtime.module'
 import { StorageModule } from '../storage/storage.module'
@@ -24,7 +25,8 @@ import { WhatsAppOutboundService } from './services/whatsapp-outbound.service'
     TypeOrmModule.forFeature([Lead, Message, UserInformations, FollowUp]),
     RabbitModule,
     RealtimeModule,
-    StorageModule
+    StorageModule,
+    FollowUpModule
   ],
   controllers: [LeadsController, LeadMessagesController],
   providers: [

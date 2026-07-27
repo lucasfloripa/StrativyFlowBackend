@@ -14,8 +14,10 @@ import { FileInterceptor } from '@nestjs/platform-express'
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { StorageUploadFile } from '../../storage/storage.service'
 import { SendMediaLeadMessageDto } from '../dtos/send-media-lead-message.dto'
+import { SendTemplateLeadMessageDto } from '../dtos/send-template-lead-message.dto'
 import { SendTextLeadMessageDto } from '../dtos/send-text-lead-message.dto'
 import { SendMediaLeadMessageCommand } from '../services/commands/send-media-lead-message.command'
+import { SendTemplateLeadMessageCommand } from '../services/commands/send-template-lead-message.command'
 import { SendTextLeadMessageCommand } from '../services/commands/send-text-lead-message.command'
 import { LeadMessageApplicationService } from '../services/lead-message-application.service'
 
@@ -80,5 +82,21 @@ export class LeadMessagesController {
     }
 
     return this.leadMessageApplicationService.sendMediaMessage(command)
+  }
+
+  @Post(':leadId/messages/template')
+  sendTemplateMessage(
+    @Param('leadId') leadId: string,
+    @Body() body: SendTemplateLeadMessageDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    const command: SendTemplateLeadMessageCommand = {
+      userId: req.user.id,
+      leadId,
+      templateId: body.templateId,
+      variables: body.variables
+    }
+
+    return this.leadMessageApplicationService.sendTemplateMessage(command)
   }
 }
