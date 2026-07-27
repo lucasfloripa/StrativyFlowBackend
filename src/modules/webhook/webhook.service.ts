@@ -348,17 +348,22 @@ export class WebhookService {
         return { status: 'ignored_duplicate_message' }
       }
 
+      const isButtonMessage = message?.type === 'button'
+
+      // BUTTON MESSAGE: lead deve existir (vem de template Meta com CTA)
+      if (isButtonMessage && !lead) {
+        this.logger.warn(
+          `Stopping webhook processing: button message ${inboundMessageId} from ${from} but lead not found`
+        )
+        return { status: 'ignored_button_message_lead_not_found' }
+      }
+
       // PRIMEIRO CONTATO (via anúncio)
       if (!lead) {
-        const isButtonMessage = message?.type === 'button'
-        const initialFlowState = isButtonMessage
-          ? LeadFlowState.IN_CONVERSATION
-          : LeadFlowState.ASKING_NAME
-
         const leadDraft = this.leadRepo.create({
           userInformationsId: userInformations.id,
           name: 'Lead sem nome',
-          flowState: initialFlowState,
+          flowState: LeadFlowState.ASKING_NAME,
           phone: from,
           source: leadSource,
           state: LeadState.ACTIVE,
@@ -394,7 +399,7 @@ export class WebhookService {
           notificationPreferences: userInformations.notificationPreferences
         })
 
-        if (!isTextMessage && !isButtonMessage) {
+        if (!isTextMessage) {
           return this.processInboundMediaMessage({
             lead,
             userId: userInformations.userId,
@@ -412,13 +417,6 @@ export class WebhookService {
 
         if (persistedMessageResult.wasCreated) {
           await this.emitMessageCreated(persistedMessageResult.message)
-        }
-
-        if (isButtonMessage) {
-          this.logger.log(
-            `[11] Button message processed for new lead ${lead.id}, skipping automation and reply`
-          )
-          return { status: 'created_from_button_message', leadId: lead.id }
         }
 
         const automationTriggerContext: AutomationTriggerContext = {
@@ -454,6 +452,38 @@ export class WebhookService {
 
         lead.lastAutoReplyMessageId =
           response?.data?.messages?.[0]?.id ?? undefined
+
+        this.logger.log('[10] Saving lead after first auto-reply dispatch')
+        await this.leadRepo.save(lead)
+
+        return { status: 'created_and_replied', leadId: lead.id }
+      }
+
+      // BUTTON MESSAGE: lead existe, apenas persistir mensagem
+      if (isButtonMessage) {
+        this.logger.log(
+          `[7] Persisting button message ${inboundMessageId} for existing lead ${lead.id}`
+        )
+
+        const persistedMessageResult = await this.persistMessage({
+          leadId: lead.id,
+          leadName: lead.name,
+          userId: userInformations.userId,
+          message
+        })
+
+        if (persistedMessageResult.wasCreated) {
+          await this.emitMessageCreated(persistedMessageResult.message)
+        }
+
+        lead.lastInboundMessageId = inboundMessageId ?? undefined
+        lead.lastActivityAt = new Date()
+        await this.leadRepo.save(lead)
+
+        this.logger.log(
+          `[11] Button message processed for lead ${lead.id}, skipping automation`
+        )
+        return { status: 'button_message_processed', leadId: lead.id }
       }
 
       this.logger.log(
