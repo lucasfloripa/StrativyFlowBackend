@@ -186,10 +186,19 @@ export class LeadMessageApplicationService {
 
     await this.leadMessageContextService.markLeadActivity(lead)
 
+    // Compile template content by replacing variables with their values
+    let compiledContent = template.description ?? ''
+    if (template.variables && template.variables.length > 0) {
+      template.variables.forEach((variable) => {
+        const value = command.variables[variable.key] ?? ''
+        compiledContent = compiledContent.replace(`{{${variable.key}}}`, value)
+      })
+    }
+
     // Also persist a text message with template source to track it in the chat
     return this.leadMessageDispatchService.persistAndEmitOutboundMessage({
       leadId: lead.id,
-      content: template.description ?? null,
+      content: compiledContent,
       type: MessageType.TEXT,
       source: 'template' as any,
       metadata: {
