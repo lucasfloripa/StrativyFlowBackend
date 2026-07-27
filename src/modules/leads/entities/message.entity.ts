@@ -21,7 +21,8 @@ export enum MessageType {
   STICKER = 'sticker',
   LOCATION = 'location',
   CONTACT = 'contact',
-  REACTION = 'reaction'
+  REACTION = 'reaction',
+  BUTTON = 'button'
 }
 
 export enum MessageStatus {

@@ -118,6 +118,10 @@ export type WhatsAppWebhookPayload = {
           image?: WhatsAppImageMessage
           video?: WhatsAppVideoMessage
           document?: WhatsAppDocumentMessage
+          button?: {
+            text?: string
+            payload?: string
+          }
           id?: string
           referral?: {
             source_type?: string
@@ -149,6 +153,10 @@ type WhatsAppInboundMessage = {
   image?: WhatsAppImageMessage
   video?: WhatsAppVideoMessage
   document?: WhatsAppDocumentMessage
+  button?: {
+    text?: string
+    payload?: string
+  }
   id?: string
   referral?: {
     source_type?: string
@@ -244,7 +252,7 @@ export class WebhookService {
       const phoneNumberId = value?.metadata?.phone_number_id
       from = message?.from?.trim()
       inboundMessageId = message?.id?.trim()
-      const text = message?.text?.body?.trim() ?? null
+      const text = this.resolveInboundMessageContent(message)
       const resolvedMessageType = this.resolveMessageType(message?.type)
       const isTextMessage = resolvedMessageType === MessageType.TEXT
       const isFromAd = message?.referral?.source_type === 'ad'
@@ -689,7 +697,7 @@ export class WebhookService {
     const { leadId, leadName, userId, message } = params
 
     const resolvedMessageType = this.resolveMessageType(message?.type)
-    let content: string | null = message?.text?.body ?? null
+    let content: string | null = this.resolveInboundMessageContent(message)
     let metaMediaId: string | null = null
     let mimeType: string | null = null
     let mediaSha256: string | null = null
@@ -1092,8 +1100,33 @@ export class WebhookService {
     })
   }
 
+  private resolveInboundMessageContent(
+    message: WhatsAppInboundMessage
+  ): string | null {
+    // Tenta extrair conteúdo textual baseado no tipo de mensagem
+    
+    // Para mensagens de texto normais
+    if (message?.text?.body?.trim()) {
+      return message.text.body.trim()
+    }
+    
+    // Para mensagens de botão (template da Meta)
+    if (message?.button?.text?.trim()) {
+      return message.button.text.trim()
+    }
+    
+    if (message?.button?.payload?.trim()) {
+      return message.button.payload.trim()
+    }
+    
+    return null
+  }
+
   private resolveMessageType(type?: string): MessageType {
     switch (type) {
+      case 'button':
+        // Mensagens de botão são tratadas como TEXT
+        return MessageType.TEXT
       case MessageType.IMAGE:
         return MessageType.IMAGE
       case MessageType.AUDIO:
@@ -1102,6 +1135,8 @@ export class WebhookService {
         return MessageType.VIDEO
       case MessageType.DOCUMENT:
         return MessageType.DOCUMENT
+      case MessageType.BUTTON:
+        return MessageType.BUTTON
       case MessageType.TEXT:
       default:
         return MessageType.TEXT
