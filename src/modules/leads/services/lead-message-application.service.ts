@@ -60,6 +60,7 @@ export class LeadMessageApplicationService {
       leadId: lead.id,
       content,
       type: MessageType.TEXT,
+      source: command.source,
       whatsappMessageId: response.data.messages[0]?.id ?? null,
       metadata: {
         whatsappResponse: response.data
@@ -131,6 +132,7 @@ export class LeadMessageApplicationService {
         leadId: lead.id,
         content: normalizedCaption,
         type: this.chatMediaPolicyService.toMessageType(validatedMedia.type),
+        source: command.source,
         mediaUrl: uploadResult.url,
         metaMediaId: uploadedMedia.data.id,
         mimeType: validatedMedia.mimeType,

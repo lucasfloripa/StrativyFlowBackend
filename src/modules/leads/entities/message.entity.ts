@@ -31,6 +31,11 @@ export enum MessageStatus {
   RECEIVED = 'received'
 }
 
+export enum MessageSource {
+  NORMAL = 'normal',
+  TEMPLATE = 'template'
+}
+
 @Entity('messages')
 @Index('idx_messages_lead_id', ['leadId'])
 export class Message {
@@ -86,6 +91,13 @@ export class Message {
     nullable: true
   })
   status?: MessageStatus | null
+
+  @Column({
+    type: 'enum',
+    enum: MessageSource,
+    default: MessageSource.NORMAL
+  })
+  source!: MessageSource
 
   @Column({ type: 'jsonb', nullable: true })
   metadata?: Record<string, unknown> | null

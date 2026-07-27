@@ -464,6 +464,7 @@ export class LeadsService {
       mediaSize: message.mediaSize ?? null,
       fileName: message.fileName ?? null,
       status: message.status ?? null,
+      source: message.source,
       metadata: message.metadata ?? null,
       createdAt: message.createdAt.toISOString(),
       updatedAt: message.updatedAt.toISOString()

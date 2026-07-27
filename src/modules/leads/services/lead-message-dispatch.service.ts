@@ -6,7 +6,8 @@ import { RealtimeService } from '../../realtime/realtime.service'
 import {
   Message,
   MessageDirection,
-  MessageType
+  MessageType,
+  MessageSource
 } from '../entities/message.entity'
 import { LeadsService } from '../leads.service'
 
@@ -25,6 +26,7 @@ export class LeadMessageDispatchService {
     leadId: string
     content: string | null
     type: MessageType
+    source?: MessageSource
     mediaUrl?: string | null
     metaMediaId?: string | null
     mimeType?: string | null
@@ -39,6 +41,7 @@ export class LeadMessageDispatchService {
         direction: MessageDirection.OUTBOUND,
         content: params.content,
         type: params.type,
+        source: params.source ?? MessageSource.NORMAL,
         mediaUrl: params.mediaUrl ?? null,
         metaMediaId: params.metaMediaId ?? null,
         mimeType: params.mimeType ?? null,

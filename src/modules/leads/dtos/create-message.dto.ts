@@ -9,7 +9,8 @@ import {
 import {
   MessageDirection,
   MessageStatus,
-  MessageType
+  MessageType,
+  MessageSource
 } from '../entities/message.entity'
 
 export class CreateMessageDto {
@@ -58,6 +59,10 @@ export class CreateMessageDto {
   @IsOptional()
   @IsEnum(MessageStatus)
   status?: MessageStatus | null
+
+  @IsOptional()
+  @IsEnum(MessageSource)
+  source?: MessageSource
 
   @IsOptional()
   @IsObject()

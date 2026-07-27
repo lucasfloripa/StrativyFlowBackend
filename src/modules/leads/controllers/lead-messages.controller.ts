@@ -54,7 +54,8 @@ export class LeadMessagesController {
     const command: SendTextLeadMessageCommand = {
       userId: req.user.id,
       leadId,
-      content: body.content
+      content: body.content,
+      source: body.source
     }
 
     return this.leadMessageApplicationService.sendTextMessage(command)
@@ -74,6 +75,7 @@ export class LeadMessagesController {
       type: body.type,
       file,
       caption: body.caption,
+      source: body.source,
       metadata: body.metadata
     }
 

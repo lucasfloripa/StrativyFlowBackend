@@ -1,7 +1,8 @@
 import {
   MessageDirection,
   MessageStatus,
-  MessageType
+  MessageType,
+  MessageSource
 } from '../entities/message.entity'
 
 export class ResponseMessageDto {
@@ -17,6 +18,7 @@ export class ResponseMessageDto {
   mediaSize?: number | null
   fileName?: string | null
   status?: MessageStatus | null
+  source!: MessageSource
   metadata?: Record<string, unknown> | null
   createdAt!: string
   updatedAt!: string
