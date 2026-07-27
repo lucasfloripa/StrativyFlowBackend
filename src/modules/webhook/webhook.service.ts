@@ -394,13 +394,31 @@ export class WebhookService {
           notificationPreferences: userInformations.notificationPreferences
         })
 
-        if (!isTextMessage) {
+        if (!isTextMessage && !isButtonMessage) {
           return this.processInboundMediaMessage({
             lead,
             userId: userInformations.userId,
             message,
             inboundMessageId
           })
+        }
+
+        const persistedMessageResult = await this.persistMessage({
+          leadId: lead.id,
+          leadName: lead.name,
+          userId: userInformations.userId,
+          message
+        })
+
+        if (persistedMessageResult.wasCreated) {
+          await this.emitMessageCreated(persistedMessageResult.message)
+        }
+
+        if (isButtonMessage) {
+          this.logger.log(
+            `[11] Button message processed for new lead ${lead.id}, skipping automation and reply`
+          )
+          return { status: 'created_from_button_message', leadId: lead.id }
         }
 
         const automationTriggerContext: AutomationTriggerContext = {
@@ -426,34 +444,16 @@ export class WebhookService {
           }
         })
 
-        const persistedMessageResult = await this.persistMessage({
-          leadId: lead.id,
-          leadName: lead.name,
-          userId: userInformations.userId,
-          message
-        })
+        const reply = 'Olá! 👋 \nComo podemos te chamar?'
 
-        if (persistedMessageResult.wasCreated) {
-          await this.emitMessageCreated(persistedMessageResult.message)
-        }
+        const response = await this.sendWhatsAppMessage(
+          from,
+          reply,
+          phoneNumberId
+        )
 
-        if (!isButtonMessage) {
-          const reply = 'Olá! 👋 \nComo podemos te chamar?'
-
-          const response = await this.sendWhatsAppMessage(
-            from,
-            reply,
-            phoneNumberId
-          )
-
-          lead.lastAutoReplyMessageId =
-            response?.data?.messages?.[0]?.id ?? undefined
-
-          this.logger.log('[10] Saving lead after first auto-reply dispatch')
-          await this.leadRepo.save(lead)
-        }
-
-        return { status: 'created_and_replied', leadId: lead.id }
+        lead.lastAutoReplyMessageId =
+          response?.data?.messages?.[0]?.id ?? undefined
       }
 
       this.logger.log(
