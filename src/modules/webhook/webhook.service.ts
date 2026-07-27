@@ -350,10 +350,15 @@ export class WebhookService {
 
       // PRIMEIRO CONTATO (via anúncio)
       if (!lead) {
+        const isButtonMessage = message?.type === 'button'
+        const initialFlowState = isButtonMessage
+          ? LeadFlowState.IN_CONVERSATION
+          : LeadFlowState.ASKING_NAME
+
         const leadDraft = this.leadRepo.create({
           userInformationsId: userInformations.id,
           name: 'Lead sem nome',
-          flowState: LeadFlowState.ASKING_NAME,
+          flowState: initialFlowState,
           phone: from,
           source: leadSource,
           state: LeadState.ACTIVE,
@@ -432,19 +437,21 @@ export class WebhookService {
           await this.emitMessageCreated(persistedMessageResult.message)
         }
 
-        const reply = 'Olá! 👋 \nComo podemos te chamar?'
+        if (!isButtonMessage) {
+          const reply = 'Olá! 👋 \nComo podemos te chamar?'
 
-        const response = await this.sendWhatsAppMessage(
-          from,
-          reply,
-          phoneNumberId
-        )
+          const response = await this.sendWhatsAppMessage(
+            from,
+            reply,
+            phoneNumberId
+          )
 
-        lead.lastAutoReplyMessageId =
-          response?.data?.messages?.[0]?.id ?? undefined
+          lead.lastAutoReplyMessageId =
+            response?.data?.messages?.[0]?.id ?? undefined
 
-        this.logger.log('[10] Saving lead after first auto-reply dispatch')
-        await this.leadRepo.save(lead)
+          this.logger.log('[10] Saving lead after first auto-reply dispatch')
+          await this.leadRepo.save(lead)
+        }
 
         return { status: 'created_and_replied', leadId: lead.id }
       }
