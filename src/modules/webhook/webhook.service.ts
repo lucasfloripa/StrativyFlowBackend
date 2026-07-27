@@ -118,6 +118,22 @@ export type WhatsAppWebhookPayload = {
           image?: WhatsAppImageMessage
           video?: WhatsAppVideoMessage
           document?: WhatsAppDocumentMessage
+          button?: {
+            text?: string
+            payload?: string
+          }
+          interactive?: {
+            type?: string
+            button_reply?: {
+              id?: string
+              title?: string
+            }
+            list_reply?: {
+              id?: string
+              title?: string
+              description?: string
+            }
+          }
           id?: string
           referral?: {
             source_type?: string
@@ -149,6 +165,22 @@ type WhatsAppInboundMessage = {
   image?: WhatsAppImageMessage
   video?: WhatsAppVideoMessage
   document?: WhatsAppDocumentMessage
+  button?: {
+    text?: string
+    payload?: string
+  }
+  interactive?: {
+    type?: string
+    button_reply?: {
+      id?: string
+      title?: string
+    }
+    list_reply?: {
+      id?: string
+      title?: string
+      description?: string
+    }
+  }
   id?: string
   referral?: {
     source_type?: string
@@ -244,7 +276,7 @@ export class WebhookService {
       const phoneNumberId = value?.metadata?.phone_number_id
       from = message?.from?.trim()
       inboundMessageId = message?.id?.trim()
-      const text = message?.text?.body?.trim() ?? null
+      const text = this.resolveInboundMessageContent(message)
       const resolvedMessageType = this.resolveMessageType(message?.type)
       const isTextMessage = resolvedMessageType === MessageType.TEXT
       const isFromAd = message?.referral?.source_type === 'ad'
@@ -689,7 +721,7 @@ export class WebhookService {
     const { leadId, leadName, userId, message } = params
 
     const resolvedMessageType = this.resolveMessageType(message?.type)
-    let content: string | null = message?.text?.body ?? null
+    let content: string | null = this.resolveInboundMessageContent(message)
     let metaMediaId: string | null = null
     let mimeType: string | null = null
     let mediaSha256: string | null = null
@@ -1092,17 +1124,67 @@ export class WebhookService {
     })
   }
 
+  private resolveInboundMessageContent(
+    message: WhatsAppInboundMessage
+  ): string | null {
+    // Try to resolve text content in order of priority
+    const textBody = message?.text?.body?.trim()
+    if (textBody) {
+      return textBody
+    }
+
+    const buttonText = message?.button?.text?.trim()
+    if (buttonText) {
+      return buttonText
+    }
+
+    const buttonPayload = message?.button?.payload?.trim()
+    if (buttonPayload) {
+      return buttonPayload
+    }
+
+    const interactiveButtonTitle = message?.interactive?.button_reply?.title?.trim()
+    if (interactiveButtonTitle) {
+      return interactiveButtonTitle
+    }
+
+    const interactiveButtonId = message?.interactive?.button_reply?.id?.trim()
+    if (interactiveButtonId) {
+      return interactiveButtonId
+    }
+
+    const interactiveListTitle = message?.interactive?.list_reply?.title?.trim()
+    if (interactiveListTitle) {
+      return interactiveListTitle
+    }
+
+    const interactiveListId = message?.interactive?.list_reply?.id?.trim()
+    if (interactiveListId) {
+      return interactiveListId
+    }
+
+    return null
+  }
+
   private resolveMessageType(type?: string): MessageType {
     switch (type) {
+      case 'image':
       case MessageType.IMAGE:
         return MessageType.IMAGE
+      case 'audio':
       case MessageType.AUDIO:
         return MessageType.AUDIO
+      case 'video':
       case MessageType.VIDEO:
         return MessageType.VIDEO
+      case 'document':
       case MessageType.DOCUMENT:
         return MessageType.DOCUMENT
+      case 'button':
+      case 'interactive':
+      case 'text':
       case MessageType.TEXT:
+        return MessageType.TEXT
       default:
         return MessageType.TEXT
     }
