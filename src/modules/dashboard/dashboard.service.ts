@@ -4,6 +4,7 @@ import { In, MoreThanOrEqual, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { Lead, LeadState } from '../leads/entities/lead.entity'
+import { MessageDirection } from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 type DashboardSummary = {
@@ -60,13 +61,27 @@ export class DashboardService {
             state: LeadState.ACTIVE
           }
         }),
-        this.leadRepo.count({
-          where: {
-            userInformationsId: In(userInformationsIds),
-            state: LeadState.ACTIVE,
-            createdAt: MoreThanOrEqual(twentyFourHoursAgo)
-          }
-        }),
+        this.leadRepo
+          .createQueryBuilder('lead')
+          .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+            userInformationsIds
+          })
+          .andWhere('lead.state = :activeState', {
+            activeState: LeadState.ACTIVE
+          })
+          .andWhere('lead."createdAt" >= :twentyFourHoursAgo', {
+            twentyFourHoursAgo
+          })
+          .andWhere(
+            `NOT EXISTS (
+              SELECT 1
+              FROM messages message
+              WHERE message."leadId" = lead.id::text
+                AND message.direction = :outboundDirection
+            )`,
+            { outboundDirection: MessageDirection.OUTBOUND }
+          )
+          .getCount(),
         this.leadRepo
           .createQueryBuilder('lead')
           .where('lead."userInformationsId" IN (:...userInformationsIds)', {

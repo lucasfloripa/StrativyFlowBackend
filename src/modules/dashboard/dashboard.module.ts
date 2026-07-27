@@ -9,9 +9,7 @@ import { DashboardController } from './dashboard.controller'
 import { DashboardService } from './dashboard.service'
 
 @Module({
-  imports: [
-    TypeOrmModule.forFeature([FollowUp, Lead, UserInformations])
-  ],
+  imports: [TypeOrmModule.forFeature([FollowUp, Lead, UserInformations])],
   controllers: [DashboardController],
   providers: [DashboardService],
   exports: [DashboardService]

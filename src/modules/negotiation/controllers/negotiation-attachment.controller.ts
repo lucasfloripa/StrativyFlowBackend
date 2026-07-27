@@ -9,15 +9,15 @@ import {
   UseGuards,
   UseInterceptors
 } from '@nestjs/common'
-import type { Request } from 'express'
 import { FileInterceptor } from '@nestjs/platform-express'
 
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { StorageUploadFile } from '../../storage/storage.service'
-
 import { NegotiationAttachmentDownloadUrlDto } from '../dto/negotiation-attachment-download-url.dto'
 import { NegotiationAttachmentResponseDto } from '../dto/negotiation-attachment-response.dto'
 import { NegotiationAttachmentService } from '../services/negotiation-attachment.service'
+
+import type { Request } from 'express'
 
 type AuthenticatedRequest = Request & {
   user: {

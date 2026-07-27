@@ -41,7 +41,9 @@ export class LeadMessageMetadataService {
     uploadedMediaId: string
   }): Record<string, unknown> {
     return {
-      ...(params.requestMetadata ? { requestMetadata: params.requestMetadata } : {}),
+      ...(params.requestMetadata
+        ? { requestMetadata: params.requestMetadata }
+        : {}),
       storage: {
         key: params.storageKey
       },

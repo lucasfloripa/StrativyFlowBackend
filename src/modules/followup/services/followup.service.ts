@@ -65,7 +65,10 @@ export class FollowUpService {
     return followUp
   }
 
-  async update(id: string, dto: UpdateFollowUpDto): Promise<FollowUpResponseDto> {
+  async update(
+    id: string,
+    dto: UpdateFollowUpDto
+  ): Promise<FollowUpResponseDto> {
     const followUp = await this.findEntityById(id)
 
     followUp.reminder1hSentAt = null

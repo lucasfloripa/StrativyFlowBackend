@@ -1,13 +1,17 @@
-import { Injectable } from '@nestjs/common'
 import { randomUUID } from 'crypto'
+
+import { Injectable } from '@nestjs/common'
 
 import { RABBIT_EXCHANGE } from '../constants/rabbit.constants'
 import { RabbitMessage } from '../interfaces/rabbit-message.interface'
+
 import { RabbitConnectionService } from './rabbit-connection.service'
 
 @Injectable()
 export class RabbitPublisherService {
-  constructor(private readonly rabbitConnectionService: RabbitConnectionService) {}
+  constructor(
+    private readonly rabbitConnectionService: RabbitConnectionService
+  ) {}
 
   async publish(routingKey: string, payload: unknown): Promise<void> {
     const message: RabbitMessage = {

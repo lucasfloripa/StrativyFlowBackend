@@ -2,18 +2,18 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
-import { Message, MessageDirection } from '../../leads/entities/message.entity'
 import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
+import { Message, MessageDirection } from '../../leads/entities/message.entity'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
-import {
-  NotificationChannel,
-  NotificationType as PreferenceNotificationType
-} from '../enums'
 import {
   NotificationReferenceType,
   NotificationType
 } from '../entities/notification.entity'
+import {
+  NotificationChannel,
+  NotificationType as PreferenceNotificationType
+} from '../enums'
 import { NotificationService } from '../notification.service'
 
 import { NotificationEventHandler } from './notification-event-handler.interface'
@@ -170,7 +170,9 @@ export class MessageReceivedHandler implements NotificationEventHandler {
       .andWhere('message."createdAt" < :currentCreatedAt', {
         currentCreatedAt: currentMessage.createdAt
       })
-      .andWhere("message.metadata->>'messageReceivedWhatsAppNotifiedAt' IS NOT NULL")
+      .andWhere(
+        "message.metadata->>'messageReceivedWhatsAppNotifiedAt' IS NOT NULL"
+      )
       .orderBy('message."createdAt"', 'DESC')
       .getOne()
 

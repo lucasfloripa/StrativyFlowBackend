@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import axios from 'axios'
 
 import { StorageUploadFile } from '../../storage/storage.service'
+
 import { OutboundMediaType } from './types/outbound-media.type'
 
 export type WhatsAppOutboundTextResponse = {
@@ -49,6 +50,13 @@ export class WhatsAppOutboundService {
     file: StorageUploadFile,
     phoneNumberId: string
   ): Promise<{ data: WhatsAppUploadMediaResponse }> {
+    this.logger.debug('Uploading media to WhatsApp /media endpoint.', {
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+      phoneNumberId
+    })
+
     const formData = new FormData()
     formData.append('messaging_product', 'whatsapp')
     formData.append(
@@ -58,7 +66,7 @@ export class WhatsAppOutboundService {
     )
     formData.append('type', file.mimetype)
 
-    return this.postToMetaApi<WhatsAppUploadMediaResponse>({
+    const response = await this.postToMetaApi<WhatsAppUploadMediaResponse>({
       path: `/${phoneNumberId}/media`,
       payload: formData,
       includeJsonContentType: false,
@@ -70,6 +78,15 @@ export class WhatsAppOutboundService {
         size: file.size
       }
     })
+
+    this.logger.debug('WhatsApp /media upload response received.', {
+      phoneNumberId,
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      response: response.data
+    })
+
+    return response
   }
 
   async sendMediaMessage(params: {

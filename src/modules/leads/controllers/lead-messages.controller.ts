@@ -10,16 +10,16 @@ import {
   UseInterceptors
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
-import type { Request } from 'express'
 
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { StorageUploadFile } from '../../storage/storage.service'
-
 import { SendMediaLeadMessageDto } from '../dtos/send-media-lead-message.dto'
 import { SendTextLeadMessageDto } from '../dtos/send-text-lead-message.dto'
 import { SendMediaLeadMessageCommand } from '../services/commands/send-media-lead-message.command'
 import { SendTextLeadMessageCommand } from '../services/commands/send-text-lead-message.command'
 import { LeadMessageApplicationService } from '../services/lead-message-application.service'
+
+import type { Request } from 'express'
 
 type AuthenticatedRequest = Request & {
   user: {

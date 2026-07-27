@@ -28,10 +28,7 @@ import {
   LeadSocialLinks,
   LeadState
 } from './entities/lead.entity'
-import {
-  Message,
-  MessageDirection
-} from './entities/message.entity'
+import { Message, MessageDirection } from './entities/message.entity'
 
 @Injectable()
 export class LeadsService {
@@ -473,7 +470,9 @@ export class LeadsService {
     }
   }
 
-  private async resolveMessageMediaUrl(message: Message): Promise<string | null> {
+  private async resolveMessageMediaUrl(
+    message: Message
+  ): Promise<string | null> {
     const mediaKey = this.extractStorageKeyFromMediaUrl(message.mediaUrl)
 
     if (!mediaKey) {
@@ -481,7 +480,8 @@ export class LeadsService {
     }
 
     try {
-      const response = await this.storageService.generateDownloadPresignedUrl(mediaKey)
+      const response =
+        await this.storageService.generateDownloadPresignedUrl(mediaKey)
       return response.url
     } catch (error) {
       this.logger.warn(
@@ -491,7 +491,9 @@ export class LeadsService {
     }
   }
 
-  private extractStorageKeyFromMediaUrl(mediaUrl?: string | null): string | null {
+  private extractStorageKeyFromMediaUrl(
+    mediaUrl?: string | null
+  ): string | null {
     if (!mediaUrl?.trim()) {
       return null
     }
@@ -512,7 +514,9 @@ export class LeadsService {
         const bucketIndex = pathSegments.indexOf(bucketName)
 
         if (bucketIndex >= 0 && bucketIndex < pathSegments.length - 1) {
-          return decodeURIComponent(pathSegments.slice(bucketIndex + 1).join('/'))
+          return decodeURIComponent(
+            pathSegments.slice(bucketIndex + 1).join('/')
+          )
         }
       }
 

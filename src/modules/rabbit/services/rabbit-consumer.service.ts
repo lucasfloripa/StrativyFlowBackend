@@ -4,13 +4,16 @@ import { ConsumeMessage } from 'amqplib'
 import { RABBIT_EXCHANGE } from '../constants/rabbit.constants'
 import { RabbitMessage } from '../interfaces/rabbit-message.interface'
 import { RabbitSubscription } from '../interfaces/rabbit-subscription.interface'
+
 import { RabbitConnectionService } from './rabbit-connection.service'
 
 @Injectable()
 export class RabbitConsumerService {
   private readonly logger = new Logger(RabbitConsumerService.name)
 
-  constructor(private readonly rabbitConnectionService: RabbitConnectionService) {}
+  constructor(
+    private readonly rabbitConnectionService: RabbitConnectionService
+  ) {}
 
   async subscribe(options: RabbitSubscription): Promise<void> {
     const channel = this.rabbitConnectionService.getChannel()
@@ -24,7 +27,11 @@ export class RabbitConsumerService {
         durable: true
       })
 
-      await confirmChannel.bindQueue(options.queue, RABBIT_EXCHANGE, options.routingKey)
+      await confirmChannel.bindQueue(
+        options.queue,
+        RABBIT_EXCHANGE,
+        options.routingKey
+      )
 
       await confirmChannel.consume(
         options.queue,
@@ -41,7 +48,11 @@ export class RabbitConsumerService {
   private async handleMessage(
     confirmChannel: {
       ack: (message: ConsumeMessage) => void
-      nack: (message: ConsumeMessage, allUpTo?: boolean, requeue?: boolean) => void
+      nack: (
+        message: ConsumeMessage,
+        allUpTo?: boolean,
+        requeue?: boolean
+      ) => void
     },
     rawMessage: ConsumeMessage | null,
     options: RabbitSubscription
@@ -51,11 +62,16 @@ export class RabbitConsumerService {
     }
 
     try {
-      const parsed = JSON.parse(rawMessage.content.toString('utf-8')) as RabbitMessage
+      const parsed = JSON.parse(
+        rawMessage.content.toString('utf-8')
+      ) as RabbitMessage
       await options.handler(parsed)
       confirmChannel.ack(rawMessage)
     } catch (error) {
-      this.logger.error(`Error consuming message from queue ${options.queue}`, error as Error)
+      this.logger.error(
+        `Error consuming message from queue ${options.queue}`,
+        error as Error
+      )
       confirmChannel.nack(rawMessage, false, false)
     }
   }

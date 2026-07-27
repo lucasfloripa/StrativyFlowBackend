@@ -1,3 +1,15 @@
+import { randomUUID } from 'crypto'
+import { extname } from 'path'
+import { Readable } from 'stream'
+
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  GetObjectCommandOutput,
+  PutObjectCommand,
+  S3Client
+} from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import {
   BadRequestException,
   Inject,
@@ -7,21 +19,10 @@ import {
   NotFoundException
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  GetObjectCommandOutput,
-  PutObjectCommand,
-  S3Client
-} from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { randomUUID } from 'crypto'
-import { extname } from 'path'
-import { Readable } from 'stream'
 
-import { R2_S3_CLIENT } from './storage.constants'
 import { DeleteFileResponseDto } from './dto/delete-file-response.dto'
 import { UploadFileResponseDto } from './dto/upload-file-response.dto'
+import { R2_S3_CLIENT } from './storage.constants'
 
 export type StorageUploadFile = {
   originalname: string
@@ -110,7 +111,9 @@ export class StorageService {
         error
       })
 
-      throw new InternalServerErrorException('Falha ao enviar arquivo para o storage.')
+      throw new InternalServerErrorException(
+        'Falha ao enviar arquivo para o storage.'
+      )
     }
   }
 
@@ -144,7 +147,9 @@ export class StorageService {
         error
       })
 
-      throw new InternalServerErrorException('Falha ao baixar arquivo do storage.')
+      throw new InternalServerErrorException(
+        'Falha ao baixar arquivo do storage.'
+      )
     }
   }
 
@@ -170,7 +175,9 @@ export class StorageService {
         error
       })
 
-      throw new InternalServerErrorException('Falha ao excluir arquivo do storage.')
+      throw new InternalServerErrorException(
+        'Falha ao excluir arquivo do storage.'
+      )
     }
   }
 
@@ -207,7 +214,9 @@ export class StorageService {
         error
       })
 
-      throw new InternalServerErrorException('Falha ao gerar URL temporaria do arquivo.')
+      throw new InternalServerErrorException(
+        'Falha ao gerar URL temporaria do arquivo.'
+      )
     }
   }
 
@@ -216,7 +225,9 @@ export class StorageService {
     return `${randomUUID()}${extension}`
   }
 
-  private async toNodeReadable(body: GetObjectCommandOutput['Body']): Promise<Readable> {
+  private async toNodeReadable(
+    body: GetObjectCommandOutput['Body']
+  ): Promise<Readable> {
     if (!body) {
       throw new NotFoundException('Arquivo nao encontrado.')
     }
@@ -230,10 +241,14 @@ export class StorageService {
       return Readable.from(Buffer.from(bytes))
     }
 
-    throw new InternalServerErrorException('Formato de stream do arquivo nao suportado.')
+    throw new InternalServerErrorException(
+      'Formato de stream do arquivo nao suportado.'
+    )
   }
 
-  private hasTransformToByteArray(value: unknown): value is StreamWithTransformToByteArray {
+  private hasTransformToByteArray(
+    value: unknown
+  ): value is StreamWithTransformToByteArray {
     return (
       typeof value === 'object' &&
       value !== null &&

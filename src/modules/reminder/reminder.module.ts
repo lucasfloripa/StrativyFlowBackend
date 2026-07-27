@@ -8,8 +8,8 @@ import { MailModule } from '../mail/mail.module'
 import { Negotiation } from '../negotiation/entities/negotiation.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
-import { ReminderController } from './reminder.controller'
 import { ReminderCronService } from './reminder-cron.service'
+import { ReminderController } from './reminder.controller'
 
 @Module({
   imports: [

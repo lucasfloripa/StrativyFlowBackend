@@ -1,9 +1,10 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
 import { basename, extname } from 'path'
 
-import { StorageUploadFile } from '../../storage/storage.service'
+import { BadRequestException, Injectable } from '@nestjs/common'
 
+import { StorageUploadFile } from '../../storage/storage.service'
 import { MessageType } from '../entities/message.entity'
+
 import { OutboundMediaType } from './types/outbound-media.type'
 
 type MediaRule = {
@@ -32,7 +33,7 @@ export class ChatMediaPolicyService {
         'audio/aac',
         'audio/amr'
       ]),
-      allowedExtensions: new Set(['ogg', 'mp3', 'mp4', 'aac', 'amr'])
+      allowedExtensions: new Set(['ogg', 'mp3', 'mp4', 'm4a', 'aac', 'amr'])
     },
     image: {
       maxSizeInBytes: 5 * 1024 * 1024,
@@ -125,9 +126,14 @@ export class ChatMediaPolicyService {
     }
 
     const normalizedMimeType = file.mimetype.trim().toLowerCase()
+    const normalizedMimeTypeBase =
+      normalizedMimeType.split(';')[0]?.trim() || ''
     const extension = extname(file.originalname).replace('.', '').toLowerCase()
 
-    if (!normalizedMimeType || !rule.allowedMimeTypes.has(normalizedMimeType)) {
+    if (
+      !normalizedMimeTypeBase ||
+      !rule.allowedMimeTypes.has(normalizedMimeTypeBase)
+    ) {
       throw new BadRequestException('Unsupported file type.')
     }
 
@@ -136,14 +142,17 @@ export class ChatMediaPolicyService {
     }
 
     if (file.size > rule.maxSizeInBytes) {
-      throw new BadRequestException('File size exceeds the maximum allowed size.')
+      throw new BadRequestException(
+        'File size exceeds the maximum allowed size.'
+      )
     }
 
-    const safeOriginalName = basename(file.originalname).trim() || `media.${extension}`
+    const safeOriginalName =
+      basename(file.originalname).trim() || `media.${extension}`
 
     return {
       type,
-      mimeType: normalizedMimeType,
+      mimeType: normalizedMimeTypeBase,
       extension,
       originalName: safeOriginalName,
       size: file.size

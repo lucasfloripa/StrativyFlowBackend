@@ -61,7 +61,9 @@ export class AutomationMessagingService {
 
       return { data: response.data }
     } catch (error) {
-      const axiosError = error as { response?: { status?: number; data?: unknown } }
+      const axiosError = error as {
+        response?: { status?: number; data?: unknown }
+      }
       this.logger.error(
         `Failed to send WhatsApp message via automation service to=${to}, status=${axiosError.response?.status ?? 'unknown'}, error=${error instanceof Error ? error.message : String(error)}`
       )

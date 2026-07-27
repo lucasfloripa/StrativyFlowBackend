@@ -3,8 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { RealtimeService } from '../../realtime/realtime.service'
-
-import { Message, MessageDirection, MessageType } from '../entities/message.entity'
+import {
+  Message,
+  MessageDirection,
+  MessageType
+} from '../entities/message.entity'
 import { LeadsService } from '../leads.service'
 
 @Injectable()
@@ -46,7 +49,8 @@ export class LeadMessageDispatchService {
       })
     )
 
-    const responseMessage = await this.leadsService.toResponseMessageDto(savedMessage)
+    const responseMessage =
+      await this.leadsService.toResponseMessageDto(savedMessage)
 
     try {
       this.realtimeService.emitToLead(

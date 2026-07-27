@@ -32,7 +32,9 @@ export class RabbitConnectionService implements OnModuleInit, OnModuleDestroy {
     const rabbitMqUrl = process.env.RABBITMQ_URL
 
     if (!rabbitMqUrl) {
-      throw new Error('RABBITMQ_URL env var must be configured when RABBITMQ_ENABLED=true')
+      throw new Error(
+        'RABBITMQ_URL env var must be configured when RABBITMQ_ENABLED=true'
+      )
     }
 
     this.connection = connect([rabbitMqUrl], {
@@ -45,7 +47,9 @@ export class RabbitConnectionService implements OnModuleInit, OnModuleDestroy {
     })
 
     this.connection.on('disconnect', (params) => {
-      this.logger.error(`RabbitMQ disconnected: ${params.err?.message ?? 'unknown error'}`)
+      this.logger.error(
+        `RabbitMQ disconnected: ${params.err?.message ?? 'unknown error'}`
+      )
     })
 
     this.channel = this.connection.createChannel({

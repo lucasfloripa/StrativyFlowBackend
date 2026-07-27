@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer'
 import {
   IsArray,
   IsDateString,
@@ -7,13 +8,13 @@ import {
   ValidateNested,
   IsUUID
 } from 'class-validator'
-import { Type } from 'class-transformer'
 
 import {
   NegotiationType,
   NegotiationStage,
   NegotiationTemperature
 } from '../entities/negotiation.entity'
+
 import { NegotiationNoteDto } from './negotiation-note.dto'
 
 export class UpdateNegotiationDto {

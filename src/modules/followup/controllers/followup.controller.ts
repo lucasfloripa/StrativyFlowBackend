@@ -1,4 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common'
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post
+} from '@nestjs/common'
 
 import { CreateFollowUpDto } from '../dto/create-followup.dto'
 import { UpdateFollowUpDto } from '../dto/update-followup.dto'

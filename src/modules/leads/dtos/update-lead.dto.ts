@@ -7,7 +7,11 @@ import {
   IsString
 } from 'class-validator'
 
-import { LeadQualification, LeadSocialLinks, LeadState } from '../entities/lead.entity'
+import {
+  LeadQualification,
+  LeadSocialLinks,
+  LeadState
+} from '../entities/lead.entity'
 
 export class UpdateLeadDto {
   @IsOptional()
@@ -49,5 +53,4 @@ export class UpdateLeadDto {
   @IsOptional()
   @IsEnum(LeadState)
   state?: LeadState
-
 }

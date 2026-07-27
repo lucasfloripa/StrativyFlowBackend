@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { UserInformations } from '../../user/entities/user-informations.entity'
-
 import { Lead } from '../entities/lead.entity'
 import { LeadsService } from '../leads.service'
 

@@ -7,12 +7,14 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { NotificationType, NotificationChannel } from '../notification/enums'
+
 import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
 import { UpdateUserInformationsNotificationsDto } from './dtos/update-user-informations-notifications.dto'
 import { UpdateUserInformationsPreferencesDto } from './dtos/update-user-informations-preferences.dto'
 import { UserInformations } from './entities/user-informations.entity'
+
 import type { NotificationPreferences } from '../notification/types'
-import { NotificationType, NotificationChannel } from '../notification/enums'
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   [NotificationType.NEW_LEAD]: [NotificationChannel.APP],
@@ -34,7 +36,9 @@ export class UserService {
     const phoneNumber = dto.phoneNumber.trim()
 
     if (!userId || !email || !phoneNumber) {
-      throw new BadRequestException('userId, email and phoneNumber are required')
+      throw new BadRequestException(
+        'userId, email and phoneNumber are required'
+      )
     }
 
     const existingByPhone = await this.userInformationsRepo.findOne({
@@ -52,7 +56,8 @@ export class UserService {
       phoneNumber,
       notificationWhatsAppNumbers: dto.notificationWhatsAppNumbers ?? [],
       notificationEmails: dto.notificationEmails ?? [],
-      notificationPreferences: dto.notificationPreferences ?? DEFAULT_NOTIFICATION_PREFERENCES
+      notificationPreferences:
+        dto.notificationPreferences ?? DEFAULT_NOTIFICATION_PREFERENCES
     })
 
     return this.userInformationsRepo.save(userInformations)

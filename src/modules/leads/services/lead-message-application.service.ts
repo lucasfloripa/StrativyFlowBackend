@@ -1,8 +1,8 @@
-import { BadRequestException, Injectable } from '@nestjs/common'
 import { randomUUID } from 'crypto'
 
-import { StorageService } from '../../storage/storage.service'
+import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 
+import { StorageService } from '../../storage/storage.service'
 import { MessageType } from '../entities/message.entity'
 import { LeadsService } from '../leads.service'
 
@@ -16,6 +16,8 @@ import { WhatsAppOutboundService } from './whatsapp-outbound.service'
 
 @Injectable()
 export class LeadMessageApplicationService {
+  private readonly logger = new Logger(LeadMessageApplicationService.name)
+
   constructor(
     private readonly leadsService: LeadsService,
     private readonly leadMessageContextService: LeadMessageContextService,
@@ -72,17 +74,23 @@ export class LeadMessageApplicationService {
         command.leadId
       )
 
-    const validatedMedia = this.chatMediaPolicyService.validateOutboundMediaPayload(
-      {
+    const validatedMedia =
+      this.chatMediaPolicyService.validateOutboundMediaPayload({
         type: command.type,
         file: command.file
-      }
-    )
+      })
 
     const file = command.file
     if (!file) {
       throw new BadRequestException('Arquivo nao enviado.')
     }
+
+    this.logger.debug('Outbound media file received.', {
+      fileOriginalName: file.originalname,
+      fileMimeType: file.mimetype,
+      fileSize: file.size,
+      requestedType: command.type
+    })
 
     const normalizedRequestMetadata =
       this.leadMessageMetadataService.normalizeMetadata(command.metadata)
@@ -98,14 +106,15 @@ export class LeadMessageApplicationService {
         phoneNumberId
       )
 
-      const outboundResponse = await this.whatsappOutboundService.sendMediaMessage({
-        to: destinationPhone,
-        phoneNumberId,
-        type: validatedMedia.type,
-        mediaId: uploadedMedia.data.id,
-        caption: command.caption,
-        fileName: validatedMedia.originalName
-      })
+      const outboundResponse =
+        await this.whatsappOutboundService.sendMediaMessage({
+          to: destinationPhone,
+          phoneNumberId,
+          type: validatedMedia.type,
+          mediaId: uploadedMedia.data.id,
+          caption: command.caption,
+          fileName: validatedMedia.originalName
+        })
 
       await this.leadMessageContextService.markLeadActivity(lead)
 

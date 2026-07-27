@@ -1,16 +1,18 @@
+import { randomUUID } from 'crypto'
+import { basename, extname } from 'path'
+
 import {
   BadRequestException,
   Injectable,
   NotFoundException
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { basename } from 'path'
-import { extname } from 'path'
-import { randomUUID } from 'crypto'
 import { Repository } from 'typeorm'
 
-import { StorageService, StorageUploadFile } from '../../storage/storage.service'
-
+import {
+  StorageService,
+  StorageUploadFile
+} from '../../storage/storage.service'
 import { NegotiationAttachmentDownloadUrlDto } from '../dto/negotiation-attachment-download-url.dto'
 import { NegotiationAttachmentResponseDto } from '../dto/negotiation-attachment-response.dto'
 import { NegotiationAttachment } from '../entities/negotiation-attachment.entity'
@@ -144,7 +146,9 @@ export class NegotiationAttachmentService {
     }
   }
 
-  private validateUploadFile(file: StorageUploadFile | undefined): asserts file is StorageUploadFile {
+  private validateUploadFile(
+    file: StorageUploadFile | undefined
+  ): asserts file is StorageUploadFile {
     if (!file) {
       throw new BadRequestException('Arquivo nao enviado.')
     }
@@ -154,7 +158,9 @@ export class NegotiationAttachmentService {
     }
 
     if (file.size > MAX_FILE_SIZE_IN_BYTES) {
-      throw new BadRequestException('File size exceeds the maximum allowed size of 20 MB.')
+      throw new BadRequestException(
+        'File size exceeds the maximum allowed size of 20 MB.'
+      )
     }
 
     const extension = this.extractFileExtension(file.originalname)
@@ -180,7 +186,8 @@ export class NegotiationAttachmentService {
     originalName: string,
     extension: string
   ): string {
-    const fileName = basename(originalName).trim() || `${randomUUID()}.${extension}`
+    const fileName =
+      basename(originalName).trim() || `${randomUUID()}.${extension}`
 
     return `leads/${leadId}/negotiations/${negotiationId}/attachments/${fileName}`
   }
@@ -193,7 +200,9 @@ export class NegotiationAttachmentService {
     })
 
     if (!attachment) {
-      throw new NotFoundException(`Negotiation attachment ${attachmentId} not found`)
+      throw new NotFoundException(
+        `Negotiation attachment ${attachmentId} not found`
+      )
     }
 
     return attachment

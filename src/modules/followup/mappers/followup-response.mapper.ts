@@ -12,7 +12,9 @@ export const mapFollowUpToResponseDto = (
     title: followUp.title,
     status: followUp.status,
     dueAt: followUp.dueAt.toISOString(),
-    completedAt: followUp.completedAt ? followUp.completedAt.toISOString() : null,
+    completedAt: followUp.completedAt
+      ? followUp.completedAt.toISOString()
+      : null,
     templateId: followUp.templateId ?? null,
     template: template
       ? {

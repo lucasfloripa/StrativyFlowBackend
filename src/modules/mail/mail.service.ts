@@ -18,7 +18,9 @@ export class MailService {
     const apiKey = this.configService.get<string>('RESEND_API_KEY')
 
     if (!apiKey) {
-      this.logger.error('MailService initialization failed: RESEND_API_KEY is not configured')
+      this.logger.error(
+        'MailService initialization failed: RESEND_API_KEY is not configured'
+      )
       throw new Error('RESEND_API_KEY is not configured')
     }
 

@@ -8,8 +8,8 @@ import { NegotiationAttachmentController } from './controllers/negotiation-attac
 import { NegotiationAttachment } from './entities/negotiation-attachment.entity'
 import { Negotiation } from './entities/negotiation.entity'
 import { NegotiationController } from './negotiation.controller'
-import { NegotiationAttachmentService } from './services/negotiation-attachment.service'
 import { NegotiationService } from './negotiation.service'
+import { NegotiationAttachmentService } from './services/negotiation-attachment.service'
 
 @Module({
   imports: [

@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm'
 
-export class AddOwnershipAndMetaFieldsToMessageTemplates1760000000000
-  implements MigrationInterface
-{
+export class AddOwnershipAndMetaFieldsToMessageTemplates1760000000000 implements MigrationInterface {
   name = 'AddOwnershipAndMetaFieldsToMessageTemplates1760000000000'
 
   public async up(queryRunner: QueryRunner): Promise<void> {

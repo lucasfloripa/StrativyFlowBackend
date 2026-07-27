@@ -2,12 +2,12 @@ import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { UserInformations } from '../../user/entities/user-informations.entity'
 import { CreateMessageTemplateDto } from '../dto/create-message-template.dto'
 import { MessageTemplateResponseDto } from '../dto/message-template-response.dto'
 import { UpdateMessageTemplateDto } from '../dto/update-message-template.dto'
 import { Template } from '../entities/template.entity'
 import { mapMessageTemplateToResponseDto } from '../mappers/message-template-response.mapper'
-import { UserInformations } from '../../user/entities/user-informations.entity'
 
 @Injectable()
 export class MessageTemplateService {

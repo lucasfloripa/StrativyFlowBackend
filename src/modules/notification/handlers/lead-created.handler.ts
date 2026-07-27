@@ -2,17 +2,17 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
-import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { MailService } from '../../mail/mail.service'
+import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
-import {
-  NotificationChannel,
-  NotificationType as PreferenceNotificationType
-} from '../enums'
 import {
   NotificationReferenceType,
   NotificationType
 } from '../entities/notification.entity'
+import {
+  NotificationChannel,
+  NotificationType as PreferenceNotificationType
+} from '../enums'
 import { NotificationService } from '../notification.service'
 
 import { NotificationEventHandler } from './notification-event-handler.interface'
