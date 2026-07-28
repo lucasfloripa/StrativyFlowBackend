@@ -257,6 +257,7 @@ export class WebhookService {
       const isTextMessage = resolvedMessageType === MessageType.TEXT
       const isFromAd = message?.referral?.source_type === 'ad'
       const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
+      const metaAdId = isFromAd ? message?.referral?.source_id : undefined
 
       this.logger.log(
         `[1] Payload parsed. Inbound WhatsApp message received from ${from ?? 'unknown'} with id ${inboundMessageId ?? 'unknown'} and type ${message?.type ?? 'unknown'}`
@@ -366,6 +367,7 @@ export class WebhookService {
           flowState: LeadFlowState.ASKING_NAME,
           phone: from,
           source: leadSource,
+          metaAdId: metaAdId,
           state: LeadState.ACTIVE,
           runtimeMode: LeadRuntimeMode.AUTOMATION,
           lastInboundMessageId: inboundMessageId ?? undefined,
@@ -1141,21 +1143,21 @@ export class WebhookService {
     message: WhatsAppInboundMessage
   ): string | null {
     // Tenta extrair conteúdo textual baseado no tipo de mensagem
-    
+
     // Para mensagens de texto normais
     if (message?.text?.body?.trim()) {
       return message.text.body.trim()
     }
-    
+
     // Para mensagens de botão (template da Meta)
     if (message?.button?.text?.trim()) {
       return message.button.text.trim()
     }
-    
+
     if (message?.button?.payload?.trim()) {
       return message.button.payload.trim()
     }
-    
+
     return null
   }
 

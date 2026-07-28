@@ -37,6 +37,10 @@ export class CreateLeadDto {
 
   @IsOptional()
   @IsString()
+  metaAdId?: string
+
+  @IsOptional()
+  @IsString()
   location?: string
 
   @IsOptional()

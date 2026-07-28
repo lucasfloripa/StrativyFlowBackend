@@ -32,6 +32,10 @@ export class UpdateLeadDto {
 
   @IsOptional()
   @IsString()
+  metaAdId?: string
+
+  @IsOptional()
+  @IsString()
   location?: string
 
   @IsOptional()
