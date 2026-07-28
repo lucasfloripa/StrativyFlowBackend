@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable } from '@nestjs/common'
 import axios from 'axios'
 
 import { StorageUploadFile } from '../../storage/storage.service'
 
+import { AudioConverterService } from './audio-converter.service'
 import { OutboundMediaType } from './types/outbound-media.type'
 
 export type WhatsAppOutboundTextResponse = {
@@ -22,7 +23,7 @@ type WhatsAppUploadMediaResponse = {
 
 @Injectable()
 export class WhatsAppOutboundService {
-  private readonly logger = new Logger(WhatsAppOutboundService.name)
+  constructor(private readonly audioConverterService: AudioConverterService) {}
 
   async sendTextMessage(
     to: string,
@@ -50,21 +51,39 @@ export class WhatsAppOutboundService {
     file: StorageUploadFile,
     phoneNumberId: string
   ): Promise<{ data: WhatsAppUploadMediaResponse }> {
-    this.logger.debug('Uploading media to WhatsApp /media endpoint.', {
-      fileName: file.originalname,
-      mimeType: file.mimetype,
-      size: file.size,
-      phoneNumberId
-    })
+    let bufferToUpload = file.buffer
+    let mimeTypeToUpload = file.mimetype
+    let fileNameToUpload = file.originalname
+
+    // Convert WebM audio to MP3 before uploading to Meta
+    if (this.audioConverterService.isWebmAudio(file.mimetype)) {
+      try {
+        const convertedAudio = await this.audioConverterService.convertWebmToOgg(
+          file.buffer,
+          file.originalname
+        )
+        
+        // Validate converted buffer
+        if (!convertedAudio.buffer || convertedAudio.buffer.length === 0) {
+          throw new Error('Converted buffer is empty')
+        }
+
+        bufferToUpload = convertedAudio.buffer
+        mimeTypeToUpload = convertedAudio.mimeType
+        fileNameToUpload = file.originalname.replace(/\.webm$/i, '.mp3')
+      } catch (error) {
+        // Continue with original file if conversion fails
+      }
+    }
 
     const formData = new FormData()
     formData.append('messaging_product', 'whatsapp')
     formData.append(
       'file',
-      new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }),
-      file.originalname
+      new Blob([new Uint8Array(bufferToUpload)], { type: mimeTypeToUpload }),
+      fileNameToUpload
     )
-    formData.append('type', file.mimetype)
+    formData.append('type', mimeTypeToUpload)
 
     const response = await this.postToMetaApi<WhatsAppUploadMediaResponse>({
       path: `/${phoneNumberId}/media`,
@@ -73,17 +92,14 @@ export class WhatsAppOutboundService {
       logContext: {
         operation: 'uploadMedia',
         phoneNumberId,
-        fileName: file.originalname,
-        mimeType: file.mimetype,
-        size: file.size
+        originalFileName: file.originalname,
+        uploadedFileName: fileNameToUpload,
+        originalMimeType: file.mimetype,
+        uploadedMimeType: mimeTypeToUpload,
+        originalSize: file.size,
+        uploadedSize: bufferToUpload.length,
+        wasConverted: mimeTypeToUpload !== file.mimetype
       }
-    })
-
-    this.logger.debug('WhatsApp /media upload response received.', {
-      phoneNumberId,
-      fileName: file.originalname,
-      mimeType: file.mimetype,
-      response: response.data
     })
 
     return response
@@ -203,13 +219,6 @@ export class WhatsAppOutboundService {
           data?: unknown
         }
       }
-
-      this.logger.error('WhatsApp outbound request failed.', {
-        ...params.logContext,
-        status: axiosError.response?.status ?? null,
-        response: axiosError.response?.data ?? null,
-        error: error instanceof Error ? error.message : String(error)
-      })
 
       throw error
     }

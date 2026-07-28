@@ -13,6 +13,7 @@ import { Lead } from './entities/lead.entity'
 import { Message } from './entities/message.entity'
 import { LeadsController } from './leads.controller'
 import { LeadsService } from './leads.service'
+import { AudioConverterService } from './services/audio-converter.service'
 import { ChatMediaPolicyService } from './services/chat-media-policy.service'
 import { LeadMessageApplicationService } from './services/lead-message-application.service'
 import { LeadMessageContextService } from './services/lead-message-context.service'
@@ -36,7 +37,8 @@ import { WhatsAppOutboundService } from './services/whatsapp-outbound.service'
     LeadMessageDispatchService,
     LeadMessageMetadataService,
     WhatsAppOutboundService,
-    ChatMediaPolicyService
+    ChatMediaPolicyService,
+    AudioConverterService
   ],
   exports: [LeadsService]
 })
