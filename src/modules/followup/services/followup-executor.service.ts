@@ -73,6 +73,24 @@ export class FollowUpExecutor {
     return true
   }
 
+  isLeadInActiveConversation(followUp: FollowUp, referenceDate: Date = new Date()): boolean {
+    const lastActivityAt = followUp.negotiation?.lead?.lastActivityAt
+    if (!lastActivityAt) {
+      return false
+    }
+
+    const hoursSinceLastActivity = (referenceDate.getTime() - new Date(lastActivityAt).getTime()) / (1000 * 60 * 60)
+    const isInActiveConversation = hoursSinceLastActivity < 24
+
+    if (isInActiveConversation) {
+      this.logger.debug(
+        `Lead is in active conversation (within 24h). followUpId=${followUp.id}, leadId=${followUp.negotiation?.leadId ?? 'null'}, lastActivityAt=${lastActivityAt.toISOString()}, hoursSince=${hoursSinceLastActivity.toFixed(2)}`
+      )
+    }
+
+    return isInActiveConversation
+  }
+
   async execute(followUp: FollowUp): Promise<void> {
     const canExecuteFollowUp = await this.canExecute(followUp)
 
