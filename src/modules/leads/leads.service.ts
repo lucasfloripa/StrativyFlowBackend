@@ -253,8 +253,28 @@ export class LeadsService {
     const nextFollowUpByLeadId = (leadId: string) =>
       nextFollowUpMap.get(leadId) ?? { dueAt: null, negotiationId: null }
 
+    // Determine which leads have negotiations but ALL are closed (WON or LOST with closedAt)
+    const negotiationStatusRows = await this.leadRepo.manager
+      .createQueryBuilder()
+      .select('n."leadId"', 'leadId')
+      .addSelect(
+        `BOOL_AND(n."closedAt" IS NOT NULL AND n.stage IN ('WON', 'LOST'))`,
+        'allClosed'
+      )
+      .from('negotiations', 'n')
+      .where('n."leadId" IN (:...leadIds)', { leadIds })
+      .groupBy('n."leadId"')
+      .getRawMany<{ leadId: string; allClosed: boolean }>()
+
+    const negotiationStatusByLeadId = new Map(
+      negotiationStatusRows.map((row) => [row.leadId, row.allClosed])
+    )
+
     return leads.map((lead) => {
       const nextFollowUp = nextFollowUpByLeadId(lead.id)
+      const allClosed = negotiationStatusByLeadId.get(lead.id)
+      // true only if lead has negotiations AND all are closed
+      const hasOnlyClosedNegotiations = allClosed === true
 
       return {
         ...lead,
@@ -265,7 +285,8 @@ export class LeadsService {
         hasFollowUpOverdue: false,
         hasFollowUpToday: false,
         hasFollowUpScheduled: false,
-        hasAnyFollowUp: false
+        hasAnyFollowUp: false,
+        hasOnlyClosedNegotiations
       }
     })
   }

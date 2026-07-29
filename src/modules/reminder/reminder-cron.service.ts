@@ -13,6 +13,7 @@ type ReminderRecipientGroup = {
   emailRecipients: Set<string>
   whatsappRecipients: Set<string>
   phoneNumberId: string | null
+  whatsappToken: string | null
   items: Array<{
     leadName: string
     followUpValue: string
@@ -141,6 +142,7 @@ export class ReminderCronService {
         emailRecipients: new Set<string>(),
         whatsappRecipients: new Set<string>(),
         phoneNumberId: userInformations.phoneNumberId?.trim() || null,
+        whatsappToken: userInformations.whatsappToken?.trim() || null,
         items: []
       }
 
@@ -216,7 +218,8 @@ export class ReminderCronService {
               this.automationMessagingService.sendWhatsAppMessage(
                 recipient,
                 message,
-                phoneNumberId
+                phoneNumberId,
+                group.whatsappToken ?? undefined
               )
             )
           )

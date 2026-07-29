@@ -10,6 +10,7 @@ type LeadMessageOutboundContext = {
   lead: Lead
   destinationPhone: string
   phoneNumberId: string
+  whatsappToken?: string
 }
 
 @Injectable()
@@ -51,7 +52,8 @@ export class LeadMessageContextService {
     return {
       lead,
       destinationPhone,
-      phoneNumberId
+      phoneNumberId,
+      whatsappToken: userInformations?.whatsappToken ?? undefined
     }
   }
 

@@ -28,7 +28,8 @@ export class WhatsAppOutboundService {
   async sendTextMessage(
     to: string,
     content: string,
-    phoneNumberId: string
+    phoneNumberId: string,
+    whatsappToken?: string
   ): Promise<{ data: WhatsAppOutboundTextResponse }> {
     return this.postToMetaApi<WhatsAppOutboundTextResponse>({
       path: `/${phoneNumberId}/messages`,
@@ -38,6 +39,7 @@ export class WhatsAppOutboundService {
         type: 'text',
         text: { body: content }
       },
+      whatsappToken,
       logContext: {
         operation: 'sendTextMessage',
         phoneNumberId,
@@ -49,7 +51,8 @@ export class WhatsAppOutboundService {
 
   async uploadMedia(
     file: StorageUploadFile,
-    phoneNumberId: string
+    phoneNumberId: string,
+    whatsappToken?: string
   ): Promise<{ data: WhatsAppUploadMediaResponse }> {
     let bufferToUpload = file.buffer
     let mimeTypeToUpload = file.mimetype
@@ -58,11 +61,12 @@ export class WhatsAppOutboundService {
     // Convert WebM audio to MP3 before uploading to Meta
     if (this.audioConverterService.isWebmAudio(file.mimetype)) {
       try {
-        const convertedAudio = await this.audioConverterService.convertWebmToOgg(
-          file.buffer,
-          file.originalname
-        )
-        
+        const convertedAudio =
+          await this.audioConverterService.convertWebmToOgg(
+            file.buffer,
+            file.originalname
+          )
+
         // Validate converted buffer
         if (!convertedAudio.buffer || convertedAudio.buffer.length === 0) {
           throw new Error('Converted buffer is empty')
@@ -89,6 +93,7 @@ export class WhatsAppOutboundService {
       path: `/${phoneNumberId}/media`,
       payload: formData,
       includeJsonContentType: false,
+      whatsappToken,
       logContext: {
         operation: 'uploadMedia',
         phoneNumberId,
@@ -112,12 +117,14 @@ export class WhatsAppOutboundService {
     mediaId: string
     caption?: string
     fileName?: string
+    whatsappToken?: string
   }): Promise<{ data: WhatsAppOutboundTextResponse }> {
     const payload = this.buildMediaPayload(params)
 
     return this.postToMetaApi<WhatsAppOutboundTextResponse>({
       path: `/${params.phoneNumberId}/messages`,
       payload,
+      whatsappToken: params.whatsappToken,
       logContext: {
         operation: 'sendMediaMessage',
         phoneNumberId: params.phoneNumberId,
@@ -191,11 +198,13 @@ export class WhatsAppOutboundService {
     path: string
     payload: unknown
     includeJsonContentType?: boolean
+    whatsappToken?: string
     logContext: Record<string, unknown>
   }): Promise<{ data: TResponse }> {
     const includeJsonContentType = params.includeJsonContentType ?? true
+    const token = params.whatsappToken?.trim()
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`
+      Authorization: `Bearer ${token}`
     }
 
     if (includeJsonContentType) {

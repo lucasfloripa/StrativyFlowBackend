@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
 import { AutomationTriggerDispatcher } from '../automation/flow/automation-trigger.dispatcher'
 import {
@@ -329,13 +329,7 @@ export class WebhookService {
         `[2] Lead lookup started for user ${userInformations.userId} and phone ${from}`
       )
 
-      let lead = await this.leadRepo.findOne({
-        where: {
-          userInformationsId: userInformations.id,
-          phone: from,
-          state: LeadState.ACTIVE
-        }
-      })
+      let lead = await this.findLeadByPhone(userInformations.id, from)
 
       this.logger.log(
         lead
@@ -399,6 +393,7 @@ export class WebhookService {
         await this.notifyNewLeadToConfiguredWhatsAppNumbers({
           leadId: lead.id,
           phoneNumberId,
+          whatsappToken: userInformations.whatsappToken ?? undefined,
           notificationWhatsAppNumbers:
             userInformations.notificationWhatsAppNumbers,
           notificationPreferences: userInformations.notificationPreferences
@@ -409,7 +404,8 @@ export class WebhookService {
             lead,
             userId: userInformations.userId,
             message,
-            inboundMessageId
+            inboundMessageId,
+            whatsappToken: userInformations.whatsappToken ?? undefined
           })
         }
 
@@ -452,7 +448,8 @@ export class WebhookService {
         const response = await this.sendWhatsAppMessage(
           from,
           reply,
-          phoneNumberId
+          phoneNumberId,
+          userInformations.whatsappToken ?? undefined
         )
 
         lead.lastAutoReplyMessageId =
@@ -500,7 +497,8 @@ export class WebhookService {
           lead,
           userId: userInformations.userId,
           message,
-          inboundMessageId
+          inboundMessageId,
+          whatsappToken: userInformations.whatsappToken ?? undefined
         })
       }
 
@@ -604,7 +602,8 @@ export class WebhookService {
           const response = await this.sendWhatsAppMessage(
             to,
             content,
-            context.phoneNumberId
+            context.phoneNumberId,
+            userInformations.whatsappToken ?? undefined
           )
           const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
 
@@ -888,8 +887,9 @@ export class WebhookService {
     userId: string
     message: WhatsAppInboundMessage
     inboundMessageId: string
+    whatsappToken?: string
   }): Promise<{ status: string; leadId: string }> {
-    const { lead, userId, message, inboundMessageId } = params
+    const { lead, userId, message, inboundMessageId, whatsappToken } = params
 
     const persistedMessageResult = await this.persistMessage({
       leadId: lead.id,
@@ -901,7 +901,8 @@ export class WebhookService {
     const persistedMessage = persistedMessageResult.message
 
     await this.uploadInboundMedia({
-      message: persistedMessage
+      message: persistedMessage,
+      whatsappToken
     })
 
     if (persistedMessageResult.wasCreated) {
@@ -940,8 +941,9 @@ export class WebhookService {
 
   private async uploadInboundMedia(params: {
     message: Message
+    whatsappToken?: string
   }): Promise<void> {
-    const { message } = params
+    const { message, whatsappToken } = params
 
     if (!message.id) {
       this.logger.warn(
@@ -958,8 +960,8 @@ export class WebhookService {
     }
 
     try {
-      const mediaInfo = await this.getWhatsAppMediaInfo(message.metaMediaId)
-      const buffer = await this.downloadWhatsAppMedia(mediaInfo.data.url)
+      const mediaInfo = await this.getWhatsAppMediaInfo(message.metaMediaId, whatsappToken)
+      const buffer = await this.downloadWhatsAppMedia(mediaInfo.data.url, whatsappToken)
       const mimeType =
         mediaInfo.data.mime_type?.trim() ||
         message.mimeType?.trim() ||
@@ -1029,11 +1031,49 @@ export class WebhookService {
     }
   }
 
+  private buildPhoneVariants(phone: string): string[] {
+    const digits = phone.replace(/\D/g, '')
+    const variants = new Set<string>([digits])
+
+    // Brazilian numbers: country code (2) + DDD (2) + number
+    // Webhook sends 8-digit cell number (no leading 9)
+    // DB may have been saved with 9 inserted after DDD
+    // E.g.: webhook sends 5511987654321 (13 digits) or 551187654321 (12 digits)
+    // DB may store 55119XXXXXXXX (13) or 5511XXXXXXXX (12)
+
+    const withNine = digits.length === 12
+      ? digits.slice(0, 4) + '9' + digits.slice(4)   // 12-digit → insert 9 after DDD
+      : null
+
+    const withoutNine = digits.length === 13 && digits[4] === '9'
+      ? digits.slice(0, 4) + digits.slice(5)          // 13-digit with 9 → remove it
+      : null
+
+    if (withNine) variants.add(withNine)
+    if (withoutNine) variants.add(withoutNine)
+
+    return Array.from(variants)
+  }
+
+  private async findLeadByPhone(userInformationsId: string, phone: string): Promise<Lead | null> {
+    const variants = this.buildPhoneVariants(phone)
+
+    return this.leadRepo.findOne({
+      where: variants.map((variant) => ({
+        userInformationsId,
+        phone: variant,
+        state: LeadState.ACTIVE
+      }))
+    })
+  }
+
   private async sendWhatsAppMessage(
     to: string,
     reply: string,
-    phoneNumberId?: string
+    phoneNumberId?: string,
+    whatsappToken?: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
+    const token = whatsappToken?.trim()
     return axios.post(
       `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
       {
@@ -1044,7 +1084,7 @@ export class WebhookService {
       },
       {
         headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
       }
@@ -1052,20 +1092,23 @@ export class WebhookService {
   }
 
   private async getWhatsAppMediaInfo(
-    mediaId: string
+    mediaId: string,
+    whatsappToken?: string
   ): Promise<{ data: WhatsAppMediaResponse }> {
+    const token = whatsappToken?.trim()
     return axios.get(`https://graph.facebook.com/v22.0/${mediaId}`, {
       headers: {
-        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       }
     })
   }
 
-  private async downloadWhatsAppMedia(url: string): Promise<Buffer> {
+  private async downloadWhatsAppMedia(url: string, whatsappToken?: string): Promise<Buffer> {
+    const token = whatsappToken?.trim()
     const response = await axios.get<ArrayBuffer>(url, {
       headers: {
-        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       responseType: 'arraybuffer'
@@ -1077,12 +1120,14 @@ export class WebhookService {
   private async notifyNewLeadToConfiguredWhatsAppNumbers(params: {
     leadId: string
     phoneNumberId?: string
+    whatsappToken?: string
     notificationWhatsAppNumbers?: string[]
     notificationPreferences?: UserInformations['notificationPreferences']
   }) {
     const {
       leadId,
       phoneNumberId,
+      whatsappToken,
       notificationWhatsAppNumbers,
       notificationPreferences
     } = params
@@ -1119,7 +1164,7 @@ export class WebhookService {
     const notificationMessage = 'Tem novo Lead no Flow!'
     const results = await Promise.allSettled(
       recipients.map((recipient) =>
-        this.sendWhatsAppMessage(recipient, notificationMessage, phoneNumberId)
+        this.sendWhatsAppMessage(recipient, notificationMessage, phoneNumberId, whatsappToken)
       )
     )
 

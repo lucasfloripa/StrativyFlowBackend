@@ -106,6 +106,16 @@ export class DashboardService {
             )`,
             { twentyFourHoursAgo }
           )
+          .andWhere(
+            `NOT (
+              EXISTS (SELECT 1 FROM negotiations n WHERE n."leadId" = lead.id::text)
+              AND NOT EXISTS (
+                SELECT 1 FROM negotiations n
+                WHERE n."leadId" = lead.id::text
+                  AND (n."closedAt" IS NULL OR n.stage NOT IN ('WON', 'LOST'))
+              )
+            )`
+          )
           .getCount(),
         this.followUpRepo
           .createQueryBuilder('followup')

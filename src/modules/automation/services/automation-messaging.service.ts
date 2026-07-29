@@ -32,7 +32,8 @@ export class AutomationMessagingService {
   async sendWhatsAppMessage(
     to: string,
     content: string,
-    phoneNumberId?: string
+    phoneNumberId?: string,
+    whatsappToken?: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
     this.logger.log(
       `Sending WhatsApp message via automation service to=${to}, phoneNumberId=${phoneNumberId ?? 'missing'}`
@@ -49,7 +50,7 @@ export class AutomationMessagingService {
         },
         {
           headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            Authorization: `Bearer ${whatsappToken?.trim()}`,
             'Content-Type': 'application/json'
           }
         }

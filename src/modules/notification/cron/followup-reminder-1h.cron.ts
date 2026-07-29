@@ -134,7 +134,8 @@ export class FollowUpReminder1hCron {
                   this.automationMessagingService.sendWhatsAppMessage(
                     recipient,
                     notificationMessage,
-                    phoneNumberId
+                    phoneNumberId,
+                    userInformations?.whatsappToken ?? undefined
                   )
                 )
               )

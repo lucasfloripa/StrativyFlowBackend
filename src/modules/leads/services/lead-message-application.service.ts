@@ -41,7 +41,7 @@ export class LeadMessageApplicationService {
   async sendTextMessage(command: SendTextLeadMessageCommand) {
     this.chatMediaPolicyService.assertTextMessageIsSupported()
 
-    const { lead, destinationPhone, phoneNumberId } =
+    const { lead, destinationPhone, phoneNumberId, whatsappToken } =
       await this.leadMessageContextService.resolveOutboundContextOrFail(
         command.userId,
         command.leadId
@@ -56,7 +56,8 @@ export class LeadMessageApplicationService {
     const response = await this.whatsappOutboundService.sendTextMessage(
       destinationPhone,
       content,
-      phoneNumberId
+      phoneNumberId,
+      whatsappToken
     )
 
     await this.leadMessageContextService.markLeadActivity(lead)
@@ -74,7 +75,7 @@ export class LeadMessageApplicationService {
   }
 
   async sendMediaMessage(command: SendMediaLeadMessageCommand) {
-    const { lead, destinationPhone, phoneNumberId } =
+    const { lead, destinationPhone, phoneNumberId, whatsappToken } =
       await this.leadMessageContextService.resolveOutboundContextOrFail(
         command.userId,
         command.leadId
@@ -109,7 +110,8 @@ export class LeadMessageApplicationService {
     try {
       const uploadedMedia = await this.whatsappOutboundService.uploadMedia(
         file,
-        phoneNumberId
+        phoneNumberId,
+        whatsappToken
       )
 
       const outboundResponse =
@@ -119,7 +121,8 @@ export class LeadMessageApplicationService {
           type: validatedMedia.type,
           mediaId: uploadedMedia.data.id,
           caption: command.caption,
-          fileName: validatedMedia.originalName
+          fileName: validatedMedia.originalName,
+          whatsappToken
         })
 
       await this.leadMessageContextService.markLeadActivity(lead)

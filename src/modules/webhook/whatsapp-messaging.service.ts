@@ -17,17 +17,20 @@ export class WhatsAppMessagingService {
   async sendWhatsAppMessage(
     to: string,
     reply: string,
-    phoneNumberId?: string
+    phoneNumberId?: string,
+    whatsappToken?: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
-    return sendWhatsAppMessage(to, reply, phoneNumberId)
+    return sendWhatsAppMessage(to, reply, phoneNumberId, whatsappToken)
   }
 }
 
 export async function sendWhatsAppMessage(
   to: string,
   reply: string,
-  phoneNumberId?: string
+  phoneNumberId?: string,
+  whatsappToken?: string
 ): Promise<{ data: WhatsAppSendMessageResponse }> {
+  const token = whatsappToken?.trim()
   return axios.post(
     `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
     {
@@ -38,7 +41,7 @@ export async function sendWhatsAppMessage(
     },
     {
       headers: {
-        Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       }
     }

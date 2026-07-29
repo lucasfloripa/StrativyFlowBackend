@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
+import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { AutomationRuleController } from './automation-rule.controller'
 import { AutomationRuleService } from './automation-rule.service'
@@ -13,7 +14,7 @@ import { AutomationTriggerDispatcher } from './flow/automation-trigger.dispatche
 import { AutomationMessagingService } from './services/automation-messaging.service'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AutomationRule, Lead, Message])],
+  imports: [TypeOrmModule.forFeature([AutomationRule, Lead, Message, UserInformations])],
   providers: [
     AutomationRuleService,
     AutomationActionResolver,

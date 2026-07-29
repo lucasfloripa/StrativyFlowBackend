@@ -209,7 +209,8 @@ export class MessageReceivedHandler implements NotificationEventHandler {
         this.automationMessagingService.sendWhatsAppMessage(
           recipient,
           notificationMessage,
-          phoneNumberId
+          phoneNumberId,
+          userInformations?.whatsappToken ?? undefined
         )
       )
     )

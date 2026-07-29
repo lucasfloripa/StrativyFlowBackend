@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { Lead, LeadRuntimeMode } from '../../leads/entities/lead.entity'
+import { UserInformations } from '../../user/entities/user-informations.entity'
 import { AutomationMessagingService } from '../services/automation-messaging.service'
 
 import {
@@ -16,6 +17,8 @@ export class AutomationActionExecutor {
   constructor(
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
+    @InjectRepository(UserInformations)
+    private readonly userInformationsRepo: Repository<UserInformations>,
     private readonly automationMessagingService: AutomationMessagingService
   ) {}
 
@@ -61,10 +64,18 @@ export class AutomationActionExecutor {
             break
           }
 
+          const userInformations = lead.userInformationsId
+            ? await this.userInformationsRepo.findOne({
+                where: { id: lead.userInformationsId }
+              })
+            : null
+
           const phoneNumberId =
             typeof context?.metadata?.phoneNumberId === 'string'
               ? context.metadata.phoneNumberId
               : undefined
+
+          const whatsappToken = userInformations?.whatsappToken ?? undefined
 
           this.logger.log(
             `Dispatching automation WhatsApp message. leadId=${lead.id} phone=${lead.phone} content=${content}`
@@ -74,7 +85,8 @@ export class AutomationActionExecutor {
             await this.automationMessagingService.sendWhatsAppMessage(
               lead.phone,
               content,
-              phoneNumberId
+              phoneNumberId,
+              whatsappToken
             )
 
           const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null

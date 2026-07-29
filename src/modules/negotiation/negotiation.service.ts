@@ -157,7 +157,18 @@ export class NegotiationService {
         : null
     }
 
-    return await this.negotiationRepository.save(negotiation)
+    const savedNegotiation = await this.negotiationRepository.save(negotiation)
+
+    // When closing a negotiation, mark all pending follow-ups as done
+    const isBeingClosed = dto.closedAt != null
+    if (isBeingClosed) {
+      await this.followUpRepository.update(
+        { negotiationId: id, status: FollowUpStatus.PENDING },
+        { status: FollowUpStatus.DONE, completedAt: new Date() }
+      )
+    }
+
+    return savedNegotiation
   }
 
   async remove(id: string): Promise<Negotiation> {
