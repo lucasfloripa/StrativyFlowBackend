@@ -26,37 +26,18 @@ export class NegotiationService {
     negotiationId: string,
     createdAt: Date
   ): FollowUp[] {
-    const followUpConfigs = [
-      {
-        title: 'Primeiro contato',
-        hoursToAdd: 24
-      },
-      {
-        title: 'Entender objeções',
-        hoursToAdd: 72
-      },
-      {
-        title: 'Reforçar valor',
-        hoursToAdd: 24 * 7
-      },
-      {
-        title: 'Última tentativa',
-        hoursToAdd: 24 * 14
-      }
-    ]
-
-    return followUpConfigs.map((followUpConfig) =>
+    return [
       this.followUpRepository.create({
         negotiationId,
-        title: followUpConfig.title,
+        title: 'Próximo FollowUp',
         templateId: null,
         templateVariables: {},
-        dueAt: this.createFollowUpDueDate(createdAt, followUpConfig.hoursToAdd),
+        dueAt: this.createFollowUpDueDate(createdAt, 72),
         status: FollowUpStatus.PENDING,
         completedAt: null,
         reminder1hSentAt: null
       })
-    )
+    ]
   }
 
   private normalizeNoteCreatedAt(value?: string): string {

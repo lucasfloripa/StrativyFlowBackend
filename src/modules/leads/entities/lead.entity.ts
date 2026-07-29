@@ -65,6 +65,9 @@ export class Lead {
   @Column({ nullable: true })
   metaAdId?: string
 
+  @Column({ nullable: true })
+  googleAdId?: string
+
   @Column({
     type: 'jsonb',
     nullable: true

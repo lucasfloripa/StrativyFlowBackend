@@ -41,6 +41,10 @@ export class CreateLeadDto {
 
   @IsOptional()
   @IsString()
+  googleAdId?: string
+
+  @IsOptional()
+  @IsString()
   location?: string
 
   @IsOptional()

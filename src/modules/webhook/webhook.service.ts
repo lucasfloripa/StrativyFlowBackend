@@ -256,8 +256,10 @@ export class WebhookService {
       const resolvedMessageType = this.resolveMessageType(message?.type)
       const isTextMessage = resolvedMessageType === MessageType.TEXT
       const isFromAd = message?.referral?.source_type === 'ad'
-      const leadSource = isFromAd ? 'MetaAds' : 'whatsapp'
+      const isFromGoogleAds = text?.toLowerCase().includes('google ads')
+      const leadSource = isFromAd ? 'MetaAds' : isFromGoogleAds ? 'GoogleAds' : 'whatsapp'
       const metaAdId = isFromAd ? message?.referral?.source_id : undefined
+      const googleAdId = isFromGoogleAds ? 'google_ads_contact' : undefined
 
       this.logger.log(
         `[1] Payload parsed. Inbound WhatsApp message received from ${from ?? 'unknown'} with id ${inboundMessageId ?? 'unknown'} and type ${message?.type ?? 'unknown'}`
@@ -368,6 +370,7 @@ export class WebhookService {
           phone: from,
           source: leadSource,
           metaAdId: metaAdId,
+          googleAdId: googleAdId,
           state: LeadState.ACTIVE,
           runtimeMode: LeadRuntimeMode.AUTOMATION,
           lastInboundMessageId: inboundMessageId ?? undefined,

@@ -36,6 +36,10 @@ export class UpdateLeadDto {
 
   @IsOptional()
   @IsString()
+  googleAdId?: string
+
+  @IsOptional()
+  @IsString()
   location?: string
 
   @IsOptional()
