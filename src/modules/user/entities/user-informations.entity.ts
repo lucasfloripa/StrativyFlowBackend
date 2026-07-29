@@ -30,6 +30,9 @@ export class UserInformations {
   @Column({ type: 'varchar', nullable: true })
   phoneNumberId?: string | null
 
+  @Column({ type: 'varchar', nullable: true })
+  whatsappToken?: string | null
+
   @Column('text', { array: true, default: '{}' })
   notificationWhatsAppNumbers!: string[]
 

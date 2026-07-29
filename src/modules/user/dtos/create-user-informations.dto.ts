@@ -27,6 +27,14 @@ export class CreateUserInformationsDto {
   phoneNumber!: string
 
   @IsOptional()
+  @IsString()
+  phoneNumberId?: string
+
+  @IsOptional()
+  @IsString()
+  whatsappToken?: string
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   notificationWhatsAppNumbers?: string[]

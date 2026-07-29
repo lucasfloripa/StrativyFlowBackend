@@ -23,7 +23,6 @@ export type ValidatedMediaPayload = {
 
 @Injectable()
 export class ChatMediaPolicyService {
-
   private static readonly MEDIA_RULES: Record<OutboundMediaType, MediaRule> = {
     audio: {
       maxSizeInBytes: 16 * 1024 * 1024,
@@ -35,7 +34,15 @@ export class ChatMediaPolicyService {
         'audio/aac',
         'audio/amr'
       ]),
-      allowedExtensions: new Set(['webm', 'ogg', 'mp3', 'mp4', 'm4a', 'aac', 'amr'])
+      allowedExtensions: new Set([
+        'webm',
+        'ogg',
+        'mp3',
+        'mp4',
+        'm4a',
+        'aac',
+        'amr'
+      ])
     },
     image: {
       maxSizeInBytes: 5 * 1024 * 1024,
