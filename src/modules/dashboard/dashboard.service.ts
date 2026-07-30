@@ -108,10 +108,10 @@ export class DashboardService {
           )
           .andWhere(
             `NOT (
-              EXISTS (SELECT 1 FROM negotiations n WHERE n."leadId" = lead.id::text)
+              EXISTS (SELECT 1 FROM negotiations n WHERE n."leadId" = lead.id)
               AND NOT EXISTS (
                 SELECT 1 FROM negotiations n
-                WHERE n."leadId" = lead.id::text
+                WHERE n."leadId" = lead.id
                   AND (n."closedAt" IS NULL OR n.stage NOT IN ('WON', 'LOST'))
               )
             )`

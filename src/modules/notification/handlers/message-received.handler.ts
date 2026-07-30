@@ -183,9 +183,7 @@ export class MessageReceivedHandler implements NotificationEventHandler {
       return
     }
 
-    const phoneNumberId =
-      userInformations?.phoneNumberId?.trim() ||
-      process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()
+    const phoneNumberId = userInformations?.phoneNumberId?.trim()
 
     this.logger.log(
       `MESSAGE_RECEIVED phoneNumberId resolved for userId=${userId}: ${phoneNumberId ? 'configured' : 'missing'}`

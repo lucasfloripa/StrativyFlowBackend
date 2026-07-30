@@ -2,12 +2,15 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { AutomationModule } from '../automation/automation.module'
+import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { MailModule } from '../mail/mail.module'
 import { RabbitModule } from '../rabbit/rabbit.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { NotificationConsumer } from './consumers/notification.consumer'
+import { ConversationExpiredCron } from './cron/conversation-expired.cron'
+import { ConversationExpiring1hCron } from './cron/conversation-expiring-1h.cron'
 import { FollowUpReminder1hCron } from './cron/followup-reminder-1h.cron'
 import { Notification } from './entities/notification.entity'
 import { LeadCreatedHandler } from './handlers/lead-created.handler'
@@ -18,7 +21,7 @@ import { NotificationRepository } from './repositories/notification.repository'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Notification, UserInformations, Message]),
+    TypeOrmModule.forFeature([Notification, UserInformations, Message, Lead]),
     AutomationModule,
     MailModule,
     RabbitModule
@@ -28,6 +31,8 @@ import { NotificationRepository } from './repositories/notification.repository'
     NotificationRepository,
     NotificationService,
     FollowUpReminder1hCron,
+    ConversationExpiring1hCron,
+    ConversationExpiredCron,
     LeadCreatedHandler,
     MessageReceivedHandler,
     NotificationConsumer

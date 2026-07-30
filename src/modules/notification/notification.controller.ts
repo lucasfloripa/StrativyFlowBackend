@@ -99,6 +99,14 @@ export class NotificationController {
       return NotificationType.FOLLOW_UP_REMINDER_1H
     }
 
+    if (value === 'CONVERSATION_EXPIRING_1H') {
+      return NotificationType.CONVERSATION_EXPIRING_1H
+    }
+
+    if (value === 'CONVERSATION_EXPIRED') {
+      return NotificationType.CONVERSATION_EXPIRED
+    }
+
     throw new BadRequestException('Invalid notification type')
   }
 }

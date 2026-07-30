@@ -204,8 +204,7 @@ export class ReminderCronService {
       }
 
       if (whatsappRecipients.length) {
-        const phoneNumberId =
-          group.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID?.trim()
+        const phoneNumberId = group.phoneNumberId
 
         if (!phoneNumberId) {
           this.logger.warn(

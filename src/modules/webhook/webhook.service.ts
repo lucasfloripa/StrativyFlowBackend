@@ -257,7 +257,11 @@ export class WebhookService {
       const isTextMessage = resolvedMessageType === MessageType.TEXT
       const isFromAd = message?.referral?.source_type === 'ad'
       const isFromGoogleAds = text?.toLowerCase().includes('google ads')
-      const leadSource = isFromAd ? 'MetaAds' : isFromGoogleAds ? 'GoogleAds' : 'whatsapp'
+      const leadSource = isFromAd
+        ? 'MetaAds'
+        : isFromGoogleAds
+          ? 'GoogleAds'
+          : 'whatsapp'
       const metaAdId = isFromAd ? message?.referral?.source_id : undefined
       const googleAdId = isFromGoogleAds ? 'google_ads_contact' : undefined
 
@@ -480,6 +484,8 @@ export class WebhookService {
 
         lead.lastInboundMessageId = inboundMessageId ?? undefined
         lead.lastActivityAt = new Date()
+        lead.conversationReminder1hSentAt = null
+        lead.conversationExpiredNotificationSentAt = null
         await this.leadRepo.save(lead)
 
         this.logger.log(
@@ -561,6 +567,8 @@ export class WebhookService {
 
         lead.lastInboundMessageId = inboundMessageId ?? undefined
         lead.lastActivityAt = new Date()
+        lead.conversationReminder1hSentAt = null
+        lead.conversationExpiredNotificationSentAt = null
 
         this.logger.log(
           '[10] Saving lead after HUMAN runtime mode inbound update'
@@ -645,6 +653,8 @@ export class WebhookService {
       }
 
       lead.lastInboundMessageId = inboundMessageId ?? undefined
+      lead.conversationReminder1hSentAt = null
+      lead.conversationExpiredNotificationSentAt = null
 
       this.logger.log('[10] Saving lead after FlowEngine execution')
       await this.leadRepo.save(lead)
@@ -911,6 +921,8 @@ export class WebhookService {
 
     lead.lastInboundMessageId = inboundMessageId
     lead.lastActivityAt = new Date()
+    lead.conversationReminder1hSentAt = null
+    lead.conversationExpiredNotificationSentAt = null
 
     this.logger.log('[10] Saving lead after media message processing')
     await this.leadRepo.save(lead)
@@ -960,8 +972,14 @@ export class WebhookService {
     }
 
     try {
-      const mediaInfo = await this.getWhatsAppMediaInfo(message.metaMediaId, whatsappToken)
-      const buffer = await this.downloadWhatsAppMedia(mediaInfo.data.url, whatsappToken)
+      const mediaInfo = await this.getWhatsAppMediaInfo(
+        message.metaMediaId,
+        whatsappToken
+      )
+      const buffer = await this.downloadWhatsAppMedia(
+        mediaInfo.data.url,
+        whatsappToken
+      )
       const mimeType =
         mediaInfo.data.mime_type?.trim() ||
         message.mimeType?.trim() ||
@@ -1041,13 +1059,15 @@ export class WebhookService {
     // E.g.: webhook sends 5511987654321 (13 digits) or 551187654321 (12 digits)
     // DB may store 55119XXXXXXXX (13) or 5511XXXXXXXX (12)
 
-    const withNine = digits.length === 12
-      ? digits.slice(0, 4) + '9' + digits.slice(4)   // 12-digit → insert 9 after DDD
-      : null
+    const withNine =
+      digits.length === 12
+        ? digits.slice(0, 4) + '9' + digits.slice(4) // 12-digit → insert 9 after DDD
+        : null
 
-    const withoutNine = digits.length === 13 && digits[4] === '9'
-      ? digits.slice(0, 4) + digits.slice(5)          // 13-digit with 9 → remove it
-      : null
+    const withoutNine =
+      digits.length === 13 && digits[4] === '9'
+        ? digits.slice(0, 4) + digits.slice(5) // 13-digit with 9 → remove it
+        : null
 
     if (withNine) variants.add(withNine)
     if (withoutNine) variants.add(withoutNine)
@@ -1055,7 +1075,10 @@ export class WebhookService {
     return Array.from(variants)
   }
 
-  private async findLeadByPhone(userInformationsId: string, phone: string): Promise<Lead | null> {
+  private async findLeadByPhone(
+    userInformationsId: string,
+    phone: string
+  ): Promise<Lead | null> {
     const variants = this.buildPhoneVariants(phone)
 
     return this.leadRepo.findOne({
@@ -1104,7 +1127,10 @@ export class WebhookService {
     })
   }
 
-  private async downloadWhatsAppMedia(url: string, whatsappToken?: string): Promise<Buffer> {
+  private async downloadWhatsAppMedia(
+    url: string,
+    whatsappToken?: string
+  ): Promise<Buffer> {
     const token = whatsappToken?.trim()
     const response = await axios.get<ArrayBuffer>(url, {
       headers: {
@@ -1164,7 +1190,12 @@ export class WebhookService {
     const notificationMessage = 'Tem novo Lead no Flow!'
     const results = await Promise.allSettled(
       recipients.map((recipient) =>
-        this.sendWhatsAppMessage(recipient, notificationMessage, phoneNumberId, whatsappToken)
+        this.sendWhatsAppMessage(
+          recipient,
+          notificationMessage,
+          phoneNumberId,
+          whatsappToken
+        )
       )
     )
 

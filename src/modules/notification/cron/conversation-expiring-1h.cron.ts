@@ -4,10 +4,7 @@ import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
 import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
-import {
-  FollowUp,
-  FollowUpStatus
-} from '../../followup/entities/followup.entity'
+import { Lead } from '../../leads/entities/lead.entity'
 import { MailService } from '../../mail/mail.service'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
@@ -20,16 +17,16 @@ import {
   NotificationType as PreferenceNotificationType
 } from '../enums'
 
-type FollowUpReminderCandidate = {
-  followUpId: string
+type ConversationExpiringCandidate = {
+  leadId: string
   userId: string
   leadName: string
   userInformationsId: string
 }
 
 @Injectable()
-export class FollowUpReminder1hCron {
-  private readonly logger = new Logger(FollowUpReminder1hCron.name)
+export class ConversationExpiring1hCron {
+  private readonly logger = new Logger(ConversationExpiring1hCron.name)
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
@@ -38,41 +35,46 @@ export class FollowUpReminder1hCron {
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
-  async sendOneHourFollowUpReminders(): Promise<void> {
+  async sendConversationExpiringReminders(): Promise<void> {
     const now = new Date()
     const windowStart = now
     const windowEnd = new Date(now.getTime() + 60 * 60 * 1000)
 
+    // Expiration window: lastInboundMessageAt + 24h
+    // We want: expirationAt > now AND expirationAt <= now + 1h
+    // i.e.: lastInboundMessageAt + 24h > now  AND  lastInboundMessageAt + 24h <= now + 1h
+    // i.e.: lastInboundMessageAt > now - 24h  AND  lastInboundMessageAt <= now + 1h - 24h
+    const twentyThreeHoursAgo = new Date(now.getTime() - 23 * 60 * 60 * 1000)
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+
     this.logger.debug(
-      `Running 1h follow-up reminder cron. windowStart=${windowStart.toISOString()} windowEnd=${windowEnd.toISOString()}`
+      `Running conversation expiring 1h cron. windowStart=${windowStart.toISOString()} windowEnd=${windowEnd.toISOString()}`
     )
 
     await this.dataSource.transaction(async (manager) => {
       const candidates = await manager
-        .createQueryBuilder(FollowUp, 'followUp')
-        .innerJoin('followUp.negotiation', 'negotiation')
-        .innerJoin('negotiation.lead', 'lead')
+        .createQueryBuilder(Lead, 'lead')
         .innerJoin(
           UserInformations,
           'userInformations',
           '"userInformations"."id"::text = "lead"."userInformationsId"'
         )
-        .select('followUp.id', 'followUpId')
+        .select('lead.id', 'leadId')
         .addSelect('lead.name', 'leadName')
         .addSelect('userInformations.userId', 'userId')
         .addSelect('userInformations.id', 'userInformationsId')
-        .where('"followUp"."status" = :pendingStatus', {
-          pendingStatus: FollowUpStatus.PENDING
-        })
-        .andWhere('"followUp"."remider1hSentAt" IS NULL')
-        .andWhere('"followUp"."dueAt" > :windowStart', { windowStart })
-        .andWhere('"followUp"."dueAt" <= :windowEnd', { windowEnd })
+        .where('lead."lastActivityAt" IS NOT NULL')
+        .andWhere('lead."conversationReminder1hSentAt" IS NULL')
+        // lastActivityAt > now - 24h (not yet expired)
+        .andWhere('lead."lastActivityAt" > :twentyFourHoursAgo', { twentyFourHoursAgo })
+        // lastActivityAt <= now - 23h (within the 1h warning window)
+        .andWhere('lead."lastActivityAt" <= :twentyThreeHoursAgo', { twentyThreeHoursAgo })
         .setLock('pessimistic_write')
         .setOnLocked('skip_locked')
-        .getRawMany<FollowUpReminderCandidate>()
+        .getRawMany<ConversationExpiringCandidate>()
 
       if (!candidates.length) {
-        this.logger.debug('No follow-ups matched the 1h reminder window')
+        this.logger.debug('No conversations matched the expiring 1h reminder window')
         return
       }
 
@@ -83,24 +85,24 @@ export class FollowUpReminder1hCron {
 
         const enabledChannels =
           userInformations?.notificationPreferences?.[
-            PreferenceNotificationType.FOLLOWUP_ONE_HOUR
+            PreferenceNotificationType.CONVERSATION_EXPIRING_1H
           ] ?? []
 
         if (enabledChannels.includes(NotificationChannel.APP)) {
           await manager.insert(Notification, {
             organizationId: null,
             userId: candidate.userId,
-            type: NotificationType.FOLLOW_UP_REMINDER_1H,
-            title: 'Follow-up em 1 hora',
-            description: `Retornar para ${candidate.leadName}`,
+            type: NotificationType.CONVERSATION_EXPIRING_1H,
+            title: 'Conversa expirando em 1 hora',
+            description: `A janela de atendimento de ${candidate.leadName} expira em breve`,
             referenceType: NotificationReferenceType.FOLLOW_UP,
-            referenceId: candidate.followUpId,
+            referenceId: candidate.leadId,
             isRead: false,
             readAt: null
           })
         } else {
           this.logger.log(
-            `Skipping APP follow-up 1h reminder because APP channel is disabled for userId=${candidate.userId}`
+            `Skipping APP conversation expiring reminder because APP channel is disabled for userId=${candidate.userId}`
           )
         }
 
@@ -115,17 +117,17 @@ export class FollowUpReminder1hCron {
 
           if (!recipients.length) {
             this.logger.warn(
-              `Skipping WHATSAPP follow-up 1h reminder because no recipient numbers are configured for userId=${candidate.userId}`
+              `Skipping WHATSAPP conversation expiring reminder because no recipient numbers are configured for userId=${candidate.userId}`
             )
           } else {
-            const phoneNumberId = userInformations?.phoneNumberId?.trim()
-
+            const phoneNumberId =
+              userInformations?.phoneNumberId?.trim()
             if (!phoneNumberId) {
               this.logger.warn(
-                `Skipping WHATSAPP follow-up 1h reminder because phoneNumberId is missing for userId=${candidate.userId}`
+                `Skipping WHATSAPP conversation expiring reminder because phoneNumberId is missing for userId=${candidate.userId}`
               )
             } else {
-              const notificationMessage = `Follow-up em 1 hora: Retornar para ${candidate.leadName}`
+              const notificationMessage = `Atenção: a janela de atendimento de ${candidate.leadName} expira em menos de 1 hora`
 
               const results = await Promise.allSettled(
                 recipients.map((recipient) =>
@@ -143,13 +145,13 @@ export class FollowUpReminder1hCron {
               ).length
 
               this.logger.log(
-                `WHATSAPP follow-up 1h reminder dispatch finished for userId=${candidate.userId}, followUpId=${candidate.followUpId}. success=${successCount}/${recipients.length}`
+                `WHATSAPP conversation expiring reminder dispatch finished for userId=${candidate.userId}, leadId=${candidate.leadId}. success=${successCount}/${recipients.length}`
               )
 
               results.forEach((result, index) => {
                 if (result.status === 'rejected') {
                   this.logger.warn(
-                    `Failed to send WHATSAPP follow-up 1h reminder to ${recipients[index]} for followUpId=${candidate.followUpId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
+                    `Failed to send WHATSAPP conversation expiring reminder to ${recipients[index]} for leadId=${candidate.leadId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
                   )
                 }
               })
@@ -157,7 +159,7 @@ export class FollowUpReminder1hCron {
           }
         } else {
           this.logger.log(
-            `Skipping WHATSAPP follow-up 1h reminder because WHATSAPP channel is disabled for userId=${candidate.userId}`
+            `Skipping WHATSAPP conversation expiring reminder because WHATSAPP channel is disabled for userId=${candidate.userId}`
           )
         }
 
@@ -172,46 +174,43 @@ export class FollowUpReminder1hCron {
 
           if (!recipients.length) {
             this.logger.warn(
-              `Skipping EMAIL follow-up 1h reminder because no notificationEmails are configured for userId=${candidate.userId}`
+              `Skipping EMAIL conversation expiring reminder because no notificationEmails are configured for userId=${candidate.userId}`
             )
           } else {
             await this.mailService.send({
               from: 'Strativy Flow <no-reply@strativyflow.com>',
               to: recipients,
-              subject: 'Follow-up em 1 hora',
+              subject: 'Conversa expirando em 1 hora',
               html: [
-                '<h2>Follow-up em 1 hora</h2>',
-                `<p>Retornar para ${this.escapeHtml(candidate.leadName)}</p>`
+                '<h2>Conversa expirando em 1 hora</h2>',
+                `<p>A janela de atendimento de <strong>${this.escapeHtml(candidate.leadName)}</strong> expira em menos de 1 hora.</p>`,
+                '<p>Responda agora para manter a conversa ativa.</p>'
               ].join('')
             })
 
             this.logger.log(
-              `EMAIL follow-up 1h reminder sent for userId=${candidate.userId}, followUpId=${candidate.followUpId}, recipients=${recipients.length}`
+              `EMAIL conversation expiring reminder sent for userId=${candidate.userId}, leadId=${candidate.leadId}, recipients=${recipients.length}`
             )
           }
         } else {
           this.logger.log(
-            `Skipping EMAIL follow-up 1h reminder because EMAIL channel is disabled for userId=${candidate.userId}`
+            `Skipping EMAIL conversation expiring reminder because EMAIL channel is disabled for userId=${candidate.userId}`
           )
         }
 
-        const updateResult = await manager.update(
-          FollowUp,
-          {
-            id: candidate.followUpId
-          },
-          {
-            reminder1hSentAt: now
-          }
+        await manager.update(
+          Lead,
+          { id: candidate.leadId },
+          { conversationReminder1hSentAt: now }
         )
 
         this.logger.log(
-          `Marked reminder1hSentAt for follow-up ${candidate.followUpId}. Affected rows: ${updateResult.affected ?? 0}`
+          `Marked conversationReminder1hSentAt for lead ${candidate.leadId}`
         )
       }
 
       this.logger.log(
-        `Generated ${candidates.length} one-hour follow-up reminder notification(s)`
+        `Generated ${candidates.length} conversation expiring reminder notification(s)`
       )
     })
   }

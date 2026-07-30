@@ -33,6 +33,9 @@ export class UserInformations {
   @Column({ type: 'varchar', nullable: true })
   whatsappToken?: string | null
 
+  @Column({ type: 'json', nullable: true })
+  messageShortcuts?: Record<string, string> | null
+
   @Column('text', { array: true, default: '{}' })
   notificationWhatsAppNumbers!: string[]
 

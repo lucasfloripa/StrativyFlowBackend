@@ -12,6 +12,7 @@ import { NotificationType, NotificationChannel } from '../notification/enums'
 import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
 import { UpdateUserInformationsNotificationsDto } from './dtos/update-user-informations-notifications.dto'
 import { UpdateUserInformationsPreferencesDto } from './dtos/update-user-informations-preferences.dto'
+import { UpdateUserInformationsShortcutsDto } from './dtos/update-user-informations-shortcuts.dto'
 import { UserInformations } from './entities/user-informations.entity'
 
 import type { NotificationPreferences } from '../notification/types'
@@ -137,5 +138,31 @@ export class UserService {
       where: { userId: normalizedUserId },
       order: { createdAt: 'ASC' }
     })
+  }
+
+  async updateUserInformationsShortcutsByUserId(
+    userId: string,
+    dto: UpdateUserInformationsShortcutsDto
+  ) {
+    const normalizedUserId = userId.trim()
+
+    if (!normalizedUserId) {
+      throw new BadRequestException('userId is required')
+    }
+
+    const userInformations = await this.userInformationsRepo.findOne({
+      where: { userId: normalizedUserId },
+      order: { createdAt: 'ASC' }
+    })
+
+    if (!userInformations) {
+      throw new NotFoundException('User informations not found')
+    }
+
+    if (dto.messageShortcuts !== undefined) {
+      userInformations.messageShortcuts = dto.messageShortcuts ?? null
+    }
+
+    return this.userInformationsRepo.save(userInformations)
   }
 }

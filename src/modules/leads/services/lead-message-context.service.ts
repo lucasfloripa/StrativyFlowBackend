@@ -39,9 +39,7 @@ export class LeadMessageContextService {
         })
       : null
 
-    const phoneNumberId =
-      userInformations?.phoneNumberId?.trim() ||
-      process.env.WHATSAPP_PHONE_NUMBER_ID
+    const phoneNumberId = userInformations?.phoneNumberId?.trim()
 
     if (!phoneNumberId?.trim()) {
       throw new BadRequestException(

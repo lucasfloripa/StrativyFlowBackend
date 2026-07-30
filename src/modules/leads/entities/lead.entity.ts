@@ -93,6 +93,12 @@ export class Lead {
   @Column({ type: 'timestamptz', nullable: true })
   lastActivityAt?: Date
 
+  @Column({ type: 'timestamptz', nullable: true })
+  conversationReminder1hSentAt?: Date | null
+
+  @Column({ type: 'timestamptz', nullable: true })
+  conversationExpiredNotificationSentAt?: Date | null
+
   @Column({
     type: 'varchar',
     default: LeadState.ACTIVE
