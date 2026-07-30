@@ -84,14 +84,14 @@ export class DashboardService {
             `EXISTS (
               SELECT 1
               FROM messages message
-              WHERE message."leadId" = lead.id
+              WHERE message."leadId" = lead.id::text
             )`
           )
           .andWhere(
             `NOT EXISTS (
               SELECT 1
               FROM messages message
-              WHERE message."leadId" = lead.id
+              WHERE message."leadId" = lead.id::text
                 AND message."createdAt" >= :twentyFourHoursAgo
             )`,
             { twentyFourHoursAgo }
