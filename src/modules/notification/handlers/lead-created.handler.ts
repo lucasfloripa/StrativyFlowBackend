@@ -55,6 +55,13 @@ export class LeadCreatedHandler implements NotificationEventHandler {
         PreferenceNotificationType.NEW_LEAD
       ] ?? []
 
+    const notificationWhatsAppNumbers = userInformations?.notificationWhatsAppNumbers ?? []
+    const notificationEmails = userInformations?.notificationEmails ?? []
+
+    this.logger.debug(
+      `NEW_LEAD notification targets for userId=${userId}, leadId=${leadId}: whatsAppNumbers=[${notificationWhatsAppNumbers.join(', ') || 'none'}], emails=[${notificationEmails.join(', ') || 'none'}], enabledChannels=[${enabledChannels.join(', ') || 'none'}]`
+    )
+
     this.logger.log(
       `Processing lead.created for userId=${userId}, leadId=${leadId}, origin=${origin ?? 'unknown'}, channels=${enabledChannels.join(',') || 'none'}`
     )
