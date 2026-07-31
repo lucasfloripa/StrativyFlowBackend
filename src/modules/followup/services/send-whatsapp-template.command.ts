@@ -6,6 +6,8 @@ export type SendWhatsAppTemplateCommand = {
   leadId: string
   templateId: string
   phone: string
+  phoneNumberId: string
+  accessToken: string
   metaTemplateName: string
   language: string
   templateVariableDefinitions: TemplateVariableDefinition[]

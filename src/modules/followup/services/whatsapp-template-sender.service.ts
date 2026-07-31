@@ -15,7 +15,10 @@ export class WhatsAppTemplateSender {
   async sendTemplate(command: SendWhatsAppTemplateCommand): Promise<void> {
     const payload = this.buildMetaSendTemplateRequest(command)
 
-    await this.metaWhatsAppClient.sendTemplate(payload)
+    await this.metaWhatsAppClient.sendTemplate(payload, {
+      phoneNumberId: command.phoneNumberId,
+      accessToken: command.accessToken
+    })
   }
 
   private buildMetaSendTemplateRequest(

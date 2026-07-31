@@ -161,11 +161,17 @@ export class LeadMessageApplicationService {
   }
 
   async sendTemplateMessage(command: SendTemplateLeadMessageCommand) {
-    const { lead, destinationPhone } =
+    const { lead, destinationPhone, phoneNumberId, whatsappToken } =
       await this.leadMessageContextService.resolveOutboundContextOrFail(
         command.userId,
         command.leadId
       )
+
+    if (!whatsappToken?.trim()) {
+      throw new BadRequestException(
+        'WhatsApp token is not configured for this lead'
+      )
+    }
 
     const template = await this.messageTemplateService.findOne(command.templateId)
 
@@ -179,6 +185,8 @@ export class LeadMessageApplicationService {
       leadId: lead.id,
       templateId: command.templateId,
       phone: destinationPhone,
+      phoneNumberId,
+      accessToken: whatsappToken,
       metaTemplateName: template.metaTemplateName,
       language: template.language ?? 'pt_BR',
       templateVariableDefinitions: template.variables ?? [],

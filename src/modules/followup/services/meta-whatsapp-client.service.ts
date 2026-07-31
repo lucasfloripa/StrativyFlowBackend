@@ -32,9 +32,10 @@ export class MetaWhatsAppClient {
   ) {}
 
   async sendTemplate(
-    payload: MetaWhatsAppSendTemplateRequestDto
+    payload: MetaWhatsAppSendTemplateRequestDto,
+    credentials: Pick<MetaWhatsAppApiConfig, 'phoneNumberId' | 'accessToken'>
   ): Promise<MetaWhatsAppSendTemplateSuccessDto> {
-    const metaApiConfig = this.getMetaApiConfig()
+    const metaApiConfig = this.getMetaApiConfig(credentials)
     const endpoint = `${metaApiConfig.baseUrl}/${metaApiConfig.phoneNumberId}/messages`
     try {
       const { data } = await firstValueFrom(
@@ -77,17 +78,17 @@ export class MetaWhatsAppClient {
     return typeof value === 'object' && value !== null && 'response' in value
   }
 
-  private getMetaApiConfig(): MetaWhatsAppApiConfig {
+  private getMetaApiConfig(
+    credentials: Pick<MetaWhatsAppApiConfig, 'phoneNumberId' | 'accessToken'>
+  ): MetaWhatsAppApiConfig {
     const apiVersion = this.configService.getOrThrow<string>(
       'WHATSAPP_API_VERSION'
     )
 
     return {
       baseUrl: buildMetaWhatsAppBaseUrl(apiVersion),
-      phoneNumberId: this.configService.getOrThrow<string>(
-        'WHATSAPP_PHONE_NUMBER_ID'
-      ),
-      accessToken: this.configService.getOrThrow<string>('WHATSAPP_TOKEN')
+      phoneNumberId: credentials.phoneNumberId,
+      accessToken: credentials.accessToken
     }
   }
 }

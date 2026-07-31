@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { NegotiationStage } from '../../negotiation/entities/negotiation.entity'
+import { UserInformations } from '../../user/entities/user-informations.entity'
 import { FollowUp, FollowUpStatus } from '../entities/followup.entity'
 
 import { FollowUpTemplateCommandMapper } from './followup-template-command.mapper'
@@ -15,6 +16,8 @@ export class FollowUpExecutor {
   constructor(
     @InjectRepository(FollowUp)
     private readonly followUpRepository: Repository<FollowUp>,
+    @InjectRepository(UserInformations)
+    private readonly userInformationsRepository: Repository<UserInformations>,
     private readonly followUpTemplateCommandMapper: FollowUpTemplateCommandMapper,
     private readonly whatsAppTemplateSender: WhatsAppTemplateSender
   ) {}
@@ -73,13 +76,18 @@ export class FollowUpExecutor {
     return true
   }
 
-  isLeadInActiveConversation(followUp: FollowUp, referenceDate: Date = new Date()): boolean {
+  isLeadInActiveConversation(
+    followUp: FollowUp,
+    referenceDate: Date = new Date()
+  ): boolean {
     const lastActivityAt = followUp.negotiation?.lead?.lastActivityAt
     if (!lastActivityAt) {
       return false
     }
 
-    const hoursSinceLastActivity = (referenceDate.getTime() - new Date(lastActivityAt).getTime()) / (1000 * 60 * 60)
+    const hoursSinceLastActivity =
+      (referenceDate.getTime() - new Date(lastActivityAt).getTime()) /
+      (1000 * 60 * 60)
     const isInActiveConversation = hoursSinceLastActivity < 24
 
     if (isInActiveConversation) {
@@ -102,8 +110,27 @@ export class FollowUpExecutor {
       `Preparing WhatsApp template command. followUpId=${followUp.id}, negotiationId=${followUp.negotiationId}, templateId=${followUp.templateId ?? 'null'}`
     )
 
+    const userInformationsId = followUp.negotiation?.lead?.userInformationsId
+    const userInformations = userInformationsId
+      ? await this.userInformationsRepository.findOne({
+          where: { id: userInformationsId }
+        })
+      : null
+    const phoneNumberId = userInformations?.phoneNumberId?.trim()
+    const accessToken = userInformations?.whatsappToken?.trim()
+
+    if (!phoneNumberId || !accessToken) {
+      this.logger.warn(
+        `Skipping follow-up execution due to missing WhatsApp credentials in userInformations. followUpId=${followUp.id}, leadId=${followUp.negotiation?.leadId ?? 'null'}, userInformationsId=${userInformationsId ?? 'null'}, hasPhoneNumberId=${Boolean(phoneNumberId)}, hasAccessToken=${Boolean(accessToken)}`
+      )
+      return
+    }
+
     const sendTemplateCommand =
-      this.followUpTemplateCommandMapper.toSendWhatsAppTemplateCommand(followUp)
+      this.followUpTemplateCommandMapper.toSendWhatsAppTemplateCommand(
+        followUp,
+        { phoneNumberId, accessToken }
+      )
 
     await this.whatsAppTemplateSender.sendTemplate(sendTemplateCommand)
 
