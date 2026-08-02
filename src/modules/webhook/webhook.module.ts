@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { AutomationModule } from '../automation/automation.module'
+import { EvolutionModule } from '../evolution/evolution.module'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { LeadsModule } from '../leads/leads.module'
@@ -20,6 +21,7 @@ import { WebhookService } from './webhook.service'
   imports: [
     TypeOrmModule.forFeature([Lead, Message, UserInformations]),
     AutomationModule,
+    EvolutionModule,
     LeadsModule,
     RabbitModule,
     RealtimeModule,

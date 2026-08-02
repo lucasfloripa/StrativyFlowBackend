@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
+import { EvolutionService } from '../../evolution/evolution.service'
 import {
   FollowUp,
   FollowUpStatus
@@ -33,7 +33,7 @@ export class FollowUpReminder1hCron {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly automationMessagingService: AutomationMessagingService,
+    private readonly evolutionService: EvolutionService,
     private readonly mailService: MailService
   ) {}
 
@@ -118,42 +118,29 @@ export class FollowUpReminder1hCron {
               `Skipping WHATSAPP follow-up 1h reminder because no recipient numbers are configured for userId=${candidate.userId}`
             )
           } else {
-            const phoneNumberId = userInformations?.phoneNumberId?.trim()
+            const notificationMessage = `Follow-up em 1 hora: Retornar para ${candidate.leadName}`
 
-            if (!phoneNumberId) {
-              this.logger.warn(
-                `Skipping WHATSAPP follow-up 1h reminder because phoneNumberId is missing for userId=${candidate.userId}`
+            const results = await Promise.allSettled(
+              recipients.map((recipient) =>
+                this.evolutionService.sendText(recipient, notificationMessage)
               )
-            } else {
-              const notificationMessage = `Follow-up em 1 hora: Retornar para ${candidate.leadName}`
+            )
 
-              const results = await Promise.allSettled(
-                recipients.map((recipient) =>
-                  this.automationMessagingService.sendWhatsAppMessage(
-                    recipient,
-                    notificationMessage,
-                    phoneNumberId,
-                    userInformations?.whatsappToken ?? undefined
-                  )
+            const successCount = results.filter(
+              (result) => result.status === 'fulfilled'
+            ).length
+
+            this.logger.log(
+              `WHATSAPP follow-up 1h reminder dispatch finished for userId=${candidate.userId}, followUpId=${candidate.followUpId}. success=${successCount}/${recipients.length}`
+            )
+
+            results.forEach((result, index) => {
+              if (result.status === 'rejected') {
+                this.logger.warn(
+                  `Failed to send WHATSAPP follow-up 1h reminder to ${recipients[index]} for followUpId=${candidate.followUpId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
                 )
-              )
-
-              const successCount = results.filter(
-                (result) => result.status === 'fulfilled'
-              ).length
-
-              this.logger.log(
-                `WHATSAPP follow-up 1h reminder dispatch finished for userId=${candidate.userId}, followUpId=${candidate.followUpId}. success=${successCount}/${recipients.length}`
-              )
-
-              results.forEach((result, index) => {
-                if (result.status === 'rejected') {
-                  this.logger.warn(
-                    `Failed to send WHATSAPP follow-up 1h reminder to ${recipients[index]} for followUpId=${candidate.followUpId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
-                  )
-                }
-              })
-            }
+              }
+            })
           }
         } else {
           this.logger.log(

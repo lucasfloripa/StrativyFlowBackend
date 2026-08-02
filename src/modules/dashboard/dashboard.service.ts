@@ -3,11 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { In, MoreThanOrEqual, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
-import {
-  Lead,
-  LeadRuntimeMode,
-  LeadState
-} from '../leads/entities/lead.entity'
+import { Lead, LeadRuntimeMode, LeadState } from '../leads/entities/lead.entity'
 import { MessageDirection } from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -102,14 +98,14 @@ export class DashboardService {
             `EXISTS (
               SELECT 1
               FROM messages message
-              WHERE message."leadId" = lead.id::text
+              WHERE message."leadId"::text = lead.id::text
             )`
           )
           .andWhere(
             `NOT EXISTS (
               SELECT 1
               FROM messages message
-              WHERE message."leadId" = lead.id::text
+              WHERE message."leadId"::text = lead.id::text
                 AND message."createdAt" >= :twentyFourHoursAgo
             )`,
             { twentyFourHoursAgo }

@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
+import { EvolutionService } from '../../evolution/evolution.service'
 import { Lead } from '../../leads/entities/lead.entity'
 import { MailService } from '../../mail/mail.service'
 import { UserInformations } from '../../user/entities/user-informations.entity'
@@ -30,7 +30,7 @@ export class ConversationExpiring1hCron {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly automationMessagingService: AutomationMessagingService,
+    private readonly evolutionService: EvolutionService,
     private readonly mailService: MailService
   ) {}
 
@@ -120,42 +120,29 @@ export class ConversationExpiring1hCron {
               `Skipping WHATSAPP conversation expiring reminder because no recipient numbers are configured for userId=${candidate.userId}`
             )
           } else {
-            const phoneNumberId =
-              userInformations?.phoneNumberId?.trim()
-            if (!phoneNumberId) {
-              this.logger.warn(
-                `Skipping WHATSAPP conversation expiring reminder because phoneNumberId is missing for userId=${candidate.userId}`
-              )
-            } else {
-              const notificationMessage = `Atenção: a janela de atendimento de ${candidate.leadName} expira em menos de 1 hora`
+            const notificationMessage = `Atenção: a janela de atendimento de ${candidate.leadName} expira em menos de 1 hora`
 
-              const results = await Promise.allSettled(
-                recipients.map((recipient) =>
-                  this.automationMessagingService.sendWhatsAppMessage(
-                    recipient,
-                    notificationMessage,
-                    phoneNumberId,
-                    userInformations?.whatsappToken ?? undefined
-                  )
+            const results = await Promise.allSettled(
+              recipients.map((recipient) =>
+                this.evolutionService.sendText(recipient, notificationMessage)
+              )
+            )
+
+            const successCount = results.filter(
+              (result) => result.status === 'fulfilled'
+            ).length
+
+            this.logger.log(
+              `WHATSAPP conversation expiring reminder dispatch finished for userId=${candidate.userId}, leadId=${candidate.leadId}. success=${successCount}/${recipients.length}`
+            )
+
+            results.forEach((result, index) => {
+              if (result.status === 'rejected') {
+                this.logger.warn(
+                  `Failed to send WHATSAPP conversation expiring reminder to ${recipients[index]} for leadId=${candidate.leadId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
                 )
-              )
-
-              const successCount = results.filter(
-                (result) => result.status === 'fulfilled'
-              ).length
-
-              this.logger.log(
-                `WHATSAPP conversation expiring reminder dispatch finished for userId=${candidate.userId}, leadId=${candidate.leadId}. success=${successCount}/${recipients.length}`
-              )
-
-              results.forEach((result, index) => {
-                if (result.status === 'rejected') {
-                  this.logger.warn(
-                    `Failed to send WHATSAPP conversation expiring reminder to ${recipients[index]} for leadId=${candidate.leadId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
-                  )
-                }
-              })
-            }
+              }
+            })
           }
         } else {
           this.logger.log(

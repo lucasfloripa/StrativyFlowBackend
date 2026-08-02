@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { DashboardModule } from './modules/dashboard/dashboard.module'
+import { EvolutionModule } from './modules/evolution/evolution.module'
 import { FollowUpModule } from './modules/followup/followup.module'
 import { LeadsModule } from './modules/leads/leads.module'
 import { NegotiationModule } from './modules/negotiation/negotiation.module'
@@ -49,6 +50,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
       }
     }),
     DashboardModule,
+    EvolutionModule,
     FollowUpModule,
     LeadsModule,
     NegotiationModule,

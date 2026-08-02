@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
-import { AutomationModule } from '../automation/automation.module'
+import { EvolutionModule } from '../evolution/evolution.module'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { MailModule } from '../mail/mail.module'
@@ -22,7 +22,7 @@ import { NotificationRepository } from './repositories/notification.repository'
 @Module({
   imports: [
     TypeOrmModule.forFeature([Notification, UserInformations, Message, Lead]),
-    AutomationModule,
+    EvolutionModule,
     MailModule,
     RabbitModule
   ],
