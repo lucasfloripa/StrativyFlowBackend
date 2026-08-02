@@ -455,9 +455,9 @@ export class WebhookService {
           phoneNumberId,
           userInformations.whatsappToken ?? undefined
         )
+        const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
 
-        lead.lastAutoReplyMessageId =
-          response?.data?.messages?.[0]?.id ?? undefined
+        lead.lastAutoReplyMessageId = whatsappMessageId ?? undefined
 
         this.logger.log('[10] Saving lead after first auto-reply dispatch')
         await this.leadRepo.save(lead)
@@ -882,7 +882,10 @@ export class WebhookService {
           direction: MessageDirection.OUTBOUND,
           content,
           type: MessageType.TEXT,
-          whatsappMessageId: whatsappMessageId ?? null
+          whatsappMessageId: whatsappMessageId ?? null,
+          metadata: {
+            runtimeMode: LeadRuntimeMode.AUTOMATION
+          }
         })
       )
     } catch (error) {
