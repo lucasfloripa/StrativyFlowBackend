@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
-import { EvolutionModule } from '../evolution/evolution.module'
+import { AutomationModule } from '../automation/automation.module'
 import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead } from '../leads/entities/lead.entity'
 import { MailModule } from '../mail/mail.module'
@@ -14,7 +14,7 @@ import { ReminderController } from './reminder.controller'
 @Module({
   imports: [
     TypeOrmModule.forFeature([FollowUp, Negotiation, Lead, UserInformations]),
-    EvolutionModule,
+    AutomationModule,
     MailModule
   ],
   controllers: [ReminderController],

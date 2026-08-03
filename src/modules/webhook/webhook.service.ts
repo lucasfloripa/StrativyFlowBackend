@@ -10,7 +10,6 @@ import {
   AutomationTriggerContext,
   AutomationTriggerType
 } from '../automation/flow/automation-trigger.types'
-import { EvolutionService } from '../evolution/evolution.service'
 import {
   Lead,
   LeadFlowState,
@@ -184,8 +183,7 @@ export class WebhookService {
     private readonly rabbitPublisherService: RabbitPublisherService,
     private readonly storageService: StorageService,
     private readonly leadsService: LeadsService,
-    private readonly realtimeService: RealtimeService,
-    private readonly evolutionService: EvolutionService
+    private readonly realtimeService: RealtimeService
   ) {}
 
   private readonly logger = new Logger(WebhookService.name)
@@ -398,6 +396,8 @@ export class WebhookService {
 
         await this.notifyNewLeadToConfiguredWhatsAppNumbers({
           leadId: lead.id,
+          phoneNumberId,
+          whatsappToken: userInformations.whatsappToken ?? undefined,
           notificationWhatsAppNumbers:
             userInformations.notificationWhatsAppNumbers,
           notificationPreferences: userInformations.notificationPreferences
@@ -1148,11 +1148,15 @@ export class WebhookService {
 
   private async notifyNewLeadToConfiguredWhatsAppNumbers(params: {
     leadId: string
+    phoneNumberId?: string
+    whatsappToken?: string
     notificationWhatsAppNumbers?: string[]
     notificationPreferences?: UserInformations['notificationPreferences']
   }) {
     const {
       leadId,
+      phoneNumberId,
+      whatsappToken,
       notificationWhatsAppNumbers,
       notificationPreferences
     } = params
@@ -1179,10 +1183,22 @@ export class WebhookService {
       return
     }
 
+    if (!phoneNumberId?.trim()) {
+      this.logger.warn(
+        `Skipping new lead notification dispatch for lead ${leadId}: missing phone_number_id`
+      )
+      return
+    }
+
     const notificationMessage = 'Tem novo Lead no Flow!'
     const results = await Promise.allSettled(
       recipients.map((recipient) =>
-        this.evolutionService.sendText(recipient, notificationMessage)
+        this.sendWhatsAppMessage(
+          recipient,
+          notificationMessage,
+          phoneNumberId,
+          whatsappToken
+        )
       )
     )
 

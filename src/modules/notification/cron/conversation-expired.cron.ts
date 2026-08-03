@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
-import { EvolutionService } from '../../evolution/evolution.service'
+import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
 import { Lead } from '../../leads/entities/lead.entity'
 import { MailService } from '../../mail/mail.service'
 import { UserInformations } from '../../user/entities/user-informations.entity'
@@ -30,7 +30,7 @@ export class ConversationExpiredCron {
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly evolutionService: EvolutionService,
+    private readonly automationMessagingService: AutomationMessagingService,
     private readonly mailService: MailService
   ) {}
 
@@ -110,29 +110,42 @@ export class ConversationExpiredCron {
               `Skipping WHATSAPP conversation expired notification because no recipient numbers are configured for userId=${candidate.userId}`
             )
           } else {
-            const notificationMessage = `A conversa com ${candidate.leadName} saiu da janela de atendimento de 24 horas.\n\nAgora será necessário enviar um template para continuar a conversa.`
-
-            const results = await Promise.allSettled(
-              recipients.map((recipient) =>
-                this.evolutionService.sendText(recipient, notificationMessage)
+            const phoneNumberId =
+              userInformations?.phoneNumberId?.trim()
+            if (!phoneNumberId) {
+              this.logger.warn(
+                `Skipping WHATSAPP conversation expired notification because phoneNumberId is missing for userId=${candidate.userId}`
               )
-            )
+            } else {
+              const notificationMessage = `A conversa com ${candidate.leadName} saiu da janela de atendimento de 24 horas.\n\nAgora será necessário enviar um template para continuar a conversa.`
 
-            const successCount = results.filter(
-              (result) => result.status === 'fulfilled'
-            ).length
-
-            this.logger.log(
-              `WHATSAPP conversation expired notification dispatch finished for userId=${candidate.userId}, leadId=${candidate.leadId}. success=${successCount}/${recipients.length}`
-            )
-
-            results.forEach((result, index) => {
-              if (result.status === 'rejected') {
-                this.logger.warn(
-                  `Failed to send WHATSAPP conversation expired notification to ${recipients[index]} for leadId=${candidate.leadId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
+              const results = await Promise.allSettled(
+                recipients.map((recipient) =>
+                  this.automationMessagingService.sendWhatsAppMessage(
+                    recipient,
+                    notificationMessage,
+                    phoneNumberId,
+                    userInformations?.whatsappToken ?? undefined
+                  )
                 )
-              }
-            })
+              )
+
+              const successCount = results.filter(
+                (result) => result.status === 'fulfilled'
+              ).length
+
+              this.logger.log(
+                `WHATSAPP conversation expired notification dispatch finished for userId=${candidate.userId}, leadId=${candidate.leadId}. success=${successCount}/${recipients.length}`
+              )
+
+              results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                  this.logger.warn(
+                    `Failed to send WHATSAPP conversation expired notification to ${recipients[index]} for leadId=${candidate.leadId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
+                  )
+                }
+              })
+            }
           }
         } else {
           this.logger.log(

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
-import { EvolutionService } from '../../evolution/evolution.service'
+import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
 import { Message, MessageDirection } from '../../leads/entities/message.entity'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
@@ -27,7 +27,7 @@ export class MessageReceivedHandler implements NotificationEventHandler {
 
   constructor(
     private readonly notificationService: NotificationService,
-    private readonly evolutionService: EvolutionService,
+    private readonly automationMessagingService: AutomationMessagingService,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
     @InjectRepository(Message)
@@ -183,6 +183,19 @@ export class MessageReceivedHandler implements NotificationEventHandler {
       return
     }
 
+    const phoneNumberId = userInformations?.phoneNumberId?.trim()
+
+    this.logger.log(
+      `MESSAGE_RECEIVED phoneNumberId resolved for userId=${userId}: ${phoneNumberId ? 'configured' : 'missing'}`
+    )
+
+    if (!phoneNumberId) {
+      this.logger.warn(
+        `Skipping MESSAGE_RECEIVED WhatsApp notification because phoneNumberId is missing for userId=${userId}`
+      )
+      return
+    }
+
     const notificationMessage = `Lead ${leadName} mandou mensagem no Flow!`
 
     this.logger.log(
@@ -191,7 +204,12 @@ export class MessageReceivedHandler implements NotificationEventHandler {
 
     const results = await Promise.allSettled(
       recipients.map((recipient) =>
-        this.evolutionService.sendText(recipient, notificationMessage)
+        this.automationMessagingService.sendWhatsAppMessage(
+          recipient,
+          notificationMessage,
+          phoneNumberId,
+          userInformations?.whatsappToken ?? undefined
+        )
       )
     )
 
