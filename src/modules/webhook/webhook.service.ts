@@ -250,6 +250,7 @@ export class WebhookService {
 
       const displayPhoneNumber = value?.metadata?.display_phone_number
       const phoneNumberId = value?.metadata?.phone_number_id
+      const profileName = this.resolveInboundContactProfileName(value?.contacts)
       from = message?.from?.trim()
       inboundMessageId = message?.id?.trim()
       const text = this.resolveInboundMessageContent(message)
@@ -361,10 +362,14 @@ export class WebhookService {
 
       // PRIMEIRO CONTATO (via anúncio)
       if (!lead) {
+        const shouldUseProfileName = this.hasValidLeadName(profileName)
+
         const leadDraft = this.leadRepo.create({
           userInformationsId: userInformations.id,
-          name: 'Lead sem nome',
-          flowState: LeadFlowState.ASKING_NAME,
+          name: shouldUseProfileName ? profileName!.trim() : 'Lead sem nome',
+          flowState: shouldUseProfileName
+            ? LeadFlowState.ASKING_LOCATION
+            : LeadFlowState.ASKING_NAME,
           phone: from,
           source: leadSource,
           metaAdId: metaAdId,
@@ -447,7 +452,9 @@ export class WebhookService {
           }
         })
 
-        const reply = 'Olá! 👋 \nComo podemos te chamar?'
+        const reply = shouldUseProfileName
+          ? 'Olá! 👋 \nDa onde você fala?'
+          : 'Olá! 👋 \nComo podemos te chamar?'
 
         const response = await this.sendWhatsAppMessage(
           from,
@@ -1350,6 +1357,27 @@ export class WebhookService {
     if (Number.isNaN(numericTimestamp)) return null
 
     return new Date(numericTimestamp * 1000)
+  }
+
+  private resolveInboundContactProfileName(
+    contacts?: Array<{
+      profile?: {
+        name?: string
+      }
+    }>
+  ): string | null {
+    const rawName = contacts?.[0]?.profile?.name
+
+    if (!rawName) {
+      return null
+    }
+
+    const normalizedName = rawName.trim()
+    if (!normalizedName) {
+      return null
+    }
+
+    return normalizedName
   }
 
   private hasValidLeadName(leadName?: string | null): boolean {
