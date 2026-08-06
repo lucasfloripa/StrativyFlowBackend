@@ -86,10 +86,14 @@ export class UserService {
     if (dto.notificationWhatsAppNumbers) {
       userInformations.notificationWhatsAppNumbers =
         dto.notificationWhatsAppNumbers
+          .map((number) => number.trim())
+          .filter(Boolean)
     }
 
     if (dto.notificationEmails) {
       userInformations.notificationEmails = dto.notificationEmails
+        .map((email) => email.trim().toLowerCase())
+        .filter((email) => Boolean(email))
     }
 
     return this.userInformationsRepo.save(userInformations)

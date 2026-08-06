@@ -4,6 +4,7 @@ import { Repository } from 'typeorm'
 
 import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
 import { Message, MessageDirection } from '../../leads/entities/message.entity'
+import { Lead, LeadFlowState } from '../../leads/entities/lead.entity'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
@@ -31,7 +32,9 @@ export class MessageReceivedHandler implements NotificationEventHandler {
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
     @InjectRepository(Message)
-    private readonly messageRepo: Repository<Message>
+    private readonly messageRepo: Repository<Message>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>
   ) {}
 
   async handle(message: RabbitMessage): Promise<void> {
@@ -48,6 +51,15 @@ export class MessageReceivedHandler implements NotificationEventHandler {
     if (!userId || !messageId || !leadId) {
       this.logger.warn(
         'Skipping message.received notification due to invalid payload'
+      )
+      return
+    }
+
+    const lead = await this.leadRepo.findOne({ where: { id: leadId } })
+
+    if (!lead || lead.flowState !== LeadFlowState.IN_CONVERSATION) {
+      this.logger.log(
+        `Skipping MESSAGE_RECEIVED notifications until lead reaches IN_CONVERSATION. leadId=${leadId}, flowState=${lead?.flowState ?? 'unknown'}`
       )
       return
     }

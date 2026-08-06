@@ -3,10 +3,12 @@ import { ConfigService } from '@nestjs/config'
 import { Resend } from 'resend'
 
 export type SendMailInput = {
-  from: string
+  from?: string
   to: string | string[]
   subject: string
   html: string
+  text?: string
+  replyTo?: string
 }
 
 @Injectable()
@@ -31,6 +33,20 @@ export class MailService {
   async send(input: SendMailInput): Promise<{ id: string | null }> {
     const recipients = Array.isArray(input.to) ? input.to : [input.to]
     const recipientCount = Array.isArray(input.to) ? input.to.length : 1
+    const fromAddress =
+      input.from ??
+      this.configService.get<string>('MAIL_FROM') ??
+      'Strativy Flow <no-reply@strativyflow.com>'
+    const replyToAddress =
+      input.replyTo ??
+      this.configService.get<string>('MAIL_REPLY_TO') ??
+      'no-reply@strativyflow.com'
+    const textContent =
+      input.text ??
+      input.html
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
 
     this.logger.log(
       `Sending email with subject "${input.subject}" to ${recipientCount} recipient(s)`
@@ -40,10 +56,16 @@ export class MailService {
     )
     try {
       const response = await this.resend.emails.send({
-        from: input.from,
+        from: fromAddress,
         to: input.to,
         subject: input.subject,
-        html: input.html
+        html: input.html,
+        text: textContent,
+        replyTo: replyToAddress,
+        headers: {
+          'List-Unsubscribe': `<mailto:${replyToAddress}>`,
+          'X-Entity-Ref-ID': `${Date.now()}`
+        }
       })
 
       if (response.error) {
