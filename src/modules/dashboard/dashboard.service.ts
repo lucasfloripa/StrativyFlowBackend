@@ -4,8 +4,18 @@ import { In, MoreThanOrEqual, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { Lead, LeadRuntimeMode, LeadState } from '../leads/entities/lead.entity'
-import { MessageDirection } from '../leads/entities/message.entity'
+import {
+  MessageDirection,
+  MessageType
+} from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
+
+import { DashboardConversationFilter } from './dto/dashboard-conversations-query.dto'
+import {
+  DashboardConversationItemDto,
+  DashboardConversationStatus,
+  DashboardConversationsResponseDto
+} from './dto/dashboard-conversations-response.dto'
 
 type DashboardSummary = {
   activeLeads: number
@@ -16,6 +26,25 @@ type DashboardSummary = {
     today: number
     scheduled: number
   }
+}
+
+type DashboardConversationRow = {
+  leadId: string
+  leadName: string
+  source: string | null
+  leadCreatedAt: Date | string
+  lastMessageAt: Date | string
+  lastMessage: string | null
+  lastMessageDirection: MessageDirection
+  lastMessageType: MessageType
+  lastInboundAt: Date | string | null
+  hasOutbound: boolean
+  runtimeMode: LeadRuntimeMode
+}
+
+type ClassifiedDashboardConversation = DashboardConversationItemDto & {
+  hasOpenMetaWindow: boolean
+  hasNoResponse24h: boolean
 }
 
 @Injectable()
@@ -162,6 +191,168 @@ export class DashboardService {
         today: Number(followUpsRaw?.today ?? 0),
         scheduled: Number(followUpsRaw?.scheduled ?? 0)
       }
+    }
+  }
+
+  async getConversations(
+    userId: string,
+    filter: DashboardConversationFilter
+  ): Promise<DashboardConversationsResponseDto> {
+    const userInformationsIds = await this.findUserInformationsIds(userId)
+
+    if (!userInformationsIds.length) {
+      return {
+        filter,
+        counts: {
+          all: 0,
+          new: 0,
+          today: 0,
+          noResponse24h: 0
+        },
+        items: []
+      }
+    }
+
+    const rows = await this.leadRepo.query<DashboardConversationRow[]>(
+      `
+        SELECT
+          lead.id AS "leadId",
+          lead.name AS "leadName",
+          lead.source AS source,
+          lead."createdAt" AS "leadCreatedAt",
+          lead."runtimeMode" AS "runtimeMode",
+          latest_message."createdAt" AS "lastMessageAt",
+          latest_message.content AS "lastMessage",
+          latest_message.direction AS "lastMessageDirection",
+          latest_message.type AS "lastMessageType",
+          message_stats."lastInboundAt" AS "lastInboundAt",
+          COALESCE(message_stats."hasOutbound", FALSE) AS "hasOutbound"
+        FROM leads lead
+        INNER JOIN LATERAL (
+          SELECT
+            message."createdAt",
+            message.content,
+            message.direction,
+            message.type
+          FROM messages message
+          WHERE message."leadId" = lead.id::text
+            AND message.direction IN ($2, $3)
+          ORDER BY message."createdAt" DESC, message.id DESC
+          LIMIT 1
+        ) latest_message ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            MAX(message."createdAt") FILTER (
+              WHERE message.direction = $2
+            ) AS "lastInboundAt",
+            BOOL_OR(
+              message.direction = $3
+              AND (message.metadata->>'runtimeMode') IS DISTINCT FROM $4
+            ) AS "hasOutbound"
+          FROM messages message
+          WHERE message."leadId" = lead.id::text
+        ) message_stats ON TRUE
+        WHERE lead."userInformationsId"::text = ANY($1::text[])
+      `,
+      [
+        userInformationsIds,
+        MessageDirection.INBOUND,
+        MessageDirection.OUTBOUND,
+        LeadRuntimeMode.AUTOMATION
+      ]
+    )
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const conversations = rows.map((row) =>
+      this.classifyConversation(row, twentyFourHoursAgo)
+    )
+
+    const counts = {
+      all: conversations.length,
+      new: conversations.filter((conversation) => conversation.isNew).length,
+      today: conversations.filter(
+        (conversation) => conversation.hasOpenMetaWindow
+      ).length,
+      noResponse24h: conversations.filter(
+        (conversation) => conversation.hasNoResponse24h
+      ).length
+    }
+
+    const filteredConversations = conversations
+      .filter((conversation) => {
+        if (filter === DashboardConversationFilter.NEW) {
+          return conversation.isNew
+        }
+
+        if (filter === DashboardConversationFilter.TODAY) {
+          return conversation.hasOpenMetaWindow
+        }
+
+        if (filter === DashboardConversationFilter.NO_RESPONSE_24H) {
+          return conversation.hasNoResponse24h
+        }
+
+        return true
+      })
+      .sort((first, second) => {
+        if (
+          filter === DashboardConversationFilter.ALL &&
+          first.isNew !== second.isNew
+        ) {
+          return first.isNew ? -1 : 1
+        }
+
+        return second.leadCreatedAt.getTime() - first.leadCreatedAt.getTime()
+      })
+      .map(({ hasOpenMetaWindow, hasNoResponse24h, ...conversation }) =>
+        conversation
+      )
+
+    return {
+      filter,
+      counts,
+      items: filteredConversations
+    }
+  }
+
+  private classifyConversation(
+    row: DashboardConversationRow,
+    twentyFourHoursAgo: Date
+  ): ClassifiedDashboardConversation {
+    const leadCreatedAt = new Date(row.leadCreatedAt)
+    const lastMessageAt = new Date(row.lastMessageAt)
+    const lastInboundAt = row.lastInboundAt
+      ? new Date(row.lastInboundAt)
+      : null
+    const isNew = leadCreatedAt >= twentyFourHoursAgo && !row.hasOutbound
+    const hasOpenMetaWindow =
+      lastInboundAt !== null && lastInboundAt > twentyFourHoursAgo
+    const hasNoResponse24h =
+      lastInboundAt !== null && lastInboundAt <= twentyFourHoursAgo
+    let status: DashboardConversationStatus | null = null
+
+    if (isNew) {
+      status = 'new'
+    } else if (hasOpenMetaWindow) {
+      status = 'today'
+    } else if (hasNoResponse24h) {
+      status = 'noResponse24h'
+    }
+
+    return {
+      leadId: row.leadId,
+      leadName: row.leadName,
+      source: row.source,
+      leadCreatedAt,
+      lastMessageAt,
+      lastMessage: row.lastMessage,
+      lastMessageDirection: row.lastMessageDirection,
+      lastMessageType: row.lastMessageType,
+      isNew,
+      status,
+      runtimeMode: row.runtimeMode,
+      hasOpenMetaWindow,
+      hasNoResponse24h
     }
   }
 

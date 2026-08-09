@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
 import { Repository } from 'typeorm'
 
+import { LeadRuntimeMode } from '../../leads/entities/lead.entity'
 import {
   Message,
   MessageDirection,
@@ -96,7 +97,10 @@ export class AutomationMessagingService {
           direction: MessageDirection.OUTBOUND,
           content,
           type: MessageType.TEXT,
-          whatsappMessageId: whatsappMessageId ?? null
+          whatsappMessageId: whatsappMessageId ?? null,
+          metadata: {
+            runtimeMode: LeadRuntimeMode.AUTOMATION
+          }
         })
       )
     } catch (error) {
