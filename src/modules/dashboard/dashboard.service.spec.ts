@@ -2,10 +2,7 @@ import { Repository } from 'typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead, LeadRuntimeMode } from '../leads/entities/lead.entity'
-import {
-  MessageDirection,
-  MessageType
-} from '../leads/entities/message.entity'
+import { MessageDirection, MessageType } from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { DashboardService } from './dashboard.service'
@@ -14,7 +11,9 @@ import { DashboardConversationFilter } from './dto/dashboard-conversations-query
 describe('DashboardService conversations', () => {
   let service: DashboardService
   let leadRepo: jest.Mocked<Pick<Repository<Lead>, 'query'>>
-  let userInformationsRepo: jest.Mocked<Pick<Repository<UserInformations>, 'find'>>
+  let userInformationsRepo: jest.Mocked<
+    Pick<Repository<UserInformations>, 'find'>
+  >
 
   beforeEach(() => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-08T15:00:00.000Z'))
@@ -42,6 +41,7 @@ describe('DashboardService conversations', () => {
         lastMessage: 'Quero mais informações',
         lastMessageDirection: MessageDirection.INBOUND,
         lastMessageType: MessageType.TEXT,
+        firstInboundAt: '2026-08-08T12:10:00.000Z',
         lastInboundAt: '2026-08-08T12:10:00.000Z',
         hasOutbound: false,
         runtimeMode: LeadRuntimeMode.AUTOMATION
@@ -50,12 +50,13 @@ describe('DashboardService conversations', () => {
         leadId: 'recent-answered',
         leadName: 'Lead respondido',
         source: 'WhatsApp',
-        leadCreatedAt: '2026-08-08T13:00:00.000Z',
-        lastMessageAt: '2026-08-08T13:30:00.000Z',
+        leadCreatedAt: '2026-08-05T16:00:00.000Z',
+        lastMessageAt: '2026-08-05T20:00:00.000Z',
         lastMessage: 'Olá, como posso ajudar?',
         lastMessageDirection: MessageDirection.OUTBOUND,
         lastMessageType: MessageType.TEXT,
-        lastInboundAt: '2026-08-08T13:05:00.000Z',
+        firstInboundAt: '2026-08-05T17:00:00.000Z',
+        lastInboundAt: '2026-08-05T17:00:00.000Z',
         hasOutbound: true,
         runtimeMode: LeadRuntimeMode.HUMAN
       },
@@ -66,8 +67,9 @@ describe('DashboardService conversations', () => {
         leadCreatedAt: '2026-08-08T14:00:00.000Z',
         lastMessageAt: '2026-08-08T14:01:00.000Z',
         lastMessage: 'Olá! Como podemos ajudar?',
-        lastMessageDirection: MessageDirection.OUTBOUND,
+        lastMessageDirection: MessageDirection.AUTOMATIC,
         lastMessageType: MessageType.TEXT,
+        firstInboundAt: '2026-08-08T14:00:00.000Z',
         lastInboundAt: '2026-08-08T14:00:00.000Z',
         hasOutbound: false,
         runtimeMode: LeadRuntimeMode.AUTOMATION
@@ -81,6 +83,21 @@ describe('DashboardService conversations', () => {
         lastMessage: 'Mensagem recebida hoje',
         lastMessageDirection: MessageDirection.INBOUND,
         lastMessageType: MessageType.TEXT,
+        firstInboundAt: '2026-08-04T10:00:00.000Z',
+        lastInboundAt: '2026-08-08T10:00:00.000Z',
+        hasOutbound: true,
+        runtimeMode: LeadRuntimeMode.HUMAN
+      },
+      {
+        leadId: 'completed-72h-open-window',
+        leadName: 'Completou 72h com janela aberta',
+        source: 'WhatsApp',
+        leadCreatedAt: '2026-08-05T09:00:00.000Z',
+        lastMessageAt: '2026-08-08T10:00:00.000Z',
+        lastMessage: 'Mensagem recebida nas últimas 24h',
+        lastMessageDirection: MessageDirection.INBOUND,
+        lastMessageType: MessageType.TEXT,
+        firstInboundAt: '2026-08-05T15:00:00.000Z',
         lastInboundAt: '2026-08-08T10:00:00.000Z',
         hasOutbound: true,
         runtimeMode: LeadRuntimeMode.HUMAN
@@ -89,11 +106,12 @@ describe('DashboardService conversations', () => {
         leadId: 'old-expired-window',
         leadName: 'Sem inbound recente',
         source: 'Indicação',
-        leadCreatedAt: '2026-08-05T10:00:00.000Z',
+        leadCreatedAt: '2026-08-04T10:00:00.000Z',
         lastMessageAt: '2026-08-08T14:00:00.000Z',
         lastMessage: 'Última mensagem foi outbound',
         lastMessageDirection: MessageDirection.OUTBOUND,
         lastMessageType: MessageType.TEXT,
+        firstInboundAt: '2026-08-04T10:00:00.000Z',
         lastInboundAt: '2026-08-06T14:00:00.000Z',
         hasOutbound: true,
         runtimeMode: LeadRuntimeMode.AUTOMATION
@@ -114,14 +132,16 @@ describe('DashboardService conversations', () => {
     expect(result.items.map((item) => item.leadId)).toEqual([
       'recent-automation-replied',
       'recent-unanswered',
-      'recent-answered',
       'old-open-window',
+      'recent-answered',
+      'completed-72h-open-window',
       'old-expired-window'
     ])
     expect(result.counts).toEqual({
-      all: 5,
+      all: 6,
       new: 2,
-      today: 4,
+      last72h: 1,
+      today: 2,
       noResponse24h: 1
     })
     expect(result.items[0]).toEqual(
@@ -130,16 +150,15 @@ describe('DashboardService conversations', () => {
         status: 'new',
         runtimeMode: LeadRuntimeMode.AUTOMATION,
         lastMessageAt: new Date('2026-08-08T14:01:00.000Z'),
-        lastMessageDirection: MessageDirection.OUTBOUND
+        lastMessageDirection: MessageDirection.AUTOMATIC
       })
     )
-    expect(
-      result.items.map((item) => [item.leadId, item.status])
-    ).toEqual([
+    expect(result.items.map((item) => [item.leadId, item.status])).toEqual([
       ['recent-automation-replied', 'new'],
       ['recent-unanswered', 'new'],
-      ['recent-answered', 'today'],
       ['old-open-window', 'today'],
+      ['recent-answered', 'last72h'],
+      ['completed-72h-open-window', 'today'],
       ['old-expired-window', 'noResponse24h']
     ])
   })
@@ -149,14 +168,10 @@ describe('DashboardService conversations', () => {
       DashboardConversationFilter.NEW,
       ['recent-automation-replied', 'recent-unanswered']
     ],
+    [DashboardConversationFilter.LAST_72H, ['recent-answered']],
     [
       DashboardConversationFilter.TODAY,
-      [
-        'recent-automation-replied',
-        'recent-answered',
-        'recent-unanswered',
-        'old-open-window'
-      ]
+      ['old-open-window', 'completed-72h-open-window']
     ],
     [DashboardConversationFilter.NO_RESPONSE_24H, ['old-expired-window']]
   ])('filters conversations by %s', async (filter, expectedLeadIds) => {

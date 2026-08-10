@@ -1,10 +1,14 @@
 import { LeadRuntimeMode } from '../../leads/entities/lead.entity'
-import { MessageDirection, MessageType } from '../../leads/entities/message.entity'
+import {
+  MessageDirection,
+  MessageType
+} from '../../leads/entities/message.entity'
 
 import { DashboardConversationFilter } from './dashboard-conversations-query.dto'
 
 export type DashboardConversationStatus =
   | 'new'
+  | 'last72h'
   | 'today'
   | 'noResponse24h'
 

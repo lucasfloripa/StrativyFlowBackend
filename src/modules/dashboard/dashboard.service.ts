@@ -1,13 +1,10 @@
 import { Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { In, MoreThanOrEqual, Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { Lead, LeadRuntimeMode, LeadState } from '../leads/entities/lead.entity'
-import {
-  MessageDirection,
-  MessageType
-} from '../leads/entities/message.entity'
+import { MessageDirection, MessageType } from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { DashboardConversationFilter } from './dto/dashboard-conversations-query.dto'
@@ -37,12 +34,14 @@ type DashboardConversationRow = {
   lastMessage: string | null
   lastMessageDirection: MessageDirection
   lastMessageType: MessageType
+  firstInboundAt: Date | string | null
   lastInboundAt: Date | string | null
   hasOutbound: boolean
   runtimeMode: LeadRuntimeMode
 }
 
 type ClassifiedDashboardConversation = DashboardConversationItemDto & {
+  isWithinFirst72Hours: boolean
   hasOpenMetaWindow: boolean
   hasNoResponse24h: boolean
 }
@@ -206,6 +205,7 @@ export class DashboardService {
         counts: {
           all: 0,
           new: 0,
+          last72h: 0,
           today: 0,
           noResponse24h: 0
         },
@@ -225,6 +225,7 @@ export class DashboardService {
           latest_message.content AS "lastMessage",
           latest_message.direction AS "lastMessageDirection",
           latest_message.type AS "lastMessageType",
+          message_stats."firstInboundAt" AS "firstInboundAt",
           message_stats."lastInboundAt" AS "lastInboundAt",
           COALESCE(message_stats."hasOutbound", FALSE) AS "hasOutbound"
         FROM leads lead
@@ -236,12 +237,15 @@ export class DashboardService {
             message.type
           FROM messages message
           WHERE message."leadId" = lead.id::text
-            AND message.direction IN ($2, $3)
+            AND message.direction IN ($2, $3, $5)
           ORDER BY message."createdAt" DESC, message.id DESC
           LIMIT 1
         ) latest_message ON TRUE
         LEFT JOIN LATERAL (
           SELECT
+            MIN(message."createdAt") FILTER (
+              WHERE message.direction = $2
+            ) AS "firstInboundAt",
             MAX(message."createdAt") FILTER (
               WHERE message.direction = $2
             ) AS "lastInboundAt",
@@ -258,18 +262,23 @@ export class DashboardService {
         userInformationsIds,
         MessageDirection.INBOUND,
         MessageDirection.OUTBOUND,
-        LeadRuntimeMode.AUTOMATION
+        LeadRuntimeMode.AUTOMATION,
+        MessageDirection.AUTOMATIC
       ]
     )
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000)
     const conversations = rows.map((row) =>
-      this.classifyConversation(row, twentyFourHoursAgo)
+      this.classifyConversation(row, twentyFourHoursAgo, seventyTwoHoursAgo)
     )
 
     const counts = {
       all: conversations.length,
       new: conversations.filter((conversation) => conversation.isNew).length,
+      last72h: conversations.filter(
+        (conversation) => conversation.isWithinFirst72Hours
+      ).length,
       today: conversations.filter(
         (conversation) => conversation.hasOpenMetaWindow
       ).length,
@@ -282,6 +291,10 @@ export class DashboardService {
       .filter((conversation) => {
         if (filter === DashboardConversationFilter.NEW) {
           return conversation.isNew
+        }
+
+        if (filter === DashboardConversationFilter.LAST_72H) {
+          return conversation.isWithinFirst72Hours
         }
 
         if (filter === DashboardConversationFilter.TODAY) {
@@ -304,9 +317,7 @@ export class DashboardService {
 
         return second.leadCreatedAt.getTime() - first.leadCreatedAt.getTime()
       })
-      .map(({ hasOpenMetaWindow, hasNoResponse24h, ...conversation }) =>
-        conversation
-      )
+      .map((conversation) => this.toConversationItem(conversation))
 
     return {
       filter,
@@ -317,22 +328,38 @@ export class DashboardService {
 
   private classifyConversation(
     row: DashboardConversationRow,
-    twentyFourHoursAgo: Date
+    twentyFourHoursAgo: Date,
+    seventyTwoHoursAgo: Date
   ): ClassifiedDashboardConversation {
     const leadCreatedAt = new Date(row.leadCreatedAt)
     const lastMessageAt = new Date(row.lastMessageAt)
-    const lastInboundAt = row.lastInboundAt
-      ? new Date(row.lastInboundAt)
+    const firstInboundAt = row.firstInboundAt
+      ? new Date(row.firstInboundAt)
       : null
+    const lastInboundAt = row.lastInboundAt ? new Date(row.lastInboundAt) : null
     const isNew = leadCreatedAt >= twentyFourHoursAgo && !row.hasOutbound
+    const hasCompletedFirst72Hours =
+      firstInboundAt !== null && firstInboundAt <= seventyTwoHoursAgo
+    const isWithinFirst72Hours =
+      row.hasOutbound &&
+      firstInboundAt !== null &&
+      firstInboundAt > seventyTwoHoursAgo
     const hasOpenMetaWindow =
-      lastInboundAt !== null && lastInboundAt > twentyFourHoursAgo
+      row.hasOutbound &&
+      hasCompletedFirst72Hours &&
+      lastInboundAt !== null &&
+      lastInboundAt > twentyFourHoursAgo
     const hasNoResponse24h =
-      lastInboundAt !== null && lastInboundAt <= twentyFourHoursAgo
+      row.hasOutbound &&
+      hasCompletedFirst72Hours &&
+      lastInboundAt !== null &&
+      lastInboundAt <= twentyFourHoursAgo
     let status: DashboardConversationStatus | null = null
 
     if (isNew) {
       status = 'new'
+    } else if (isWithinFirst72Hours) {
+      status = 'last72h'
     } else if (hasOpenMetaWindow) {
       status = 'today'
     } else if (hasNoResponse24h) {
@@ -351,8 +378,27 @@ export class DashboardService {
       isNew,
       status,
       runtimeMode: row.runtimeMode,
+      isWithinFirst72Hours,
       hasOpenMetaWindow,
       hasNoResponse24h
+    }
+  }
+
+  private toConversationItem(
+    conversation: ClassifiedDashboardConversation
+  ): DashboardConversationItemDto {
+    return {
+      leadId: conversation.leadId,
+      leadName: conversation.leadName,
+      source: conversation.source,
+      leadCreatedAt: conversation.leadCreatedAt,
+      lastMessageAt: conversation.lastMessageAt,
+      lastMessage: conversation.lastMessage,
+      lastMessageDirection: conversation.lastMessageDirection,
+      lastMessageType: conversation.lastMessageType,
+      isNew: conversation.isNew,
+      status: conversation.status,
+      runtimeMode: conversation.runtimeMode
     }
   }
 

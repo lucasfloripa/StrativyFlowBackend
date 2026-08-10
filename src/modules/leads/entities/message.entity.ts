@@ -9,7 +9,8 @@ import {
 
 export enum MessageDirection {
   INBOUND = 'INBOUND',
-  OUTBOUND = 'OUTBOUND'
+  OUTBOUND = 'OUTBOUND',
+  AUTOMATIC = 'AUTOMATIC'
 }
 
 export enum MessageType {

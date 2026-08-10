@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { BadRequestException, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
-import { In, Repository } from 'typeorm'
+import { Repository } from 'typeorm'
 
 import { AutomationTriggerDispatcher } from '../automation/flow/automation-trigger.dispatcher'
 import {
@@ -466,6 +466,12 @@ export class WebhookService {
 
         lead.lastAutoReplyMessageId = whatsappMessageId ?? undefined
 
+        await this.persistAutomaticMessage({
+          leadId: lead.id,
+          content: reply,
+          whatsappMessageId
+        })
+
         this.logger.log('[10] Saving lead after first auto-reply dispatch')
         await this.leadRepo.save(lead)
 
@@ -628,13 +634,18 @@ export class WebhookService {
             whatsappMessageId
           }
         },
-        persistOutboundMessage: async ({
+        persistAutomaticMessage: async ({
           context,
           leadId,
           content,
           whatsappMessageId
+        }: {
+          context: LeadFlowActionContext
+          leadId: string
+          content: string
+          whatsappMessageId?: string | null
         }) =>
-          this.persistOutboundMessage({
+          this.persistAutomaticMessage({
             correlationId: context.correlationId,
             leadId,
             content,
@@ -868,7 +879,7 @@ export class WebhookService {
     }
   }
 
-  private async persistOutboundMessage(params: {
+  private async persistAutomaticMessage(params: {
     correlationId?: string
     leadId: string
     content: string
@@ -879,14 +890,14 @@ export class WebhookService {
     try {
       if (correlationId) {
         this.logger.debug(
-          `[${correlationId}] Persisting outbound message for lead ${leadId}`
+          `[${correlationId}] Persisting automatic message for lead ${leadId}`
         )
       }
 
       await this.messageRepo.save(
         this.messageRepo.create({
           leadId,
-          direction: MessageDirection.OUTBOUND,
+          direction: MessageDirection.AUTOMATIC,
           content,
           type: MessageType.TEXT,
           whatsappMessageId: whatsappMessageId ?? null,
@@ -897,7 +908,7 @@ export class WebhookService {
       )
     } catch (error) {
       this.logger.warn(
-        `Failed to persist outbound WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
+        `Failed to persist automatic WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
       )
     }
   }
@@ -1392,5 +1403,11 @@ export class WebhookService {
     }
 
     return !normalized.includes('sem nome') && !normalized.includes('sem nova')
+  }
+
+  handleMessengerWebhook(payload: Record<string, unknown>) {
+    this.logger.log('Received Messenger webhook payload:', payload)
+
+    return { status: 'received' }
   }
 }

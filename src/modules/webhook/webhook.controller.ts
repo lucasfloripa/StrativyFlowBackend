@@ -22,6 +22,12 @@ export class WebhookController {
     return await this.webhookService.handleIncomingMessage(body)
   }
 
+  @Post('messenger')
+  @HttpCode(200)
+  handleMessengerWebhook(@Body() body: Record<string, unknown>) {
+    return this.webhookService.handleMessengerWebhook(body)
+  }
+
   @Get('whatsapp')
   verifyWebhook(
     @Query('hub.mode') mode: string,
@@ -31,6 +37,23 @@ export class WebhookController {
   ) {
     const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN
 
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      return res.status(200).send(challenge)
+    }
+
+    return res.status(403).send('Invalid verification token')
+  }
+
+  @Get('messenger')
+  verifyMessengerWebhook(
+    @Query('hub.mode') mode: string,
+    @Query('hub.verify_token') token: string,
+    @Query('hub.challenge') challenge: string,
+    @Res() res: Response
+  ) {
+    const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN
+
+    console.log('Verifying Messenger webhook:', { mode, token, challenge })
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       return res.status(200).send(challenge)
     }

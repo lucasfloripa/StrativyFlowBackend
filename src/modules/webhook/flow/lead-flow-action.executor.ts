@@ -27,7 +27,7 @@ export class LeadFlowActionExecutor {
     }) => Promise<{
       whatsappMessageId?: string | null
     }>
-    persistOutboundMessage: (params: {
+    persistAutomaticMessage: (params: {
       context: LeadFlowActionContext
       leadId: string
       content: string
@@ -40,7 +40,7 @@ export class LeadFlowActionExecutor {
       actions,
       transitionLeadFlowState,
       sendWhatsAppMessage,
-      persistOutboundMessage
+      persistAutomaticMessage
     } = params
 
     for (const action of actions) {
@@ -70,7 +70,7 @@ export class LeadFlowActionExecutor {
             content: action.payload.content
           })
 
-          await persistOutboundMessage({
+          await persistAutomaticMessage({
             context,
             leadId: lead.id,
             content: action.payload.content,

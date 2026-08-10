@@ -129,7 +129,8 @@ export class LeadsService {
       })
       .setParameter('messageDirections', [
         MessageDirection.INBOUND,
-        MessageDirection.OUTBOUND
+        MessageDirection.OUTBOUND,
+        MessageDirection.AUTOMATIC
       ])
 
     for (const [key, rawValue] of Object.entries(filters)) {
@@ -370,7 +371,11 @@ export class LeadsService {
       )
       .where('message."leadId" = :leadId', { leadId: lead.id })
       .andWhere('message.direction IN (:...messageDirections)', {
-        messageDirections: [MessageDirection.INBOUND, MessageDirection.OUTBOUND]
+        messageDirections: [
+          MessageDirection.INBOUND,
+          MessageDirection.OUTBOUND,
+          MessageDirection.AUTOMATIC
+        ]
       })
       .getRawOne<{ totalMessages: string; lastMessageAt: string | null }>()
 
