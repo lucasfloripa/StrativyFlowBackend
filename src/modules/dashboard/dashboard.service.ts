@@ -34,14 +34,12 @@ type DashboardConversationRow = {
   lastMessage: string | null
   lastMessageDirection: MessageDirection
   lastMessageType: MessageType
-  firstInboundAt: Date | string | null
   lastInboundAt: Date | string | null
   hasOutbound: boolean
   runtimeMode: LeadRuntimeMode
 }
 
 type ClassifiedDashboardConversation = DashboardConversationItemDto & {
-  isWithinFirst72Hours: boolean
   hasOpenMetaWindow: boolean
   hasNoResponse24h: boolean
 }
@@ -205,7 +203,6 @@ export class DashboardService {
         counts: {
           all: 0,
           new: 0,
-          last72h: 0,
           today: 0,
           noResponse24h: 0
         },
@@ -225,7 +222,6 @@ export class DashboardService {
           latest_message.content AS "lastMessage",
           latest_message.direction AS "lastMessageDirection",
           latest_message.type AS "lastMessageType",
-          message_stats."firstInboundAt" AS "firstInboundAt",
           message_stats."lastInboundAt" AS "lastInboundAt",
           COALESCE(message_stats."hasOutbound", FALSE) AS "hasOutbound"
         FROM leads lead
@@ -243,9 +239,6 @@ export class DashboardService {
         ) latest_message ON TRUE
         LEFT JOIN LATERAL (
           SELECT
-            MIN(message."createdAt") FILTER (
-              WHERE message.direction = $2
-            ) AS "firstInboundAt",
             MAX(message."createdAt") FILTER (
               WHERE message.direction = $2
             ) AS "lastInboundAt",
@@ -268,17 +261,13 @@ export class DashboardService {
     )
 
     const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000)
     const conversations = rows.map((row) =>
-      this.classifyConversation(row, twentyFourHoursAgo, seventyTwoHoursAgo)
+      this.classifyConversation(row, twentyFourHoursAgo)
     )
 
     const counts = {
       all: conversations.length,
       new: conversations.filter((conversation) => conversation.isNew).length,
-      last72h: conversations.filter(
-        (conversation) => conversation.isWithinFirst72Hours
-      ).length,
       today: conversations.filter(
         (conversation) => conversation.hasOpenMetaWindow
       ).length,
@@ -291,10 +280,6 @@ export class DashboardService {
       .filter((conversation) => {
         if (filter === DashboardConversationFilter.NEW) {
           return conversation.isNew
-        }
-
-        if (filter === DashboardConversationFilter.LAST_72H) {
-          return conversation.isWithinFirst72Hours
         }
 
         if (filter === DashboardConversationFilter.TODAY) {
@@ -328,38 +313,24 @@ export class DashboardService {
 
   private classifyConversation(
     row: DashboardConversationRow,
-    twentyFourHoursAgo: Date,
-    seventyTwoHoursAgo: Date
+    twentyFourHoursAgo: Date
   ): ClassifiedDashboardConversation {
     const leadCreatedAt = new Date(row.leadCreatedAt)
     const lastMessageAt = new Date(row.lastMessageAt)
-    const firstInboundAt = row.firstInboundAt
-      ? new Date(row.firstInboundAt)
-      : null
     const lastInboundAt = row.lastInboundAt ? new Date(row.lastInboundAt) : null
     const isNew = leadCreatedAt >= twentyFourHoursAgo && !row.hasOutbound
-    const hasCompletedFirst72Hours =
-      firstInboundAt !== null && firstInboundAt <= seventyTwoHoursAgo
-    const isWithinFirst72Hours =
-      row.hasOutbound &&
-      firstInboundAt !== null &&
-      firstInboundAt > seventyTwoHoursAgo
     const hasOpenMetaWindow =
       row.hasOutbound &&
-      hasCompletedFirst72Hours &&
       lastInboundAt !== null &&
       lastInboundAt > twentyFourHoursAgo
     const hasNoResponse24h =
       row.hasOutbound &&
-      hasCompletedFirst72Hours &&
       lastInboundAt !== null &&
       lastInboundAt <= twentyFourHoursAgo
     let status: DashboardConversationStatus | null = null
 
     if (isNew) {
       status = 'new'
-    } else if (isWithinFirst72Hours) {
-      status = 'last72h'
     } else if (hasOpenMetaWindow) {
       status = 'today'
     } else if (hasNoResponse24h) {
@@ -378,7 +349,6 @@ export class DashboardService {
       isNew,
       status,
       runtimeMode: row.runtimeMode,
-      isWithinFirst72Hours,
       hasOpenMetaWindow,
       hasNoResponse24h
     }

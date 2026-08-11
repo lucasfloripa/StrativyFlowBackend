@@ -6,11 +6,7 @@ import {
 
 import { DashboardConversationFilter } from './dashboard-conversations-query.dto'
 
-export type DashboardConversationStatus =
-  | 'new'
-  | 'last72h'
-  | 'today'
-  | 'noResponse24h'
+export type DashboardConversationStatus = 'new' | 'today' | 'noResponse24h'
 
 export type DashboardConversationItemDto = {
   leadId: string
