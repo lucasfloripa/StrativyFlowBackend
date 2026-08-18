@@ -10,6 +10,7 @@ import {
   AutomationTriggerContext,
   AutomationTriggerType
 } from '../automation/flow/automation-trigger.types'
+import { LeadChannel } from '../leads/entities/lead-channel-identity.entity'
 import {
   Lead,
   LeadFlowState,
@@ -18,12 +19,14 @@ import {
 } from '../leads/entities/lead.entity'
 import {
   Message,
+  MessageChannel,
   MessageDirection,
   MessageStatus,
   MessageType
 } from '../leads/entities/message.entity'
 import { LeadsService } from '../leads/leads.service'
-import { NotificationChannel, NotificationType } from '../notification/enums'
+import { LeadChannelIdentityService } from '../leads/services/lead-channel-identity.service'
+import { buildBrazilianPhoneVariants } from '../leads/utils/brazilian-phone'
 import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { StorageService } from '../storage/storage.service'
@@ -38,7 +41,9 @@ import {
   LeadFlowActionContext,
   LeadFlowProcessResult
 } from './flow/lead-flow.types'
+import { InstagramMessagingService } from './instagram-messaging.service'
 import { canTransitionMessageStatus } from './message-status.policy'
+import { MessengerMessagingService } from './messenger-messaging.service'
 
 type WhatsAppSendMessageResponse = {
   messaging_product: string
@@ -122,6 +127,10 @@ export type WhatsAppWebhookPayload = {
             text?: string
             payload?: string
           }
+          reaction?: {
+            message_id?: string
+            emoji?: string | null
+          }
           id?: string
           referral?: {
             source_type?: string
@@ -142,6 +151,65 @@ export type WhatsAppWebhookPayload = {
   }>
 }
 
+export type MessengerWebhookPayload = {
+  entry?: Array<{
+    id?: string
+    messaging?: Array<{
+      sender?: {
+        id?: string
+      }
+      recipient?: {
+        id?: string
+      }
+      timestamp?: number
+      message?: {
+        mid?: string
+        text?: string
+        is_echo?: boolean
+        attachments?: Array<{
+          type?: string
+          payload?: {
+            url?: string
+          }
+        }>
+      }
+    }>
+  }>
+}
+
+export type InstagramDirectWebhookPayload = {
+  object?: string
+  entry?: Array<{
+    id?: string
+    messaging?: Array<{
+      sender?: {
+        id?: string
+      }
+      recipient?: {
+        id?: string
+      }
+      timestamp?: number
+      reaction?: {
+        mid?: string
+        action?: string
+        reaction?: string
+        emoji?: string | null
+      }
+      message?: {
+        mid?: string
+        text?: string
+        is_echo?: boolean
+        attachments?: Array<{
+          type?: string
+          payload?: {
+            url?: string
+          }
+        }>
+      }
+    }>
+  }>
+}
+
 type WhatsAppInboundMessage = {
   type?: string
   from?: string
@@ -153,9 +221,26 @@ type WhatsAppInboundMessage = {
   image?: WhatsAppImageMessage
   video?: WhatsAppVideoMessage
   document?: WhatsAppDocumentMessage
+  contacts?: Array<{
+    name?: {
+      formatted_name?: string
+      first_name?: string
+      last_name?: string
+    }
+    phones?: Array<{
+      phone?: string
+      wa_id?: string
+      type?: string
+    }>
+    vcard?: string
+  }>
   button?: {
     text?: string
     payload?: string
+  }
+  reaction?: {
+    message_id?: string
+    emoji?: string | null
   }
   id?: string
   referral?: {
@@ -183,6 +268,9 @@ export class WebhookService {
     private readonly rabbitPublisherService: RabbitPublisherService,
     private readonly storageService: StorageService,
     private readonly leadsService: LeadsService,
+    private readonly leadChannelIdentityService: LeadChannelIdentityService,
+    private readonly messengerMessagingService: MessengerMessagingService,
+    private readonly instagramMessagingService: InstagramMessagingService,
     private readonly realtimeService: RealtimeService
   ) {}
 
@@ -259,7 +347,7 @@ export class WebhookService {
       const isFromAd = message?.referral?.source_type === 'ad'
       const isFromGoogleAds = text?.toLowerCase().includes('google ads')
       const leadSource = isFromAd
-        ? 'MetaAds'
+        ? 'Meta Ads'
         : isFromGoogleAds
           ? 'GoogleAds'
           : 'whatsapp'
@@ -278,7 +366,10 @@ export class WebhookService {
       }
 
       const existingInboundMessage = await this.messageRepo.findOne({
-        where: { whatsappMessageId: inboundMessageId }
+        where: {
+          channel: MessageChannel.WHATSAPP,
+          externalMessageId: inboundMessageId
+        }
       })
 
       if (existingInboundMessage) {
@@ -322,70 +413,111 @@ export class WebhookService {
         return { status: 'ignored_missing_user_informations' }
       }
 
+      const eventPhoneNumberId = phoneNumberId?.trim()
       if (
-        phoneNumberId?.trim() &&
-        userInformations.phoneNumberId !== phoneNumberId
+        eventPhoneNumberId &&
+        userInformations.phoneNumberId !== eventPhoneNumberId
       ) {
-        userInformations.phoneNumberId = phoneNumberId
+        userInformations.phoneNumberId = eventPhoneNumberId
         await this.userInformationsRepo.save(userInformations)
       }
 
-      this.logger.log(
-        `[2] Lead lookup started for user ${userInformations.userId} and phone ${from}`
-      )
-
-      let lead = await this.findLeadByPhone(userInformations.id, from)
-
-      this.logger.log(
-        lead
-          ? `[6] Lead found for inbound message ${inboundMessageId}: ${lead.id}`
-          : `[6] No lead found for inbound message ${inboundMessageId} from ${from}`
-      )
-
-      // idempotência
-      if (lead?.lastInboundMessageId === inboundMessageId) {
+      const externalAccountId =
+        eventPhoneNumberId || userInformations.phoneNumberId?.trim()
+      if (!externalAccountId) {
         this.logger.warn(
-          `Stopping webhook processing: inbound message ${inboundMessageId} is a duplicate for lead ${lead.id}`
+          `Stopping webhook processing: inbound message ${inboundMessageId} is missing phone_number_id`
         )
-        return { status: 'ignored_duplicate_message' }
+        return { status: 'ignored_missing_external_account' }
       }
 
+      if (resolvedMessageType === MessageType.REACTION) {
+        return this.handleWhatsAppReaction({
+          message,
+          externalAccountId,
+          externalUserId: from
+        })
+      }
+
+      this.logger.log(
+        `[2] Lead identity lookup started. channel=${LeadChannel.WHATSAPP} externalAccountId=${externalAccountId}`
+      )
+
+      const existingIdentity =
+        await this.leadChannelIdentityService.findIdentity({
+          channel: LeadChannel.WHATSAPP,
+          externalAccountId,
+          externalUserId: from
+        })
+      const legacyLead = existingIdentity
+        ? null
+        : await this.findLeadByPhone(userInformations.id, from)
       const isButtonMessage = message?.type === 'button'
 
-      // BUTTON MESSAGE: lead deve existir (vem de template Meta com CTA)
-      if (isButtonMessage && !lead) {
+      if (isButtonMessage && !existingIdentity && !legacyLead) {
         this.logger.warn(
           `Stopping webhook processing: button message ${inboundMessageId} from ${from} but lead not found`
         )
         return { status: 'ignored_button_message_lead_not_found' }
       }
 
-      // PRIMEIRO CONTATO (via anúncio)
-      if (!lead) {
-        const shouldUseProfileName = this.hasValidLeadName(profileName)
-
-        const leadDraft = this.leadRepo.create({
-          userInformationsId: userInformations.id,
-          name: shouldUseProfileName ? profileName!.trim() : 'Lead sem nome',
-          flowState: shouldUseProfileName
-            ? LeadFlowState.ASKING_LOCATION
-            : LeadFlowState.ASKING_NAME,
-          phone: from,
-          source: leadSource,
-          metaAdId: metaAdId,
-          googleAdId: googleAdId,
-          state: LeadState.ACTIVE,
-          runtimeMode: LeadRuntimeMode.AUTOMATION,
-          lastInboundMessageId: inboundMessageId ?? undefined,
-          lastActivityAt: new Date()
+      const shouldUseProfileName = this.hasValidLeadName(profileName)
+      const identityResolution =
+        await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
+          channel: LeadChannel.WHATSAPP,
+          externalAccountId,
+          externalUserId: from,
+          profileName,
+          lastInteractionAt:
+            this.parseWhatsAppTimestamp(message?.timestamp) ?? new Date(),
+          legacyLeadId: legacyLead?.id,
+          leadDraft: {
+            userInformationsId: userInformations.id,
+            name: shouldUseProfileName ? profileName!.trim() : undefined,
+            flowState: shouldUseProfileName
+              ? LeadFlowState.ASKING_LOCATION
+              : LeadFlowState.ASKING_NAME,
+            phone: from,
+            source: leadSource,
+            metaAdId,
+            googleAdId,
+            state: LeadState.ACTIVE,
+            runtimeMode: LeadRuntimeMode.AUTOMATION,
+            lastInboundMessageId: inboundMessageId,
+            lastActivityAt: new Date()
+          }
         })
+      let lead = identityResolution.lead
 
+      if (lead.userInformationsId !== userInformations.id) {
+        this.logger.error(
+          `Stopping webhook processing: channel identity ${identityResolution.identity.id} belongs to a different Flow account`
+        )
+        return { status: 'ignored_identity_owner_mismatch' }
+      }
+
+      this.logger.log(
+        identityResolution.leadCreated
+          ? `[6] Lead created for WhatsApp identity ${identityResolution.identity.id}: ${lead.id}`
+          : `[6] Lead found for WhatsApp identity ${identityResolution.identity.id}: ${lead.id}`
+      )
+
+      // idempotência
+      if (
+        !identityResolution.leadCreated &&
+        lead.lastInboundMessageId === inboundMessageId
+      ) {
+        this.logger.warn(
+          `Stopping webhook processing: inbound message ${inboundMessageId} is a duplicate for lead ${lead.id}`
+        )
+        return { status: 'ignored_duplicate_message' }
+      }
+
+      // PRIMEIRO CONTATO (via anúncio)
+      if (identityResolution.leadCreated) {
         this.logger.log(
           `[7] Persisting inbound message ${inboundMessageId} for new lead draft`
         )
-
-        this.logger.log('[10] Saving lead for newly created inbound contact')
-        lead = await this.leadRepo.save(leadDraft)
 
         await this.rabbitPublisherService.publish('lead.created', {
           leadId: lead.id,
@@ -397,15 +529,6 @@ export class WebhookService {
           description: lead.name,
           source: lead.source ?? null,
           createdAt: lead.createdAt
-        })
-
-        await this.notifyNewLeadToConfiguredWhatsAppNumbers({
-          leadId: lead.id,
-          phoneNumberId,
-          whatsappToken: userInformations.whatsappToken ?? undefined,
-          notificationWhatsAppNumbers:
-            userInformations.notificationWhatsAppNumbers,
-          notificationPreferences: userInformations.notificationPreferences
         })
 
         if (!isTextMessage) {
@@ -438,7 +561,7 @@ export class WebhookService {
             source: 'webhook',
             from,
             messageText: text,
-            phoneNumberId
+            phoneNumberId: externalAccountId
           }
         }
 
@@ -459,7 +582,7 @@ export class WebhookService {
         const response = await this.sendWhatsAppMessage(
           from,
           reply,
-          phoneNumberId,
+          externalAccountId,
           userInformations.whatsappToken ?? undefined
         )
         const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
@@ -469,7 +592,8 @@ export class WebhookService {
         await this.persistAutomaticMessage({
           leadId: lead.id,
           content: reply,
-          whatsappMessageId
+          channel: MessageChannel.WHATSAPP,
+          externalMessageId: whatsappMessageId
         })
 
         this.logger.log('[10] Saving lead after first auto-reply dispatch')
@@ -530,7 +654,7 @@ export class WebhookService {
           source: 'webhook',
           from,
           messageText: text,
-          phoneNumberId
+          phoneNumberId: externalAccountId
         }
       }
 
@@ -603,7 +727,8 @@ export class WebhookService {
 
       const actionContext: LeadFlowActionContext = {
         trigger: 'webhook',
-        phoneNumberId,
+        phoneNumberId: externalAccountId,
+        externalUserId: from,
         inboundMessageId: inboundMessageId ?? undefined,
         correlationId: randomUUID()
       }
@@ -619,7 +744,7 @@ export class WebhookService {
             lead: transitionLead,
             to
           }),
-        sendWhatsAppMessage: async ({ context, to, content }) => {
+        sendMessage: async ({ context, to, content }) => {
           const response = await this.sendWhatsAppMessage(
             to,
             content,
@@ -631,25 +756,26 @@ export class WebhookService {
           lead.lastAutoReplyMessageId = whatsappMessageId ?? undefined
 
           return {
-            whatsappMessageId
+            externalMessageId: whatsappMessageId
           }
         },
         persistAutomaticMessage: async ({
           context,
           leadId,
           content,
-          whatsappMessageId
+          externalMessageId
         }: {
           context: LeadFlowActionContext
           leadId: string
           content: string
-          whatsappMessageId?: string | null
+          externalMessageId?: string | null
         }) =>
           this.persistAutomaticMessage({
             correlationId: context.correlationId,
             leadId,
             content,
-            whatsappMessageId
+            channel: MessageChannel.WHATSAPP,
+            externalMessageId
           })
       })
 
@@ -718,7 +844,10 @@ export class WebhookService {
       }
 
       const message = await this.messageRepo.findOne({
-        where: { whatsappMessageId }
+        where: {
+          channel: MessageChannel.WHATSAPP,
+          externalMessageId: whatsappMessageId
+        }
       })
 
       if (!message) {
@@ -771,7 +900,7 @@ export class WebhookService {
     let mimeType: string | null = null
     let mediaSha256: string | null = null
     let fileName: string | null = null
-    let metadata: Record<string, unknown> | null = message as Record<
+    const metadata: Record<string, unknown> | null = message as Record<
       string,
       unknown
     >
@@ -782,24 +911,18 @@ export class WebhookService {
         metaMediaId = message?.audio?.id ?? null
         mimeType = message?.audio?.mime_type ?? null
         mediaSha256 = message?.audio?.sha256 ?? null
-        metadata =
-          (message?.audio as Record<string, unknown> | undefined) ?? null
         break
       case MessageType.IMAGE:
         content = message?.image?.caption ?? null
         metaMediaId = message?.image?.id ?? null
         mimeType = message?.image?.mime_type ?? null
         mediaSha256 = message?.image?.sha256 ?? null
-        metadata =
-          (message?.image as Record<string, unknown> | undefined) ?? null
         break
       case MessageType.VIDEO:
         content = message?.video?.caption ?? null
         metaMediaId = message?.video?.id ?? null
         mimeType = message?.video?.mime_type ?? null
         mediaSha256 = message?.video?.sha256 ?? null
-        metadata =
-          (message?.video as Record<string, unknown> | undefined) ?? null
         break
       case MessageType.DOCUMENT:
         content = message?.document?.caption ?? null
@@ -807,8 +930,6 @@ export class WebhookService {
         mimeType = message?.document?.mime_type ?? null
         mediaSha256 = message?.document?.sha256 ?? null
         fileName = message?.document?.filename ?? null
-        metadata =
-          (message?.document as Record<string, unknown> | undefined) ?? null
         break
       case MessageType.TEXT:
       default:
@@ -818,9 +939,10 @@ export class WebhookService {
     const inboundMessage = this.messageRepo.create({
       leadId,
       direction: MessageDirection.INBOUND,
+      channel: MessageChannel.WHATSAPP,
       content,
       type: resolvedMessageType,
-      whatsappMessageId: message?.id ?? null,
+      externalMessageId: message?.id ?? null,
       metaMediaId,
       mimeType,
       mediaSha256,
@@ -834,7 +956,10 @@ export class WebhookService {
 
       if (whatsappMessageId) {
         const alreadyExists = await this.messageRepo.findOne({
-          where: { whatsappMessageId }
+          where: {
+            channel: MessageChannel.WHATSAPP,
+            externalMessageId: whatsappMessageId
+          }
         })
 
         if (alreadyExists) {
@@ -883,9 +1008,11 @@ export class WebhookService {
     correlationId?: string
     leadId: string
     content: string
-    whatsappMessageId?: string | null
+    channel: MessageChannel
+    externalMessageId?: string | null
   }) {
-    const { correlationId, leadId, content, whatsappMessageId } = params
+    const { correlationId, leadId, content, channel, externalMessageId } =
+      params
 
     try {
       if (correlationId) {
@@ -898,9 +1025,10 @@ export class WebhookService {
         this.messageRepo.create({
           leadId,
           direction: MessageDirection.AUTOMATIC,
+          channel,
           content,
           type: MessageType.TEXT,
-          whatsappMessageId: whatsappMessageId ?? null,
+          externalMessageId: externalMessageId ?? null,
           metadata: {
             runtimeMode: LeadRuntimeMode.AUTOMATION
           }
@@ -908,7 +1036,7 @@ export class WebhookService {
       )
     } catch (error) {
       this.logger.warn(
-        `Failed to persist automatic WhatsApp message: ${error instanceof Error ? error.message : 'unknown error'}`
+        `Failed to persist automatic ${channel} message: ${error instanceof Error ? error.message : 'unknown error'}`
       )
     }
   }
@@ -930,11 +1058,14 @@ export class WebhookService {
     })
 
     const persistedMessage = persistedMessageResult.message
+    const isContactMessage = persistedMessage.type === MessageType.CONTACT
 
-    await this.uploadInboundMedia({
-      message: persistedMessage,
-      whatsappToken
-    })
+    if (!isContactMessage) {
+      await this.uploadInboundMedia({
+        message: persistedMessage,
+        whatsappToken
+      })
+    }
 
     if (persistedMessageResult.wasCreated) {
       await this.emitMessageCreated(persistedMessage)
@@ -948,7 +1079,12 @@ export class WebhookService {
     this.logger.log('[10] Saving lead after media message processing')
     await this.leadRepo.save(lead)
 
-    return { status: 'media_message_processed', leadId: lead.id }
+    return {
+      status: isContactMessage
+        ? 'contact_message_processed'
+        : 'media_message_processed',
+      leadId: lead.id
+    }
   }
 
   private async emitMessageCreated(message: Message): Promise<void> {
@@ -972,6 +1108,80 @@ export class WebhookService {
     }
   }
 
+  private async handleWhatsAppReaction(params: {
+    message: WhatsAppInboundMessage
+    externalAccountId: string
+    externalUserId: string
+  }): Promise<{ status: string; messageId?: string }> {
+    const targetExternalMessageId = params.message.reaction?.message_id?.trim()
+
+    if (!targetExternalMessageId) {
+      this.logger.warn(
+        'Ignoring WhatsApp reaction: target message ID is missing'
+      )
+      return { status: 'ignored_reaction_missing_target' }
+    }
+
+    const targetMessage = await this.messageRepo.findOne({
+      where: {
+        channel: MessageChannel.WHATSAPP,
+        externalMessageId: targetExternalMessageId
+      }
+    })
+
+    if (!targetMessage) {
+      this.logger.warn(
+        `Ignoring WhatsApp reaction: target message not found. externalMessageId=${targetExternalMessageId}`
+      )
+      return { status: 'ignored_reaction_target_not_found' }
+    }
+
+    const senderIdentity = await this.leadChannelIdentityService.findIdentity({
+      channel: LeadChannel.WHATSAPP,
+      externalAccountId: params.externalAccountId,
+      externalUserId: params.externalUserId
+    })
+
+    if (!senderIdentity || senderIdentity.leadId !== targetMessage.leadId) {
+      this.logger.warn(
+        `Ignoring WhatsApp reaction: sender does not belong to the target conversation. messageId=${targetMessage.id}`
+      )
+      return { status: 'ignored_reaction_conversation_mismatch' }
+    }
+
+    const metadata = { ...(targetMessage.metadata ?? {}) }
+    const emoji = params.message.reaction?.emoji?.trim()
+
+    if (emoji) {
+      metadata.reaction = {
+        emoji,
+        externalUserId: params.externalUserId,
+        reactedAt:
+          this.parseWhatsAppTimestamp(
+            params.message.timestamp
+          )?.toISOString() ?? new Date().toISOString()
+      }
+    } else {
+      delete metadata.reaction
+    }
+
+    targetMessage.metadata = Object.keys(metadata).length ? metadata : null
+    const updatedMessage = await this.messageRepo.save(targetMessage)
+    const responseMessage =
+      await this.leadsService.toResponseMessageDto(updatedMessage)
+
+    this.realtimeService.emitToLead(
+      targetMessage.leadId,
+      'message.updated',
+      responseMessage
+    )
+
+    return {
+      status: emoji ? 'reaction_processed' : 'reaction_removed',
+      messageId: targetMessage.id
+    }
+  }
+
   private async uploadInboundMedia(params: {
     message: Message
     whatsappToken?: string
@@ -980,14 +1190,14 @@ export class WebhookService {
 
     if (!message.id) {
       this.logger.warn(
-        `Inbound media message has no persisted id. leadId=${message.leadId} whatsappMessageId=${message.whatsappMessageId ?? 'unknown'}`
+        `Inbound media message has no persisted id. leadId=${message.leadId} externalMessageId=${message.externalMessageId ?? 'unknown'}`
       )
       return
     }
 
     if (!message.metaMediaId?.trim()) {
       this.logger.warn(
-        `Inbound media message has no meta media id. leadId=${message.leadId} messageId=${message.id} whatsappMessageId=${message.whatsappMessageId ?? 'unknown'}`
+        `Inbound media message has no meta media id. leadId=${message.leadId} messageId=${message.id} externalMessageId=${message.externalMessageId ?? 'unknown'}`
       )
       return
     }
@@ -1025,7 +1235,7 @@ export class WebhookService {
       await this.messageRepo.save(message)
     } catch (error) {
       this.logger.warn(
-        `Failed to upload inbound media message. leadId=${message.leadId} messageId=${message.id} whatsappMessageId=${message.whatsappMessageId ?? 'unknown'} error=${error instanceof Error ? error.message : 'unknown error'}`
+        `Failed to upload inbound media message. leadId=${message.leadId} messageId=${message.id} externalMessageId=${message.externalMessageId ?? 'unknown'} error=${error instanceof Error ? error.message : 'unknown error'}`
       )
     }
   }
@@ -1070,37 +1280,11 @@ export class WebhookService {
     }
   }
 
-  private buildPhoneVariants(phone: string): string[] {
-    const digits = phone.replace(/\D/g, '')
-    const variants = new Set<string>([digits])
-
-    // Brazilian numbers: country code (2) + DDD (2) + number
-    // Webhook sends 8-digit cell number (no leading 9)
-    // DB may have been saved with 9 inserted after DDD
-    // E.g.: webhook sends 5511987654321 (13 digits) or 551187654321 (12 digits)
-    // DB may store 55119XXXXXXXX (13) or 5511XXXXXXXX (12)
-
-    const withNine =
-      digits.length === 12
-        ? digits.slice(0, 4) + '9' + digits.slice(4) // 12-digit → insert 9 after DDD
-        : null
-
-    const withoutNine =
-      digits.length === 13 && digits[4] === '9'
-        ? digits.slice(0, 4) + digits.slice(5) // 13-digit with 9 → remove it
-        : null
-
-    if (withNine) variants.add(withNine)
-    if (withoutNine) variants.add(withoutNine)
-
-    return Array.from(variants)
-  }
-
   private async findLeadByPhone(
     userInformationsId: string,
     phone: string
   ): Promise<Lead | null> {
-    const variants = this.buildPhoneVariants(phone)
+    const variants = buildBrazilianPhoneVariants(phone)
 
     return this.leadRepo.findOne({
       where: variants.map((variant) => ({
@@ -1164,81 +1348,6 @@ export class WebhookService {
     return Buffer.from(response.data)
   }
 
-  private async notifyNewLeadToConfiguredWhatsAppNumbers(params: {
-    leadId: string
-    phoneNumberId?: string
-    whatsappToken?: string
-    notificationWhatsAppNumbers?: string[]
-    notificationPreferences?: UserInformations['notificationPreferences']
-  }) {
-    const {
-      leadId,
-      phoneNumberId,
-      whatsappToken,
-      notificationWhatsAppNumbers,
-      notificationPreferences
-    } = params
-
-    const enabledChannels =
-      notificationPreferences?.[NotificationType.NEW_LEAD] ?? []
-
-    if (!enabledChannels.includes(NotificationChannel.WHATSAPP)) {
-      this.logger.log(
-        `Skipping WhatsApp new lead notification because WHATSAPP channel is disabled for lead ${leadId}`
-      )
-      return
-    }
-
-    const recipients = Array.from(
-      new Set(
-        (notificationWhatsAppNumbers ?? [])
-          .map((number) => number.trim())
-          .filter((number) => number.length > 0)
-      )
-    )
-
-    if (!recipients.length) {
-      return
-    }
-
-    if (!phoneNumberId?.trim()) {
-      this.logger.warn(
-        `Skipping new lead notification dispatch for lead ${leadId}: missing phone_number_id`
-      )
-      return
-    }
-
-    const notificationMessage = 'Tem novo Lead no Flow!'
-    const results = await Promise.allSettled(
-      recipients.map((recipient) =>
-        this.sendWhatsAppMessage(
-          recipient,
-          notificationMessage,
-          phoneNumberId,
-          whatsappToken
-        )
-      )
-    )
-
-    const successCount = results.filter(
-      (result) => result.status === 'fulfilled'
-    ).length
-
-    if (successCount > 0) {
-      this.logger.log(
-        `New lead notification sent for lead ${leadId}. success=${successCount}/${recipients.length}`
-      )
-    }
-
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        this.logger.warn(
-          `Failed to send new lead notification for lead ${leadId} to ${recipients[index]}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
-        )
-      }
-    })
-  }
-
   private resolveInboundMessageContent(
     message: WhatsAppInboundMessage
   ): string | null {
@@ -1274,6 +1383,11 @@ export class WebhookService {
         return MessageType.VIDEO
       case MessageType.DOCUMENT:
         return MessageType.DOCUMENT
+      case 'contacts':
+      case MessageType.CONTACT:
+        return MessageType.CONTACT
+      case MessageType.REACTION:
+        return MessageType.REACTION
       case MessageType.BUTTON:
         return MessageType.BUTTON
       case MessageType.TEXT:
@@ -1405,9 +1519,850 @@ export class WebhookService {
     return !normalized.includes('sem nome') && !normalized.includes('sem nova')
   }
 
-  handleMessengerWebhook(payload: Record<string, unknown>) {
-    this.logger.log('Received Messenger webhook payload:', payload)
+  async handleMessengerWebhook(payload: MessengerWebhookPayload) {
+    this.logger.log(
+      `Received Messenger webhook payload: ${JSON.stringify(payload)}`
+    )
+
+    for (const entry of payload.entry ?? []) {
+      for (const event of entry.messaging ?? []) {
+        const pageId = entry.id?.trim() || event.recipient?.id?.trim()
+        const psid = event.sender?.id?.trim()
+        const inboundMessageId = event.message?.mid?.trim()
+        const messageText = event.message?.text?.trim()
+        const attachment = event.message?.attachments?.find((item) =>
+          Boolean(item.payload?.url?.trim())
+        )
+        const attachmentType = this.resolveSocialAttachmentMessageType(
+          attachment?.type
+        )
+
+        if (event.message?.is_echo) {
+          continue
+        }
+
+        if (
+          !pageId ||
+          !psid ||
+          !inboundMessageId ||
+          ((!messageText || !messageText.length) && !attachmentType)
+        ) {
+          this.logger.warn(
+            'Ignoring Messenger event: Page ID, PSID, message ID and supported content are required'
+          )
+          continue
+        }
+
+        const existingMessage = await this.messageRepo.findOne({
+          where: {
+            channel: MessageChannel.MESSENGER,
+            externalMessageId: inboundMessageId
+          }
+        })
+
+        if (existingMessage) {
+          this.logger.warn(
+            `Ignoring duplicate Messenger message ${inboundMessageId}`
+          )
+          continue
+        }
+
+        const userInformations = await this.userInformationsRepo.findOne({
+          where: { messengerPageId: pageId }
+        })
+
+        if (!userInformations) {
+          this.logger.warn(
+            'Ignoring Messenger event: no Flow account is connected to the receiving Page'
+          )
+          continue
+        }
+
+        const existingIdentity =
+          await this.leadChannelIdentityService.findIdentity({
+            channel: LeadChannel.MESSENGER,
+            externalAccountId: pageId,
+            externalUserId: psid
+          })
+
+        let profileName: string | null = null
+        let profilePictureUrl: string | null = null
+
+        if (!existingIdentity && userInformations.messengerToken?.trim()) {
+          try {
+            const { data: profile } =
+              await this.messengerMessagingService.getMessengerUserInfo(
+                psid,
+                userInformations.messengerToken
+              )
+
+            profileName = [profile.first_name, profile.last_name]
+              .filter(Boolean)
+              .join(' ')
+              .trim()
+            profilePictureUrl = profile.profile_pic?.trim() || null
+          } catch {
+            this.logger.warn(
+              'Could not load the Messenger profile; creating the Lead without profile data'
+            )
+          }
+        }
+
+        const interactionAt = event.timestamp
+          ? new Date(event.timestamp)
+          : new Date()
+
+        const shouldUseProfileName = this.hasValidLeadName(profileName)
+        const identityResolution =
+          await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
+            channel: LeadChannel.MESSENGER,
+            externalAccountId: pageId,
+            externalUserId: psid,
+            profileName,
+            profilePictureUrl,
+            lastInteractionAt: interactionAt,
+            leadDraft: {
+              userInformationsId: userInformations.id,
+              name: shouldUseProfileName ? profileName!.trim() : undefined,
+              source: LeadChannel.MESSENGER,
+              flowState: shouldUseProfileName
+                ? LeadFlowState.ASKING_LOCATION
+                : LeadFlowState.ASKING_NAME,
+              state: LeadState.ACTIVE,
+              runtimeMode: LeadRuntimeMode.AUTOMATION,
+              lastInboundMessageId: inboundMessageId,
+              lastActivityAt: interactionAt
+            }
+          })
+        let lead = identityResolution.lead
+
+        if (lead.userInformationsId !== userInformations.id) {
+          this.logger.error(
+            `Ignoring Messenger identity ${identityResolution.identity.id}: it belongs to another Flow account`
+          )
+          continue
+        }
+
+        const inboundMedia =
+          attachmentType && attachment?.payload?.url
+            ? await this.storeSocialInboundAttachment({
+                leadId: lead.id,
+                externalMessageId: inboundMessageId,
+                type: attachmentType,
+                url: attachment.payload.url
+              })
+            : null
+
+        const persistedMessageResult = await this.persistSocialInboundMessage({
+          channel: MessageChannel.MESSENGER,
+          leadId: lead.id,
+          leadName: lead.name,
+          userId: userInformations.userId,
+          externalAccountId: pageId,
+          externalUserId: psid,
+          externalMessageId: inboundMessageId,
+          content: messageText || null,
+          externalTimestamp: interactionAt,
+          type: attachmentType ?? MessageType.TEXT,
+          mediaUrl: inboundMedia?.mediaUrl ?? null,
+          mimeType: inboundMedia?.mimeType ?? null,
+          mediaSize: inboundMedia?.mediaSize ?? null
+        })
+
+        if (!persistedMessageResult.wasCreated) {
+          continue
+        }
+
+        await this.emitMessageCreated(persistedMessageResult.message)
+
+        const automationTriggerContext: AutomationTriggerContext = {
+          triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
+          leadId: lead.id,
+          inboundMessageId,
+          correlationId: randomUUID(),
+          metadata: {
+            source: LeadChannel.MESSENGER,
+            from: psid,
+            messageText: messageText ?? null,
+            pageId
+          }
+        }
+
+        await this.automationTriggerDispatcher.dispatch(
+          automationTriggerContext
+        )
+
+        if (identityResolution.leadCreated) {
+          await this.rabbitPublisherService.publish('lead.created', {
+            leadId: lead.id,
+            userId: userInformations.userId,
+            origin: 'webhook',
+            organizationId: null,
+            userInformationsId: lead.userInformationsId,
+            leadName: lead.name,
+            description: lead.name,
+            source: lead.source ?? null,
+            createdAt: lead.createdAt
+          })
+
+          const reply = shouldUseProfileName
+            ? 'Olá! 👋 \nDa onde você fala?'
+            : 'Olá! 👋 \nComo podemos te chamar?'
+          const response =
+            await this.messengerMessagingService.sendMessengerMessage(
+              psid,
+              reply,
+              pageId,
+              userInformations.messengerToken ?? undefined
+            )
+          const externalMessageId = response.data.message_id ?? null
+
+          lead.lastAutoReplyMessageId = externalMessageId ?? undefined
+          await this.persistAutomaticMessage({
+            leadId: lead.id,
+            content: reply,
+            channel: MessageChannel.MESSENGER,
+            externalMessageId
+          })
+          await this.leadRepo.save(lead)
+          continue
+        }
+
+        lead = await this.leadRepo.findOneOrFail({
+          where: { id: lead.id }
+        })
+
+        if (!messageText) {
+          lead.lastInboundMessageId = inboundMessageId
+          lead.lastActivityAt = interactionAt
+          lead.conversationReminder1hSentAt = null
+          lead.conversationExpiredNotificationSentAt = null
+          await this.leadRepo.save(lead)
+          continue
+        }
+
+        const conversationContext = await this.conversationContextBuilder.build(
+          { lead }
+        )
+        const conversationType = classifyConversation(conversationContext)
+        const shouldRunAutomation = canRunAutomation({
+          lead,
+          conversationType
+        })
+
+        if (!shouldRunAutomation) {
+          lead.lastInboundMessageId = inboundMessageId
+          lead.lastActivityAt = interactionAt
+          lead.conversationReminder1hSentAt = null
+          lead.conversationExpiredNotificationSentAt = null
+          await this.leadRepo.save(lead)
+          continue
+        }
+
+        const flowResult = this.leadFlowEngine.process({
+          lead,
+          messageText,
+          conversationContext
+        })
+        const actionContext: LeadFlowActionContext = {
+          trigger: 'webhook',
+          phoneNumberId: pageId,
+          externalUserId: psid,
+          inboundMessageId,
+          correlationId: randomUUID()
+        }
+        const leadNameBeforeFlowExecution = lead.name
+
+        await this.leadFlowActionExecutor.execute({
+          context: actionContext,
+          lead,
+          actions: flowResult.actions,
+          transitionLeadFlowState: ({ lead: transitionLead, to }) =>
+            this.transitionLeadFlowState({ lead: transitionLead, to }),
+          sendMessage: async ({ to, content }) => {
+            const response =
+              await this.messengerMessagingService.sendMessengerMessage(
+                to,
+                content,
+                pageId,
+                userInformations.messengerToken ?? undefined
+              )
+            const externalMessageId = response.data.message_id ?? null
+
+            lead.lastAutoReplyMessageId = externalMessageId ?? undefined
+            return { externalMessageId }
+          },
+          persistAutomaticMessage: ({
+            context,
+            leadId,
+            content,
+            externalMessageId
+          }) =>
+            this.persistAutomaticMessage({
+              correlationId: context.correlationId,
+              leadId,
+              content,
+              channel: MessageChannel.MESSENGER,
+              externalMessageId
+            })
+        })
+
+        if (
+          !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
+          this.hasValidLeadName(lead.name)
+        ) {
+          await this.rabbitPublisherService.publish('lead.created', {
+            leadId: lead.id,
+            userId: userInformations.userId,
+            origin: 'webhook',
+            organizationId: null,
+            userInformationsId: lead.userInformationsId,
+            leadName: lead.name,
+            description: lead.name,
+            source: lead.source ?? null,
+            createdAt: lead.createdAt
+          })
+        }
+
+        lead.lastInboundMessageId = inboundMessageId
+        lead.lastActivityAt = interactionAt
+        lead.conversationReminder1hSentAt = null
+        lead.conversationExpiredNotificationSentAt = null
+        await this.leadRepo.save(lead)
+      }
+    }
 
     return { status: 'received' }
+  }
+
+  private async persistSocialInboundMessage(params: {
+    channel: MessageChannel.MESSENGER | MessageChannel.INSTAGRAM
+    leadId: string
+    leadName?: string | null
+    userId: string
+    externalAccountId: string
+    externalUserId: string
+    externalMessageId: string
+    content: string | null
+    externalTimestamp: Date
+    type?: MessageType
+    mediaUrl?: string | null
+    mimeType?: string | null
+    mediaSize?: number | null
+  }): Promise<{ message: Message; wasCreated: boolean }> {
+    const {
+      channel,
+      leadId,
+      leadName,
+      userId,
+      externalAccountId,
+      externalUserId,
+      externalMessageId,
+      content,
+      externalTimestamp,
+      type = MessageType.TEXT,
+      mediaUrl = null,
+      mimeType = null,
+      mediaSize = null
+    } = params
+    const inboundMessage = this.messageRepo.create({
+      leadId,
+      direction: MessageDirection.INBOUND,
+      channel,
+      content,
+      type,
+      externalMessageId,
+      externalTimestamp,
+      mediaUrl,
+      mimeType,
+      mediaSize,
+      metadata: {
+        externalAccountId,
+        externalUserId
+      }
+    })
+
+    try {
+      const savedMessage = await this.messageRepo.save(inboundMessage)
+
+      await this.rabbitPublisherService.publish('message.received', {
+        messageId: savedMessage.id,
+        leadId,
+        leadName: leadName ?? null,
+        userId,
+        organizationId: null,
+        createdAt: savedMessage.createdAt
+      })
+
+      return { message: savedMessage, wasCreated: true }
+    } catch (error) {
+      const existingMessage = await this.messageRepo.findOne({
+        where: {
+          channel,
+          externalMessageId
+        }
+      })
+
+      if (existingMessage) {
+        return { message: existingMessage, wasCreated: false }
+      }
+
+      throw error
+    }
+  }
+
+  private resolveSocialAttachmentMessageType(
+    attachmentType?: string
+  ): MessageType | null {
+    switch (attachmentType?.trim().toLowerCase()) {
+      case 'audio':
+        return MessageType.AUDIO
+      case 'image':
+        return MessageType.IMAGE
+      case 'video':
+        return MessageType.VIDEO
+      case 'file':
+        return MessageType.DOCUMENT
+      default:
+        return null
+    }
+  }
+
+  private async storeSocialInboundAttachment(params: {
+    leadId: string
+    externalMessageId: string
+    type: MessageType
+    url: string
+  }): Promise<{
+    mediaUrl: string
+    mimeType: string
+    mediaSize: number
+  } | null> {
+    try {
+      const response = await axios.get<ArrayBuffer>(params.url, {
+        responseType: 'arraybuffer'
+      })
+      const buffer = Buffer.from(response.data)
+      const responseContentType: unknown = response.headers['content-type']
+      const mimeType =
+        (typeof responseContentType === 'string'
+          ? responseContentType.split(';')[0]?.trim()
+          : null) || 'application/octet-stream'
+      const extension = this.resolveMediaFileExtension(mimeType)
+      const storageKey = `leads/${params.leadId}/messages/${params.externalMessageId}.${extension}`
+      const uploadResponse = await this.storageService.uploadFile(
+        {
+          originalname: `${params.externalMessageId}.${extension}`,
+          mimetype: mimeType,
+          size: buffer.length,
+          buffer
+        },
+        { key: storageKey }
+      )
+
+      return {
+        mediaUrl: uploadResponse.url,
+        mimeType,
+        mediaSize: buffer.length
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to store inbound social attachment. leadId=${params.leadId} externalMessageId=${params.externalMessageId} type=${params.type} error=${error instanceof Error ? error.message : 'unknown error'}`
+      )
+      return null
+    }
+  }
+
+  async handleDirectWebhook(payload: InstagramDirectWebhookPayload) {
+    this.logger.log(
+      `Received Instagram Direct webhook payload: ${JSON.stringify(payload)}`
+    )
+
+    for (const entry of payload.entry ?? []) {
+      for (const event of entry.messaging ?? []) {
+        const instagramAccountId = entry.id?.trim()
+        const instagramUserId = event.sender?.id?.trim()
+
+        if (event.reaction) {
+          await this.handleInstagramDirectReaction({
+            externalAccountId: instagramAccountId,
+            externalUserId: instagramUserId,
+            timestamp: event.timestamp,
+            reaction: event.reaction
+          })
+          continue
+        }
+
+        const inboundMessageId = event.message?.mid?.trim()
+        const messageText = event.message?.text?.trim()
+        const attachment = event.message?.attachments?.find((item) =>
+          Boolean(item.payload?.url?.trim())
+        )
+        const attachmentType = this.resolveSocialAttachmentMessageType(
+          attachment?.type
+        )
+
+        if (event.message?.is_echo) {
+          continue
+        }
+
+        if (
+          !instagramAccountId ||
+          !instagramUserId ||
+          !inboundMessageId ||
+          ((!messageText || !messageText.length) && !attachmentType)
+        ) {
+          this.logger.warn(
+            'Ignoring Instagram Direct event: Account ID, User ID, message ID and supported content are required'
+          )
+          continue
+        }
+
+        const existingMessage = await this.messageRepo.findOne({
+          where: {
+            channel: MessageChannel.INSTAGRAM,
+            externalMessageId: inboundMessageId
+          }
+        })
+
+        if (existingMessage) {
+          this.logger.warn(
+            `Ignoring duplicate Instagram Direct message ${inboundMessageId}`
+          )
+          continue
+        }
+
+        const userInformations = await this.userInformationsRepo.findOne({
+          where: { instagramAccountId }
+        })
+
+        if (!userInformations) {
+          this.logger.warn(
+            `Ignoring Instagram Direct event: no Flow account is connected to instagramAccountId=${instagramAccountId}`
+          )
+          continue
+        }
+
+        const existingIdentity =
+          await this.leadChannelIdentityService.findIdentity({
+            channel: LeadChannel.INSTAGRAM,
+            externalAccountId: instagramAccountId,
+            externalUserId: instagramUserId
+          })
+
+        let profileName: string | null = null
+        let profilePictureUrl: string | null = null
+
+        if (!existingIdentity) {
+          try {
+            const profile =
+              await this.instagramMessagingService.getInstagramUserProfile(
+                instagramAccountId,
+                instagramUserId
+              )
+
+            profileName = profile.name?.trim() || null
+            profilePictureUrl = profile.profile_pic?.trim() || null
+          } catch {
+            this.logger.warn(
+              'Could not load the Instagram Direct profile; creating the Lead without profile data'
+            )
+          }
+        }
+
+        const interactionAt = event.timestamp
+          ? new Date(event.timestamp)
+          : new Date()
+        const shouldUseProfileName = this.hasValidLeadName(profileName)
+        const identityResolution =
+          await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
+            channel: LeadChannel.INSTAGRAM,
+            externalAccountId: instagramAccountId,
+            externalUserId: instagramUserId,
+            profileName,
+            profilePictureUrl,
+            lastInteractionAt: interactionAt,
+            leadDraft: {
+              userInformationsId: userInformations.id,
+              name: shouldUseProfileName ? profileName!.trim() : undefined,
+              source: 'direct',
+              flowState: shouldUseProfileName
+                ? LeadFlowState.ASKING_LOCATION
+                : LeadFlowState.ASKING_NAME,
+              state: LeadState.ACTIVE,
+              runtimeMode: LeadRuntimeMode.AUTOMATION,
+              lastInboundMessageId: inboundMessageId,
+              lastActivityAt: interactionAt
+            }
+          })
+        let lead = identityResolution.lead
+
+        if (lead.userInformationsId !== userInformations.id) {
+          this.logger.error(
+            `Ignoring Instagram identity ${identityResolution.identity.id}: it belongs to another Flow account`
+          )
+          continue
+        }
+
+        const inboundMedia =
+          attachmentType && attachment?.payload?.url
+            ? await this.storeSocialInboundAttachment({
+                leadId: lead.id,
+                externalMessageId: inboundMessageId,
+                type: attachmentType,
+                url: attachment.payload.url
+              })
+            : null
+
+        const persistedMessageResult = await this.persistSocialInboundMessage({
+          channel: MessageChannel.INSTAGRAM,
+          leadId: lead.id,
+          leadName: lead.name,
+          userId: userInformations.userId,
+          externalAccountId: instagramAccountId,
+          externalUserId: instagramUserId,
+          externalMessageId: inboundMessageId,
+          content: messageText || null,
+          externalTimestamp: interactionAt,
+          type: attachmentType ?? MessageType.TEXT,
+          mediaUrl: inboundMedia?.mediaUrl ?? null,
+          mimeType: inboundMedia?.mimeType ?? null,
+          mediaSize: inboundMedia?.mediaSize ?? null
+        })
+
+        if (!persistedMessageResult.wasCreated) {
+          continue
+        }
+
+        await this.emitMessageCreated(persistedMessageResult.message)
+
+        await this.automationTriggerDispatcher.dispatch({
+          triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
+          leadId: lead.id,
+          inboundMessageId,
+          correlationId: randomUUID(),
+          metadata: {
+            source: 'direct',
+            from: instagramUserId,
+            messageText: messageText ?? null,
+            instagramAccountId
+          }
+        })
+
+        if (identityResolution.leadCreated) {
+          await this.rabbitPublisherService.publish('lead.created', {
+            leadId: lead.id,
+            userId: userInformations.userId,
+            origin: 'webhook',
+            organizationId: null,
+            userInformationsId: lead.userInformationsId,
+            leadName: lead.name,
+            description: lead.name,
+            source: lead.source ?? null,
+            createdAt: lead.createdAt
+          })
+
+          const reply = shouldUseProfileName
+            ? 'Olá! 👋 \nDa onde você fala?'
+            : 'Olá! 👋 \nComo podemos te chamar?'
+          const response = await this.instagramMessagingService.sendMessage(
+            instagramAccountId,
+            instagramUserId,
+            reply
+          )
+          const externalMessageId = response.message_id ?? null
+
+          lead.lastAutoReplyMessageId = externalMessageId ?? undefined
+          await this.persistAutomaticMessage({
+            leadId: lead.id,
+            content: reply,
+            channel: MessageChannel.INSTAGRAM,
+            externalMessageId
+          })
+          await this.leadRepo.save(lead)
+          continue
+        }
+
+        lead = await this.leadRepo.findOneOrFail({
+          where: { id: lead.id }
+        })
+
+        if (!messageText) {
+          lead.lastInboundMessageId = inboundMessageId
+          lead.lastActivityAt = interactionAt
+          lead.conversationReminder1hSentAt = null
+          lead.conversationExpiredNotificationSentAt = null
+          await this.leadRepo.save(lead)
+          continue
+        }
+
+        const conversationContext = await this.conversationContextBuilder.build(
+          { lead }
+        )
+        const conversationType = classifyConversation(conversationContext)
+        const shouldRunAutomation = canRunAutomation({
+          lead,
+          conversationType
+        })
+
+        if (!shouldRunAutomation) {
+          lead.lastInboundMessageId = inboundMessageId
+          lead.lastActivityAt = interactionAt
+          lead.conversationReminder1hSentAt = null
+          lead.conversationExpiredNotificationSentAt = null
+          await this.leadRepo.save(lead)
+          continue
+        }
+
+        const flowResult = this.leadFlowEngine.process({
+          lead,
+          messageText,
+          conversationContext
+        })
+        const actionContext: LeadFlowActionContext = {
+          trigger: 'webhook',
+          phoneNumberId: instagramAccountId,
+          externalUserId: instagramUserId,
+          inboundMessageId,
+          correlationId: randomUUID()
+        }
+        const leadNameBeforeFlowExecution = lead.name
+
+        await this.leadFlowActionExecutor.execute({
+          context: actionContext,
+          lead,
+          actions: flowResult.actions,
+          transitionLeadFlowState: ({ lead: transitionLead, to }) =>
+            this.transitionLeadFlowState({ lead: transitionLead, to }),
+          sendMessage: async ({ to, content }) => {
+            const response = await this.instagramMessagingService.sendMessage(
+              instagramAccountId,
+              to,
+              content
+            )
+            const externalMessageId = response.message_id ?? null
+
+            lead.lastAutoReplyMessageId = externalMessageId ?? undefined
+            return { externalMessageId }
+          },
+          persistAutomaticMessage: ({
+            context,
+            leadId,
+            content,
+            externalMessageId
+          }) =>
+            this.persistAutomaticMessage({
+              correlationId: context.correlationId,
+              leadId,
+              content,
+              channel: MessageChannel.INSTAGRAM,
+              externalMessageId
+            })
+        })
+
+        if (
+          !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
+          this.hasValidLeadName(lead.name)
+        ) {
+          await this.rabbitPublisherService.publish('lead.created', {
+            leadId: lead.id,
+            userId: userInformations.userId,
+            origin: 'webhook',
+            organizationId: null,
+            userInformationsId: lead.userInformationsId,
+            leadName: lead.name,
+            description: lead.name,
+            source: lead.source ?? null,
+            createdAt: lead.createdAt
+          })
+        }
+
+        lead.lastInboundMessageId = inboundMessageId
+        lead.lastActivityAt = interactionAt
+        lead.conversationReminder1hSentAt = null
+        lead.conversationExpiredNotificationSentAt = null
+        await this.leadRepo.save(lead)
+      }
+    }
+
+    return { status: 'received' }
+  }
+
+  private async handleInstagramDirectReaction(params: {
+    externalAccountId?: string
+    externalUserId?: string
+    timestamp?: number
+    reaction: {
+      mid?: string
+      action?: string
+      emoji?: string | null
+    }
+  }): Promise<void> {
+    const externalAccountId = params.externalAccountId?.trim()
+    const externalUserId = params.externalUserId?.trim()
+    const targetExternalMessageId = params.reaction.mid?.trim()
+
+    if (!externalAccountId || !externalUserId || !targetExternalMessageId) {
+      this.logger.warn(
+        'Ignoring Instagram Direct reaction: account, sender and target message ID are required'
+      )
+      return
+    }
+
+    const targetMessage = await this.messageRepo.findOne({
+      where: {
+        channel: MessageChannel.INSTAGRAM,
+        externalMessageId: targetExternalMessageId
+      }
+    })
+
+    if (!targetMessage) {
+      this.logger.warn(
+        `Ignoring Instagram Direct reaction: target message not found. externalMessageId=${targetExternalMessageId}`
+      )
+      return
+    }
+
+    const senderIdentity = await this.leadChannelIdentityService.findIdentity({
+      channel: LeadChannel.INSTAGRAM,
+      externalAccountId,
+      externalUserId
+    })
+
+    if (!senderIdentity || senderIdentity.leadId !== targetMessage.leadId) {
+      this.logger.warn(
+        `Ignoring Instagram Direct reaction: sender does not belong to the target conversation. messageId=${targetMessage.id}`
+      )
+      return
+    }
+
+    const metadata = { ...(targetMessage.metadata ?? {}) }
+    const emoji = params.reaction.emoji?.trim()
+    const normalizedEmoji = emoji === '❤' ? '❤️' : emoji
+    const isReactionRemoved =
+      params.reaction.action?.trim().toLowerCase() === 'unreact' || !emoji
+
+    if (isReactionRemoved) {
+      delete metadata.reaction
+    } else {
+      metadata.reaction = {
+        emoji: normalizedEmoji,
+        externalUserId,
+        reactedAt: params.timestamp
+          ? new Date(params.timestamp).toISOString()
+          : new Date().toISOString()
+      }
+    }
+
+    targetMessage.metadata = Object.keys(metadata).length ? metadata : null
+    const updatedMessage = await this.messageRepo.save(targetMessage)
+    const responseMessage =
+      await this.leadsService.toResponseMessageDto(updatedMessage)
+
+    this.realtimeService.emitToLead(
+      targetMessage.leadId,
+      'message.updated',
+      responseMessage
+    )
   }
 }

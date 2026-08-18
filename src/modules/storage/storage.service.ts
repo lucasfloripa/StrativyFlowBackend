@@ -220,9 +220,63 @@ export class StorageService {
     }
   }
 
+  async generatePresignedUrl(
+    key: string,
+    expiresIn = 600,
+    downloadFileName?: string
+  ): Promise<string> {
+    if (!key) {
+      throw new BadRequestException('Key do arquivo e obrigatoria.')
+    }
+
+    if (!Number.isInteger(expiresIn) || expiresIn <= 0) {
+      throw new BadRequestException('Tempo de expiracao invalido.')
+    }
+
+    try {
+      return await getSignedUrl(
+        this.s3Client,
+        new GetObjectCommand({
+          Bucket: this.bucketName,
+          Key: key,
+          ...(downloadFileName?.trim()
+            ? {
+                ResponseContentDisposition:
+                  this.buildAttachmentContentDisposition(downloadFileName)
+              }
+            : {})
+        }),
+        { expiresIn }
+      )
+    } catch (error: unknown) {
+      this.logger.error('Falha ao gerar presigned URL do R2.', {
+        key,
+        expiresIn,
+        error
+      })
+
+      throw new InternalServerErrorException(
+        'Falha ao gerar URL temporaria do arquivo.'
+      )
+    }
+  }
+
   private buildObjectKey(originalName: string): string {
     const extension = extname(originalName)
     return `${randomUUID()}${extension}`
+  }
+
+  private buildAttachmentContentDisposition(fileName: string): string {
+    const trimmedFileName = fileName.trim()
+    const fallbackFileName =
+      trimmedFileName.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_') ||
+      'download'
+    const encodedFileName = encodeURIComponent(trimmedFileName).replace(
+      /[!'()*]/g,
+      (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+    )
+
+    return `attachment; filename="${fallbackFileName}"; filename*=UTF-8''${encodedFileName}`
   }
 
   private async toNodeReadable(

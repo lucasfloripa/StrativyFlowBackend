@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -28,7 +29,15 @@ import {
   LeadSocialLinks,
   LeadState
 } from './entities/lead.entity'
-import { Message, MessageDirection } from './entities/message.entity'
+import {
+  Message,
+  MessageChannel,
+  MessageDirection
+} from './entities/message.entity'
+import {
+  buildBrazilianPhoneVariants,
+  toCanonicalBrazilianPhone
+} from './utils/brazilian-phone'
 
 @Injectable()
 export class LeadsService {
@@ -298,21 +307,45 @@ export class LeadsService {
       dto.leadQualification
     )
     const nextSocialLinks = this.normalizeLeadSocialLinks(dto.socialLinks)
-    const lead = this.leadRepo.create({
-      userInformationsId,
-      name: dto.name,
-      phone: dto.phone,
-      email: dto.email,
-      source: dto.source,
-      location: dto.location,
-      socialLinks: nextSocialLinks,
-      leadQualification: nextLeadQualification,
-      state: dto.state ?? LeadState.ACTIVE,
-      runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION,
-      lastActivityAt: new Date()
-    })
+    const phone = dto.phone.trim()
+    const phoneVariants = buildBrazilianPhoneVariants(phone)
+    const phoneLockKey = `${userInformationsId}:${toCanonicalBrazilianPhone(phone)}`
+    const createdLead = await this.leadRepo.manager.transaction(
+      async (manager) => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          phoneLockKey
+        ])
 
-    const createdLead = await this.leadRepo.save(lead)
+        const existingLead = await manager.getRepository(Lead).findOne({
+          where: phoneVariants.map((phoneVariant) => ({
+            userInformationsId,
+            phone: phoneVariant
+          }))
+        })
+
+        if (existingLead) {
+          throw new ConflictException(
+            'Já existe um lead cadastrado com este telefone.'
+          )
+        }
+
+        const lead = manager.create(Lead, {
+          userInformationsId,
+          name: dto.name,
+          phone,
+          email: dto.email,
+          source: dto.source,
+          location: dto.location,
+          socialLinks: nextSocialLinks,
+          leadQualification: nextLeadQualification,
+          state: dto.state ?? LeadState.ACTIVE,
+          runtimeMode: dto.runtimeMode ?? LeadRuntimeMode.AUTOMATION,
+          lastActivityAt: new Date()
+        })
+
+        return await manager.save(Lead, lead)
+      }
+    )
 
     await this.rabbitPublisherService.publish('lead.created', {
       leadId: createdLead.id,
@@ -426,7 +459,7 @@ export class LeadsService {
 
     const followUps = await this.followUpRepo
       .createQueryBuilder('followUp')
-      .leftJoinAndSelect('followUp.template', 'template')
+      .leftJoinAndSelect('followUp.actions', 'action')
       .innerJoin('followUp.negotiation', 'negotiation')
       .where('negotiation."leadId" = :leadId', { leadId: lead.id })
       .getMany()
@@ -481,16 +514,22 @@ export class LeadsService {
       id: message.id,
       leadId: message.leadId,
       direction: message.direction,
+      channel: message.channel,
       content: message.content ?? null,
       externalTimestamp: message.externalTimestamp?.toISOString() ?? null,
       type: message.type,
-      whatsappMessageId: message.whatsappMessageId ?? null,
+      externalMessageId: message.externalMessageId ?? null,
+      whatsappMessageId:
+        message.channel === MessageChannel.WHATSAPP
+          ? (message.externalMessageId ?? null)
+          : null,
       mediaUrl,
       mimeType: message.mimeType ?? null,
       mediaSize: message.mediaSize ?? null,
       fileName: message.fileName ?? null,
       status: message.status ?? null,
       source: message.source,
+      templateType: message.templateType ?? null,
       metadata: message.metadata ?? null,
       createdAt: message.createdAt.toISOString(),
       updatedAt: message.updatedAt.toISOString()
@@ -760,6 +799,11 @@ export class LeadsService {
     const instagram = source[LeadSocialLinks.INSTAGRAM]
     if (typeof instagram === 'string') {
       normalized[LeadSocialLinks.INSTAGRAM] = instagram
+    }
+
+    const facebook = source[LeadSocialLinks.FACEBOOK]
+    if (typeof facebook === 'string') {
+      normalized[LeadSocialLinks.FACEBOOK] = facebook
     }
 
     const url = source[LeadSocialLinks.URL]

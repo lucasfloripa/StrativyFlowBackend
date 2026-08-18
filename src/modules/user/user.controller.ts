@@ -16,12 +16,22 @@ import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
 import { UpdateUserInformationsNotificationsDto } from './dtos/update-user-informations-notifications.dto'
 import { UpdateUserInformationsPreferencesDto } from './dtos/update-user-informations-preferences.dto'
 import { UpdateUserInformationsShortcutsDto } from './dtos/update-user-informations-shortcuts.dto'
+import { UserInformations } from './entities/user-informations.entity'
 import { UserService } from './user.service'
 
 type AuthenticatedRequest = Request & {
   user: {
     id: string
   }
+}
+
+const toPublicUserInformations = (userInformations: UserInformations) => {
+  const publicUserInformations: Partial<UserInformations> = {
+    ...userInformations
+  }
+  delete publicUserInformations.instagramToken
+
+  return publicUserInformations
 }
 
 @Controller('user')
@@ -31,12 +41,14 @@ export class UserController {
 
   @Get('user-informations')
   async listUserInformations(@Req() req: AuthenticatedRequest) {
-    return await this.userService.findByUserId(req.user.id)
+    const userInformations = await this.userService.findByUserId(req.user.id)
+    return userInformations.map(toPublicUserInformations)
   }
 
   @Post('user-informations')
   async createUserInformations(@Body() dto: CreateUserInformationsDto) {
-    return await this.userService.createUserInformations(dto)
+    const userInformations = await this.userService.createUserInformations(dto)
+    return toPublicUserInformations(userInformations)
   }
 
   @Patch('user-informations/:id/notifications')
@@ -45,10 +57,12 @@ export class UserController {
     @Body() dto: UpdateUserInformationsNotificationsDto,
     @Req() req: AuthenticatedRequest
   ) {
-    return await this.userService.updateUserInformationsNotificationsByUserId(
-      req.user.id,
-      dto
-    )
+    const userInformations =
+      await this.userService.updateUserInformationsNotificationsByUserId(
+        req.user.id,
+        dto
+      )
+    return toPublicUserInformations(userInformations)
   }
 
   @Patch('user-informations/:id/preferences')
@@ -57,10 +71,12 @@ export class UserController {
     @Body() dto: UpdateUserInformationsPreferencesDto,
     @Req() req: AuthenticatedRequest
   ) {
-    return await this.userService.updateUserInformationsPreferencesByUserId(
-      req.user.id,
-      dto
-    )
+    const userInformations =
+      await this.userService.updateUserInformationsPreferencesByUserId(
+        req.user.id,
+        dto
+      )
+    return toPublicUserInformations(userInformations)
   }
 
   @Patch('user-informations/:id/shortcuts')
@@ -69,9 +85,11 @@ export class UserController {
     @Body() dto: UpdateUserInformationsShortcutsDto,
     @Req() req: AuthenticatedRequest
   ) {
-    return await this.userService.updateUserInformationsShortcutsByUserId(
-      req.user.id,
-      dto
-    )
+    const userInformations =
+      await this.userService.updateUserInformationsShortcutsByUserId(
+        req.user.id,
+        dto
+      )
+    return toPublicUserInformations(userInformations)
   }
 }

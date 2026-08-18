@@ -6,6 +6,7 @@ import { Repository } from 'typeorm'
 import { LeadRuntimeMode } from '../../leads/entities/lead.entity'
 import {
   Message,
+  MessageChannel,
   MessageDirection,
   MessageType
 } from '../../leads/entities/message.entity'
@@ -95,9 +96,10 @@ export class AutomationMessagingService {
         this.messageRepo.create({
           leadId,
           direction: MessageDirection.OUTBOUND,
+          channel: MessageChannel.WHATSAPP,
           content,
           type: MessageType.TEXT,
-          whatsappMessageId: whatsappMessageId ?? null,
+          externalMessageId: whatsappMessageId ?? null,
           metadata: {
             runtimeMode: LeadRuntimeMode.AUTOMATION
           }

@@ -7,6 +7,7 @@ import {
 } from 'class-validator'
 
 import {
+  MessageChannel,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -20,6 +21,9 @@ export class CreateMessageDto {
   @IsEnum(MessageDirection)
   direction!: MessageDirection
 
+  @IsEnum(MessageChannel)
+  channel!: MessageChannel
+
   @IsOptional()
   @IsString()
   content?: string | null
@@ -30,7 +34,7 @@ export class CreateMessageDto {
 
   @IsOptional()
   @IsString()
-  whatsappMessageId?: string | null
+  externalMessageId?: string | null
 
   @IsOptional()
   @IsString()
@@ -63,6 +67,10 @@ export class CreateMessageDto {
   @IsOptional()
   @IsEnum(MessageSource)
   source?: MessageSource
+
+  @IsOptional()
+  @IsString()
+  templateType?: string | null
 
   @IsOptional()
   @IsObject()

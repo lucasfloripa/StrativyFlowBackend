@@ -5,6 +5,7 @@ import {
   IsNotEmpty,
   IsObject,
   IsOptional,
+  Matches,
   IsString
 } from 'class-validator'
 
@@ -16,12 +17,13 @@ import {
 } from '../entities/lead.entity'
 
 export class CreateLeadDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  name!: string
+  name?: string
 
   @IsString()
   @IsNotEmpty()
+  @Matches(/^55\d{10,11}$/)
   phone!: string
 
   @IsOptional()
@@ -33,6 +35,7 @@ export class CreateLeadDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^(?!\s*(?:messenger|direct)\s*$).+$/i)
   source?: string
 
   @IsOptional()

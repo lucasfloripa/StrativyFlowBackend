@@ -1,14 +1,18 @@
+import {
+  FollowUpActionChannel,
+  FollowUpActionStatus,
+  FollowUpActionType
+} from '../entities/followup-action.entity'
 import { FollowUpStatus } from '../entities/followup.entity'
 
-export type FollowUpTemplateResponseDto = {
+export type FollowUpActionResponseDto = {
   id: string
-  name: string
-  description: string | null
-  variables: Array<{
-    key: string
-    label: string
-    required: boolean
-  }>
+  type: FollowUpActionType
+  channel: FollowUpActionChannel | null
+  status: FollowUpActionStatus
+  payload: Record<string, unknown> | null
+  executedAt: string | null
+  failureReason: string | null
   createdAt: string
   updatedAt: string
 }
@@ -20,9 +24,8 @@ export type FollowUpResponseDto = {
   status: FollowUpStatus
   dueAt: string
   completedAt: string | null
-  templateId: string | null
-  template: FollowUpTemplateResponseDto | null
-  templateVariables: Record<string, unknown>
+  reminder1hSentAt: string | null
+  actions: FollowUpActionResponseDto[]
   createdAt: string
   updatedAt: string
 }

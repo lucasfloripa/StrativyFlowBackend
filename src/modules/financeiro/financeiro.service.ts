@@ -1,22 +1,45 @@
 import { Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository, SelectQueryBuilder } from 'typeorm'
+import { ObjectLiteral, Repository, SelectQueryBuilder } from 'typeorm'
 
+import {
+  Message,
+  MessageDirection,
+  MessageSource
+} from '../leads/entities/message.entity'
 import {
   Negotiation,
   NegotiationStage
 } from '../negotiation/entities/negotiation.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
-import { FinanceiroTopKpisQueryDto } from './dto/financeiro-top-kpis-query.dto'
 import { FinanceiroDistributionKpisResponseDto } from './dto/financeiro-distribution-kpis-response.dto'
+import {
+  FinanceiroTemplateCostsResponseDto,
+  FinanceiroTemplateCostType
+} from './dto/financeiro-template-costs-response.dto'
+import { FinanceiroTopKpisQueryDto } from './dto/financeiro-top-kpis-query.dto'
 import { FinanceiroTopSummaryResponseDto } from './dto/financeiro-top-summary-response.dto'
+
+const TEMPLATE_COSTS_IN_CENTS: Record<FinanceiroTemplateCostType, number> = {
+  MARKETING: 30,
+  UTILITY: 4,
+  UNKNOWN: 0
+}
+
+const TEMPLATE_TYPE_LABELS: Record<FinanceiroTemplateCostType, string> = {
+  MARKETING: 'Marketing',
+  UTILITY: 'Utilitário',
+  UNKNOWN: 'Não identificado'
+}
 
 @Injectable()
 export class FinanceiroService {
   constructor(
     @InjectRepository(Negotiation)
     private readonly negotiationRepository: Repository<Negotiation>,
+    @InjectRepository(Message)
+    private readonly messageRepository: Repository<Message>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepository: Repository<UserInformations>
   ) {}
@@ -88,7 +111,8 @@ export class FinanceiroService {
     const negociosGanhos = Number(rawSummary?.negociosGanhos ?? 0)
     const negociosPerdidos = Number(rawSummary?.negociosPerdidos ?? 0)
 
-    const ticketMedio = negociosGanhos > 0 ? receitaFaturada / negociosGanhos : 0
+    const ticketMedio =
+      negociosGanhos > 0 ? receitaFaturada / negociosGanhos : 0
     const totalEncerrados = negociosGanhos + negociosPerdidos
     const taxaConversao =
       totalEncerrados > 0 ? (negociosGanhos / totalEncerrados) * 100 : 0
@@ -145,7 +169,10 @@ export class FinanceiroService {
         )
         .addSelect('COUNT(*)', 'count')
         .groupBy('temperature')
-        .getRawMany<{ temperature: 'hot' | 'warm' | 'cold' | 'none'; count: string }>(),
+        .getRawMany<{
+          temperature: 'hot' | 'warm' | 'cold' | 'none'
+          count: string
+        }>(),
       this.createScopedNegotiationsQuery(userInformationsIds, query)
         .select(
           `CASE WHEN negotiation.stage = 'WON' THEN 'won' WHEN negotiation.stage = 'LOST' THEN 'lost' ELSE 'open' END`,
@@ -162,7 +189,10 @@ export class FinanceiroService {
       this.createScopedNegotiationsQuery(userInformationsIds, query)
         .select('negotiation.stage', 'stage')
         .addSelect('COUNT(*)', 'count')
-        .addSelect('COALESCE(SUM(COALESCE(negotiation.value::numeric, 0)), 0)', 'totalValue')
+        .addSelect(
+          'COALESCE(SUM(COALESCE(negotiation.value::numeric, 0)), 0)',
+          'totalValue'
+        )
         .groupBy('negotiation.stage')
         .getRawMany<{
           stage: NegotiationStage
@@ -248,6 +278,67 @@ export class FinanceiroService {
     }
   }
 
+  async getTemplateCosts(
+    userId: string,
+    query: FinanceiroTopKpisQueryDto
+  ): Promise<FinanceiroTemplateCostsResponseDto> {
+    const userInformationsIds = await this.findUserInformationsIds(userId)
+    const quantities = new Map<FinanceiroTemplateCostType, number>()
+
+    if (userInformationsIds.length) {
+      const queryBuilder = this.messageRepository
+        .createQueryBuilder('message')
+        .innerJoin('leads', 'lead', 'lead.id::text = message."leadId"')
+        .select(
+          `CASE WHEN UPPER(TRIM(message."templateType")) IN ('MARKETING', 'UTILITY') THEN UPPER(TRIM(message."templateType")) ELSE 'UNKNOWN' END`,
+          'templateType'
+        )
+        .addSelect('COUNT(*)', 'quantity')
+        .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+          userInformationsIds
+        })
+        .andWhere('message.direction = :direction', {
+          direction: MessageDirection.OUTBOUND
+        })
+        .andWhere('message.source = :source', {
+          source: MessageSource.TEMPLATE
+        })
+        .groupBy('"templateType"')
+
+      this.applyCreatedAtFilter(queryBuilder, 'message', query)
+
+      const rawCosts = await queryBuilder.getRawMany<{
+        templateType: FinanceiroTemplateCostType
+        quantity: string
+      }>()
+
+      for (const item of rawCosts) {
+        quantities.set(item.templateType, Number(item.quantity))
+      }
+    }
+
+    const types = (
+      ['MARKETING', 'UTILITY', 'UNKNOWN'] as FinanceiroTemplateCostType[]
+    ).map((type) => {
+      const quantity = quantities.get(type) ?? 0
+      const unitCostInCents = TEMPLATE_COSTS_IN_CENTS[type]
+
+      return {
+        type,
+        label: TEMPLATE_TYPE_LABELS[type],
+        quantity,
+        unitCost: unitCostInCents / 100,
+        totalCost: (quantity * unitCostInCents) / 100
+      }
+    })
+
+    return {
+      totalTemplates: types.reduce((total, item) => total + item.quantity, 0),
+      totalCost: types.reduce((total, item) => total + item.totalCost, 0),
+      types
+    }
+  }
+
   private async findUserInformationsIds(userId: string): Promise<string[]> {
     const userInformations = await this.userInformationsRepository.find({
       where: { userId },
@@ -307,6 +398,30 @@ export class FinanceiroService {
     return queryBuilder
   }
 
+  private applyCreatedAtFilter<T extends ObjectLiteral>(
+    queryBuilder: SelectQueryBuilder<T>,
+    alias: string,
+    query: FinanceiroTopKpisQueryDto
+  ): void {
+    const createdAtFrom = this.parseDateOnly(query.createdAtFrom)
+    const createdAtTo = this.parseDateOnly(query.createdAtTo)
+
+    if (createdAtFrom) {
+      queryBuilder.andWhere(`${alias}."createdAt" >= :createdAtFrom`, {
+        createdAtFrom
+      })
+    }
+
+    if (createdAtTo) {
+      const createdAtToExclusive = new Date(createdAtTo)
+      createdAtToExclusive.setDate(createdAtToExclusive.getDate() + 1)
+
+      queryBuilder.andWhere(`${alias}."createdAt" < :createdAtToExclusive`, {
+        createdAtToExclusive
+      })
+    }
+  }
+
   private normalizeSourceKey(
     source: string | null
   ): 'whatsapp' | 'metaads' | 'googleads' | 'indicacao' | 'other' {
@@ -315,6 +430,7 @@ export class FinanceiroService {
       .toLowerCase()
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\s_-]+/g, '')
 
     if (normalizedSource === 'whatsapp') return 'whatsapp'
     if (normalizedSource === 'metaads') return 'metaads'

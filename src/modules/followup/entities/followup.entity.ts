@@ -4,13 +4,14 @@ import {
   Entity,
   JoinColumn,
   ManyToOne,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn
 } from 'typeorm'
 
 import { Negotiation } from '../../negotiation/entities/negotiation.entity'
 
-import { Template } from './template.entity'
+import { FollowUpAction } from './followup-action.entity'
 
 export enum FollowUpStatus {
   PENDING = 'pending',
@@ -36,22 +37,6 @@ export class FollowUp {
   @Column({ name: 'value', type: 'text' })
   title!: string
 
-  @Column({ nullable: true })
-  templateId?: string | null
-
-  @ManyToOne(() => Template, {
-    nullable: true,
-    onDelete: 'SET NULL'
-  })
-  @JoinColumn({ name: 'templateId' })
-  template?: Template | null
-
-  @Column({
-    type: 'jsonb',
-    default: () => "'{}'::jsonb"
-  })
-  templateVariables!: Record<string, unknown>
-
   @Column({ type: 'timestamptz' })
   dueAt!: Date
 
@@ -66,6 +51,11 @@ export class FollowUp {
 
   @Column({ name: 'remider1hSentAt', type: 'timestamptz', nullable: true })
   reminder1hSentAt?: Date | null
+
+  @OneToMany(() => FollowUpAction, (action) => action.followUp, {
+    cascade: true
+  })
+  actions!: FollowUpAction[]
 
   @CreateDateColumn({
     type: 'timestamptz'

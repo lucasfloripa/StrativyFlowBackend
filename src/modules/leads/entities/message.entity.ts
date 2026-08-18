@@ -38,8 +38,21 @@ export enum MessageSource {
   TEMPLATE = 'template'
 }
 
+export enum MessageChannel {
+  WHATSAPP = 'whatsapp',
+  MESSENGER = 'messenger',
+  INSTAGRAM = 'instagram'
+}
+
 @Entity('messages')
 @Index('idx_messages_lead_id', ['leadId'])
+@Index(
+  'UQ_messages_channel_externalMessageId',
+  ['channel', 'externalMessageId'],
+  {
+    unique: true
+  }
+)
 export class Message {
   @PrimaryGeneratedColumn('uuid')
   id!: string
@@ -52,6 +65,14 @@ export class Message {
     enum: MessageDirection
   })
   direction!: MessageDirection
+
+  @Column({
+    type: 'enum',
+    enum: MessageChannel,
+    enumName: 'message_channel_enum',
+    default: MessageChannel.WHATSAPP
+  })
+  channel!: MessageChannel
 
   @Column({ type: 'text', nullable: true })
   content?: string | null
@@ -66,8 +87,8 @@ export class Message {
   })
   type!: MessageType
 
-  @Column({ type: 'varchar', nullable: true, unique: true })
-  whatsappMessageId?: string | null
+  @Column({ type: 'varchar', nullable: true })
+  externalMessageId?: string | null
 
   @Column({ type: 'varchar', nullable: true })
   metaMediaId?: string | null
@@ -100,6 +121,9 @@ export class Message {
     default: MessageSource.NORMAL
   })
   source!: MessageSource
+
+  @Column({ type: 'varchar', nullable: true })
+  templateType?: string | null
 
   @Column({ type: 'jsonb', nullable: true })
   metadata?: Record<string, unknown> | null

@@ -4,8 +4,6 @@ import { FollowUp } from '../entities/followup.entity'
 export const mapFollowUpToResponseDto = (
   followUp: FollowUp
 ): FollowUpResponseDto => {
-  const template = followUp.template
-
   return {
     id: followUp.id,
     negotiationId: followUp.negotiationId,
@@ -15,18 +13,20 @@ export const mapFollowUpToResponseDto = (
     completedAt: followUp.completedAt
       ? followUp.completedAt.toISOString()
       : null,
-    templateId: followUp.templateId ?? null,
-    template: template
-      ? {
-          id: template.id,
-          name: template.name,
-          description: template.description ?? null,
-          variables: template.variables ?? [],
-          createdAt: template.createdAt.toISOString(),
-          updatedAt: template.updatedAt.toISOString()
-        }
+    reminder1hSentAt: followUp.reminder1hSentAt
+      ? followUp.reminder1hSentAt.toISOString()
       : null,
-    templateVariables: followUp.templateVariables ?? {},
+    actions: (followUp.actions ?? []).map((action) => ({
+      id: action.id,
+      type: action.type,
+      channel: action.channel ?? null,
+      status: action.status,
+      payload: action.payload ?? null,
+      executedAt: action.executedAt ? action.executedAt.toISOString() : null,
+      failureReason: action.failureReason ?? null,
+      createdAt: action.createdAt.toISOString(),
+      updatedAt: action.updatedAt.toISOString()
+    })),
     createdAt: followUp.createdAt.toISOString(),
     updatedAt: followUp.updatedAt.toISOString()
   }

@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common'
 import { MetaWhatsAppClient } from './meta-whatsapp-client.service'
 import {
   MetaWhatsAppSendTemplateRequestDto,
+  MetaWhatsAppSendTemplateSuccessDto,
   MetaWhatsAppTemplateComponentDto,
   MetaWhatsAppTemplateParameterDto
 } from './meta-whatsapp-dto'
@@ -12,10 +13,12 @@ import { SendWhatsAppTemplateCommand } from './send-whatsapp-template.command'
 export class WhatsAppTemplateSender {
   constructor(private readonly metaWhatsAppClient: MetaWhatsAppClient) {}
 
-  async sendTemplate(command: SendWhatsAppTemplateCommand): Promise<void> {
+  async sendTemplate(
+    command: SendWhatsAppTemplateCommand
+  ): Promise<MetaWhatsAppSendTemplateSuccessDto> {
     const payload = this.buildMetaSendTemplateRequest(command)
 
-    await this.metaWhatsAppClient.sendTemplate(payload, {
+    return await this.metaWhatsAppClient.sendTemplate(payload, {
       phoneNumberId: command.phoneNumberId,
       accessToken: command.accessToken
     })
@@ -67,7 +70,15 @@ export class WhatsAppTemplateSender {
     return command.templateVariableDefinitions.map((variableDefinition) => ({
       type: 'text',
       parameter_name: variableDefinition.key,
-      text: String(command.variables[variableDefinition.key] ?? '')
+      text: this.toTemplateText(command.variables[variableDefinition.key])
     }))
+  }
+
+  private toTemplateText(value: unknown): string {
+    if (typeof value === 'string') return value
+    if (typeof value === 'number' || typeof value === 'boolean') {
+      return String(value)
+    }
+    return ''
   }
 }

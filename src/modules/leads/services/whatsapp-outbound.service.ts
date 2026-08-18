@@ -62,10 +62,7 @@ export class WhatsAppOutboundService {
     if (this.audioConverterService.isWebmAudio(file.mimetype)) {
       try {
         const convertedAudio =
-          await this.audioConverterService.convertWebmToOgg(
-            file.buffer,
-            file.originalname
-          )
+          await this.audioConverterService.convertWebmToOgg(file.buffer)
 
         // Validate converted buffer
         if (!convertedAudio.buffer || convertedAudio.buffer.length === 0) {
@@ -75,7 +72,7 @@ export class WhatsAppOutboundService {
         bufferToUpload = convertedAudio.buffer
         mimeTypeToUpload = convertedAudio.mimeType
         fileNameToUpload = file.originalname.replace(/\.webm$/i, '.mp3')
-      } catch (error) {
+      } catch {
         // Continue with original file if conversion fails
       }
     }
@@ -211,25 +208,14 @@ export class WhatsAppOutboundService {
       headers['Content-Type'] = 'application/json'
     }
 
-    try {
-      const response = await axios.post<TResponse>(
-        `https://graph.facebook.com/v22.0${params.path}`,
-        params.payload,
-        {
-          headers
-        }
-      )
-
-      return { data: response.data }
-    } catch (error) {
-      const axiosError = error as {
-        response?: {
-          status?: number
-          data?: unknown
-        }
+    const response = await axios.post<TResponse>(
+      `https://graph.facebook.com/v22.0${params.path}`,
+      params.payload,
+      {
+        headers
       }
+    )
 
-      throw error
-    }
+    return { data: response.data }
   }
 }

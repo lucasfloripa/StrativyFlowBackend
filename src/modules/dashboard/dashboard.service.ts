@@ -324,9 +324,7 @@ export class DashboardService {
       lastInboundAt !== null &&
       lastInboundAt > twentyFourHoursAgo
     const hasNoResponse24h =
-      row.hasOutbound &&
-      lastInboundAt !== null &&
-      lastInboundAt <= twentyFourHoursAgo
+      lastInboundAt !== null && lastInboundAt <= twentyFourHoursAgo
     let status: DashboardConversationStatus | null = null
 
     if (isNew) {
@@ -343,6 +341,7 @@ export class DashboardService {
       source: row.source,
       leadCreatedAt,
       lastMessageAt,
+      lastInboundAt,
       lastMessage: row.lastMessage,
       lastMessageDirection: row.lastMessageDirection,
       lastMessageType: row.lastMessageType,
@@ -363,6 +362,7 @@ export class DashboardService {
       source: conversation.source,
       leadCreatedAt: conversation.leadCreatedAt,
       lastMessageAt: conversation.lastMessageAt,
+      lastInboundAt: conversation.lastInboundAt,
       lastMessage: conversation.lastMessage,
       lastMessageDirection: conversation.lastMessageDirection,
       lastMessageType: conversation.lastMessageType,

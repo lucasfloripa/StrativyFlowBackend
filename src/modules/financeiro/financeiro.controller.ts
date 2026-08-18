@@ -32,4 +32,12 @@ export class FinanceiroController {
   ) {
     return await this.financeiroService.getDistributionKpis(req.user.id, query)
   }
+
+  @Get('custos-templates')
+  async getTemplateCosts(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: FinanceiroTopKpisQueryDto
+  ) {
+    return await this.financeiroService.getTemplateCosts(req.user.id, query)
+  }
 }

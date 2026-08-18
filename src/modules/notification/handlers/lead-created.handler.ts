@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
 import { MailService } from '../../mail/mail.service'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
@@ -26,6 +27,7 @@ export class LeadCreatedHandler implements NotificationEventHandler {
   constructor(
     private readonly notificationService: NotificationService,
     private readonly mailService: MailService,
+    private readonly automationMessagingService: AutomationMessagingService,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>
   ) {}
@@ -92,6 +94,25 @@ export class LeadCreatedHandler implements NotificationEventHandler {
 
     if (
       origin === 'webhook' &&
+      enabledChannels.includes(NotificationChannel.WHATSAPP)
+    ) {
+      await this.dispatchWhatsAppNotification({
+        userId,
+        leadId,
+        userInformations
+      })
+    } else if (origin !== 'webhook') {
+      this.logger.log(
+        `Skipping NEW_LEAD WhatsApp notification because lead was created via app (origin=${origin ?? 'unknown'}), not webhook. leadId=${leadId}`
+      )
+    } else {
+      this.logger.log(
+        `Skipping NEW_LEAD WhatsApp notification because WHATSAPP channel is disabled for userId=${userId}`
+      )
+    }
+
+    if (
+      origin === 'webhook' &&
       enabledChannels.includes(NotificationChannel.EMAIL)
     ) {
       const recipients = Array.from(
@@ -129,6 +150,63 @@ export class LeadCreatedHandler implements NotificationEventHandler {
         `Skipping NEW_LEAD email notification because EMAIL channel is disabled for userId=${userId}`
       )
     }
+  }
+
+  private async dispatchWhatsAppNotification(params: {
+    userId: string
+    leadId: string
+    userInformations: UserInformations | null
+  }): Promise<void> {
+    const { userId, leadId, userInformations } = params
+    const recipients = Array.from(
+      new Set(
+        (userInformations?.notificationWhatsAppNumbers ?? [])
+          .map((number) => number.trim())
+          .filter((number) => number.length > 0)
+      )
+    )
+
+    if (!recipients.length) {
+      this.logger.warn(
+        `Skipping NEW_LEAD WhatsApp notification because no notificationWhatsAppNumbers are configured for userId=${userId}`
+      )
+      return
+    }
+
+    const phoneNumberId = userInformations?.phoneNumberId?.trim()
+
+    if (!phoneNumberId) {
+      this.logger.warn(
+        `Skipping NEW_LEAD WhatsApp notification because phoneNumberId is missing for userId=${userId}`
+      )
+      return
+    }
+
+    const results = await Promise.allSettled(
+      recipients.map((recipient) =>
+        this.automationMessagingService.sendWhatsAppMessage(
+          recipient,
+          'Tem novo Lead no Flow!',
+          phoneNumberId,
+          userInformations?.whatsappToken ?? undefined
+        )
+      )
+    )
+    const successCount = results.filter(
+      (result) => result.status === 'fulfilled'
+    ).length
+
+    this.logger.log(
+      `NEW_LEAD WhatsApp notification dispatched for leadId=${leadId}. success=${successCount}/${recipients.length}`
+    )
+
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Failed to send NEW_LEAD WhatsApp notification to ${recipients[index]} for leadId=${leadId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
+        )
+      }
+    })
   }
 
   private asRecord(value: unknown): Record<string, unknown> {

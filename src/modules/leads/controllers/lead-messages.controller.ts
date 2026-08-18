@@ -13,9 +13,11 @@ import { FileInterceptor } from '@nestjs/platform-express'
 
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { StorageUploadFile } from '../../storage/storage.service'
+import { SendContactLeadMessageDto } from '../dtos/send-contact-lead-message.dto'
 import { SendMediaLeadMessageDto } from '../dtos/send-media-lead-message.dto'
 import { SendTemplateLeadMessageDto } from '../dtos/send-template-lead-message.dto'
 import { SendTextLeadMessageDto } from '../dtos/send-text-lead-message.dto'
+import { SendContactLeadMessageCommand } from '../services/commands/send-contact-lead-message.command'
 import { SendMediaLeadMessageCommand } from '../services/commands/send-media-lead-message.command'
 import { SendTemplateLeadMessageCommand } from '../services/commands/send-template-lead-message.command'
 import { SendTextLeadMessageCommand } from '../services/commands/send-text-lead-message.command'
@@ -57,10 +59,26 @@ export class LeadMessagesController {
       userId: req.user.id,
       leadId,
       content: body.content,
-      source: body.source
+      source: body.source,
+      channel: body.channel
     }
 
     return this.leadMessageApplicationService.sendTextMessage(command)
+  }
+
+  @Post(':leadId/messages/contacts')
+  sendContactMessage(
+    @Param('leadId') leadId: string,
+    @Body() body: SendContactLeadMessageDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    const command: SendContactLeadMessageCommand = {
+      userId: req.user.id,
+      leadId,
+      contactIds: body.contactIds
+    }
+
+    return this.leadMessageApplicationService.sendContactMessage(command)
   }
 
   @Post(':leadId/messages/media')
@@ -78,7 +96,8 @@ export class LeadMessagesController {
       file,
       caption: body.caption,
       source: body.source,
-      metadata: body.metadata
+      metadata: body.metadata,
+      channel: body.channel
     }
 
     return this.leadMessageApplicationService.sendMediaMessage(command)

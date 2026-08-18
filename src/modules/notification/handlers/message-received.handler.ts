@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
-import { Message, MessageDirection } from '../../leads/entities/message.entity'
 import { Lead, LeadFlowState } from '../../leads/entities/lead.entity'
+import { Message, MessageDirection } from '../../leads/entities/message.entity'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
@@ -69,21 +69,50 @@ export class MessageReceivedHandler implements NotificationEventHandler {
       leadName ??
       'Nova mensagem recebida.'
 
-    await this.notificationService.createNotification({
-      organizationId: this.getString(data, 'organizationId') ?? null,
-      userId,
-      type: NotificationType.MESSAGE_RECEIVED,
-      title: 'Nova mensagem recebida',
-      description,
-      referenceType: NotificationReferenceType.MESSAGE,
-      referenceId: leadId
+    const userInformations = await this.userInformationsRepo.findOne({
+      where: { userId },
+      order: { createdAt: 'ASC' }
     })
+
+    if (!userInformations) {
+      this.logger.warn(
+        `Skipping MESSAGE_RECEIVED notifications because UserInformations was not found for userId=${userId}`
+      )
+      return
+    }
+
+    const enabledChannels =
+      userInformations.notificationPreferences?.[
+        PreferenceNotificationType.MESSAGE_RECEIVED
+      ] ?? []
+
+    this.logger.log(
+      `MESSAGE_RECEIVED channels for userId=${userId}: ${enabledChannels.join(',') || 'none'}`
+    )
+
+    if (enabledChannels.includes(NotificationChannel.APP)) {
+      await this.notificationService.createNotification({
+        organizationId: this.getString(data, 'organizationId') ?? null,
+        userId,
+        type: NotificationType.MESSAGE_RECEIVED,
+        title: 'Nova mensagem recebida',
+        description,
+        referenceType: NotificationReferenceType.MESSAGE,
+        referenceId: leadId
+      })
+    } else {
+      this.logger.log(
+        `Skipping MESSAGE_RECEIVED APP notification because APP channel is disabled for userId=${userId}`
+      )
+    }
 
     await this.dispatchWhatsAppMessageReceivedNotification({
       userId,
       messageId,
       leadId,
-      leadName
+      leadName,
+      userInformations,
+      enabledChannels
     })
   }
 
@@ -92,8 +121,17 @@ export class MessageReceivedHandler implements NotificationEventHandler {
     messageId: string
     leadId: string
     leadName: string | null
+    userInformations: UserInformations
+    enabledChannels: NotificationChannel[]
   }): Promise<void> {
-    const { userId, messageId, leadId, leadName } = params
+    const {
+      userId,
+      messageId,
+      leadId,
+      leadName,
+      userInformations,
+      enabledChannels
+    } = params
 
     if (!this.hasValidLeadName(leadName)) {
       this.logger.log(
@@ -101,27 +139,6 @@ export class MessageReceivedHandler implements NotificationEventHandler {
       )
       return
     }
-
-    const userInformations = await this.userInformationsRepo.findOne({
-      where: { userId },
-      order: { createdAt: 'ASC' }
-    })
-
-    if (!userInformations) {
-      this.logger.warn(
-        `Skipping MESSAGE_RECEIVED WhatsApp notification because UserInformations was not found for userId=${userId}`
-      )
-      return
-    }
-
-    const enabledChannels =
-      userInformations?.notificationPreferences?.[
-        PreferenceNotificationType.MESSAGE_RECEIVED
-      ] ?? []
-
-    this.logger.log(
-      `MESSAGE_RECEIVED channels for userId=${userId}: ${enabledChannels.join(',') || 'none'}`
-    )
 
     if (!enabledChannels.includes(NotificationChannel.WHATSAPP)) {
       this.logger.log(

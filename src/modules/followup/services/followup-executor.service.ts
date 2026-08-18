@@ -3,11 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
 import { NegotiationStage } from '../../negotiation/entities/negotiation.entity'
-import { UserInformations } from '../../user/entities/user-informations.entity'
+import {
+  FollowUpAction,
+  FollowUpActionChannel,
+  FollowUpActionStatus
+} from '../entities/followup-action.entity'
 import { FollowUp, FollowUpStatus } from '../entities/followup.entity'
 
-import { FollowUpTemplateCommandMapper } from './followup-template-command.mapper'
-import { WhatsAppTemplateSender } from './whatsapp-template-sender.service'
+import { FollowUpActionExecutor } from './followup-action-executor.service'
 
 @Injectable()
 export class FollowUpExecutor {
@@ -16,10 +19,9 @@ export class FollowUpExecutor {
   constructor(
     @InjectRepository(FollowUp)
     private readonly followUpRepository: Repository<FollowUp>,
-    @InjectRepository(UserInformations)
-    private readonly userInformationsRepository: Repository<UserInformations>,
-    private readonly followUpTemplateCommandMapper: FollowUpTemplateCommandMapper,
-    private readonly whatsAppTemplateSender: WhatsAppTemplateSender
+    @InjectRepository(FollowUpAction)
+    private readonly followUpActionRepository: Repository<FollowUpAction>,
+    private readonly followUpActionExecutor: FollowUpActionExecutor
   ) {}
 
   async findReadyForExecution(
@@ -29,7 +31,15 @@ export class FollowUpExecutor {
       .createQueryBuilder('followUp')
       .innerJoinAndSelect('followUp.negotiation', 'negotiation')
       .innerJoinAndSelect('negotiation.lead', 'lead')
-      .innerJoinAndSelect('followUp.template', 'template')
+      .innerJoinAndSelect(
+        'followUp.actions',
+        'action',
+        'action.status = :pendingActionStatus AND (action.channel IS NULL OR action.channel != :agendaChannel)',
+        {
+          pendingActionStatus: FollowUpActionStatus.PENDING,
+          agendaChannel: FollowUpActionChannel.AGENDA
+        }
+      )
       .where('followUp.status = :pendingStatus', {
         pendingStatus: FollowUpStatus.PENDING
       })
@@ -60,81 +70,79 @@ export class FollowUpExecutor {
     return await this.findReadyForExecution(referenceDate)
   }
 
-  async canExecute(followUp: FollowUp): Promise<boolean> {
-    const hasPhone = Boolean(followUp.negotiation?.lead?.phone?.trim())
-    const hasMetaTemplateName = Boolean(
-      followUp.template?.metaTemplateName?.trim()
-    )
-
-    if (!hasPhone || !hasMetaTemplateName) {
-      this.logger.warn(
-        `Skipping follow-up execution due to missing payload fields. followUpId=${followUp.id}, leadId=${followUp.negotiation?.leadId ?? 'null'}, hasPhone=${hasPhone}, hasMetaTemplateName=${hasMetaTemplateName}`
-      )
-      return false
-    }
-
-    return true
-  }
-
-  isLeadInActiveConversation(
-    followUp: FollowUp,
-    referenceDate: Date = new Date()
-  ): boolean {
-    const lastActivityAt = followUp.negotiation?.lead?.lastActivityAt
-    if (!lastActivityAt) {
-      return false
-    }
-
-    const hoursSinceLastActivity =
-      (referenceDate.getTime() - new Date(lastActivityAt).getTime()) /
-      (1000 * 60 * 60)
-    const isInActiveConversation = hoursSinceLastActivity < 24
-
-    if (isInActiveConversation) {
-      this.logger.debug(
-        `Lead is in active conversation (within 24h). followUpId=${followUp.id}, leadId=${followUp.negotiation?.leadId ?? 'null'}, lastActivityAt=${lastActivityAt.toISOString()}, hoursSince=${hoursSinceLastActivity.toFixed(2)}`
-      )
-    }
-
-    return isInActiveConversation
-  }
-
   async execute(followUp: FollowUp): Promise<void> {
-    const canExecuteFollowUp = await this.canExecute(followUp)
+    const lead = followUp.negotiation?.lead
 
-    if (!canExecuteFollowUp) {
-      return
+    if (!lead) {
+      throw new Error(`Lead not loaded for FollowUp ${followUp.id}`)
     }
 
-    this.logger.debug(
-      `Preparing WhatsApp template command. followUpId=${followUp.id}, negotiationId=${followUp.negotiationId}, templateId=${followUp.templateId ?? 'null'}`
+    for (const loadedAction of followUp.actions ?? []) {
+      const action = await this.followUpActionRepository.findOne({
+        where: {
+          id: loadedAction.id,
+          status: FollowUpActionStatus.PENDING
+        }
+      })
+
+      if (!action) {
+        continue
+      }
+
+      if (action.channel === FollowUpActionChannel.AGENDA) {
+        continue
+      }
+
+      this.logger.log(
+        `Executing follow-up action. followUpId=${followUp.id}, negotiationId=${followUp.negotiationId}, actionId=${action.id}, actionType=${action.type}, channel=${action.channel ?? 'none'}`
+      )
+
+      try {
+        const status = await this.followUpActionExecutor.execute(
+          action,
+          lead,
+          followUp.negotiationId
+        )
+
+        action.status = status
+        action.executedAt =
+          status === FollowUpActionStatus.EXECUTED ? new Date() : null
+        action.failureReason = null
+        await this.followUpActionRepository.save(action)
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : 'Unknown execution error'
+
+        action.status = FollowUpActionStatus.FAILED
+        action.executedAt = null
+        action.failureReason = message
+        await this.followUpActionRepository.save(action)
+
+        this.logger.error(
+          `Failed to execute follow-up action. followUpId=${followUp.id}, negotiationId=${followUp.negotiationId}, actionId=${action.id}, actionType=${action.type}, channel=${action.channel ?? 'none'}, error=${message}`,
+          error instanceof Error ? error.stack : undefined
+        )
+      }
+    }
+
+    await this.updateFollowUpCompletion(followUp.id)
+  }
+
+  private async updateFollowUpCompletion(followUpId: string): Promise<void> {
+    const actions = await this.followUpActionRepository.find({
+      where: { followUpId }
+    })
+    const isCompleted = actions.every(
+      (action) =>
+        action.status === FollowUpActionStatus.EXECUTED ||
+        action.status === FollowUpActionStatus.SKIPPED
     )
 
-    const userInformationsId = followUp.negotiation?.lead?.userInformationsId
-    const userInformations = userInformationsId
-      ? await this.userInformationsRepository.findOne({
-          where: { id: userInformationsId }
-        })
-      : null
-    const phoneNumberId = userInformations?.phoneNumberId?.trim()
-    const accessToken = userInformations?.whatsappToken?.trim()
-
-    if (!phoneNumberId || !accessToken) {
-      this.logger.warn(
-        `Skipping follow-up execution due to missing WhatsApp credentials in userInformations. followUpId=${followUp.id}, leadId=${followUp.negotiation?.leadId ?? 'null'}, userInformationsId=${userInformationsId ?? 'null'}, hasPhoneNumberId=${Boolean(phoneNumberId)}, hasAccessToken=${Boolean(accessToken)}`
-      )
+    if (!isCompleted) {
       return
     }
 
-    const sendTemplateCommand =
-      this.followUpTemplateCommandMapper.toSendWhatsAppTemplateCommand(
-        followUp,
-        { phoneNumberId, accessToken }
-      )
-
-    await this.whatsAppTemplateSender.sendTemplate(sendTemplateCommand)
-
-    await this.followUpRepository.update(followUp.id, {
+    await this.followUpRepository.update(followUpId, {
       status: FollowUpStatus.DONE,
       completedAt: new Date()
     })

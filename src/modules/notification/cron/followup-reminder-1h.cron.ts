@@ -5,6 +5,11 @@ import { DataSource } from 'typeorm'
 
 import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
 import {
+  FollowUpAction,
+  FollowUpActionChannel,
+  FollowUpActionType
+} from '../../followup/entities/followup-action.entity'
+import {
   FollowUp,
   FollowUpStatus
 } from '../../followup/entities/followup.entity'
@@ -22,6 +27,9 @@ import {
 
 type FollowUpReminderCandidate = {
   followUpId: string
+  followUpTitle: string
+  actionChannel: FollowUpActionChannel | null
+  actionType: FollowUpActionType | null
   userId: string
   leadName: string
   userInformationsId: string
@@ -58,6 +66,27 @@ export class FollowUpReminder1hCron {
           '"userInformations"."id"::text = "lead"."userInformationsId"'
         )
         .select('followUp.id', 'followUpId')
+        .addSelect('followUp.title', 'followUpTitle')
+        .addSelect(
+          (subQuery) =>
+            subQuery
+              .select('action.channel')
+              .from(FollowUpAction, 'action')
+              .where('action."followUpId" = followUp.id')
+              .orderBy('action."createdAt"', 'ASC')
+              .limit(1),
+          'actionChannel'
+        )
+        .addSelect(
+          (subQuery) =>
+            subQuery
+              .select('action.type')
+              .from(FollowUpAction, 'action')
+              .where('action."followUpId" = followUp.id')
+              .orderBy('action."createdAt"', 'ASC')
+              .limit(1),
+          'actionType'
+        )
         .addSelect('lead.name', 'leadName')
         .addSelect('userInformations.userId', 'userId')
         .addSelect('userInformations.id', 'userInformationsId')
@@ -77,6 +106,7 @@ export class FollowUpReminder1hCron {
       }
 
       for (const candidate of candidates) {
+        const reminderDescription = this.buildReminderDescription(candidate)
         const userInformations = await manager.findOne(UserInformations, {
           where: { id: candidate.userInformationsId }
         })
@@ -92,7 +122,7 @@ export class FollowUpReminder1hCron {
             userId: candidate.userId,
             type: NotificationType.FOLLOW_UP_REMINDER_1H,
             title: 'Follow-up em 1 hora',
-            description: `Retornar para ${candidate.leadName}`,
+            description: reminderDescription,
             referenceType: NotificationReferenceType.FOLLOW_UP,
             referenceId: candidate.followUpId,
             isRead: false,
@@ -125,7 +155,7 @@ export class FollowUpReminder1hCron {
                 `Skipping WHATSAPP follow-up 1h reminder because phoneNumberId is missing for userId=${candidate.userId}`
               )
             } else {
-              const notificationMessage = `Follow-up em 1 hora: Retornar para ${candidate.leadName}`
+              const notificationMessage = `Follow-up em 1 hora: ${reminderDescription}`
 
               const results = await Promise.allSettled(
                 recipients.map((recipient) =>
@@ -181,7 +211,7 @@ export class FollowUpReminder1hCron {
               subject: 'Follow-up em 1 hora',
               html: [
                 '<h2>Follow-up em 1 hora</h2>',
-                `<p>Retornar para ${this.escapeHtml(candidate.leadName)}</p>`
+                `<p>${this.escapeHtml(reminderDescription)}</p>`
               ].join('')
             })
 
@@ -214,6 +244,34 @@ export class FollowUpReminder1hCron {
         `Generated ${candidates.length} one-hour follow-up reminder notification(s)`
       )
     })
+  }
+
+  private buildReminderDescription(
+    candidate: FollowUpReminderCandidate
+  ): string {
+    const channelLabel = candidate.actionChannel
+      ? this.getChannelLabel(candidate.actionChannel)
+      : candidate.actionType === FollowUpActionType.SEND_EMAIL
+        ? 'Email'
+        : 'Sem canal'
+
+    return `${candidate.followUpTitle} - ${channelLabel} - ${candidate.leadName}`
+  }
+
+  private getChannelLabel(channel: FollowUpActionChannel): string {
+    if (channel === FollowUpActionChannel.INSTAGRAM) {
+      return 'Direct'
+    }
+
+    if (channel === FollowUpActionChannel.WHATSAPP) {
+      return 'WhatsApp'
+    }
+
+    if (channel === FollowUpActionChannel.MESSENGER) {
+      return 'Messenger'
+    }
+
+    return 'Agenda'
   }
 
   private escapeHtml(value: string): string {

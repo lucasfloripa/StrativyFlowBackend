@@ -172,7 +172,7 @@ export class ReminderCronService {
       }
 
       existingGroup.items.push({
-        leadName: lead.name,
+        leadName: lead.name?.trim() || 'Lead sem nome',
         followUpValue: followUp.value,
         dueAt: followUp.dueAt
       })

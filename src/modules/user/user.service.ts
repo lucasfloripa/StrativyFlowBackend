@@ -35,6 +35,10 @@ export class UserService {
     const name = dto.name?.trim() || null
     const email = dto.email.trim().toLowerCase()
     const phoneNumber = dto.phoneNumber.trim()
+    const messengerPageId = dto.messengerPageId?.trim() || null
+    const messengerToken = dto.messengerToken?.trim() || null
+    const instagramAccountId = dto.instagramAccountId?.trim() || null
+    const instagramToken = dto.instagramToken?.trim() || null
 
     if (!userId || !email || !phoneNumber) {
       throw new BadRequestException(
@@ -55,6 +59,10 @@ export class UserService {
       name,
       email,
       phoneNumber,
+      messengerPageId,
+      messengerToken,
+      instagramAccountId,
+      instagramToken,
       notificationWhatsAppNumbers: dto.notificationWhatsAppNumbers ?? [],
       notificationEmails: dto.notificationEmails ?? [],
       notificationPreferences:
@@ -120,6 +128,23 @@ export class UserService {
 
     if (dto.notificationPreferences) {
       userInformations.notificationPreferences = dto.notificationPreferences
+    }
+
+    if (dto.messengerPageId !== undefined) {
+      userInformations.messengerPageId = dto.messengerPageId?.trim() || null
+    }
+
+    if (dto.messengerToken !== undefined) {
+      userInformations.messengerToken = dto.messengerToken?.trim() || null
+    }
+
+    if (dto.instagramAccountId !== undefined) {
+      userInformations.instagramAccountId =
+        dto.instagramAccountId?.trim() || null
+    }
+
+    if (dto.instagramToken !== undefined) {
+      userInformations.instagramToken = dto.instagramToken?.trim() || null
     }
 
     return this.userInformationsRepo.save(userInformations)

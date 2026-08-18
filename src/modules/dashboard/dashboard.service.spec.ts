@@ -109,6 +109,19 @@ describe('DashboardService conversations', () => {
         lastInboundAt: '2026-08-06T14:00:00.000Z',
         hasOutbound: true,
         runtimeMode: LeadRuntimeMode.AUTOMATION
+      },
+      {
+        leadId: 'old-automation-only',
+        leadName: 'Lead atendido apenas pela automação',
+        source: 'Messenger',
+        leadCreatedAt: '2026-08-04T09:00:00.000Z',
+        lastMessageAt: '2026-08-06T15:00:00.000Z',
+        lastMessage: 'Resposta automática',
+        lastMessageDirection: MessageDirection.AUTOMATIC,
+        lastMessageType: MessageType.TEXT,
+        lastInboundAt: '2026-08-06T14:00:00.000Z',
+        hasOutbound: false,
+        runtimeMode: LeadRuntimeMode.AUTOMATION
       }
     ])
   })
@@ -129,13 +142,14 @@ describe('DashboardService conversations', () => {
       'old-open-window',
       'recent-answered',
       'established-open-window',
-      'old-expired-window'
+      'old-expired-window',
+      'old-automation-only'
     ])
     expect(result.counts).toEqual({
-      all: 6,
+      all: 7,
       new: 2,
       today: 2,
-      noResponse24h: 2
+      noResponse24h: 3
     })
     expect(result.items[0]).toEqual(
       expect.objectContaining({
@@ -152,7 +166,8 @@ describe('DashboardService conversations', () => {
       ['old-open-window', 'today'],
       ['recent-answered', 'noResponse24h'],
       ['established-open-window', 'today'],
-      ['old-expired-window', 'noResponse24h']
+      ['old-expired-window', 'noResponse24h'],
+      ['old-automation-only', 'noResponse24h']
     ])
   })
 
@@ -167,7 +182,7 @@ describe('DashboardService conversations', () => {
     ],
     [
       DashboardConversationFilter.NO_RESPONSE_24H,
-      ['recent-answered', 'old-expired-window']
+      ['recent-answered', 'old-expired-window', 'old-automation-only']
     ]
   ])('filters conversations by %s', async (filter, expectedLeadIds) => {
     const result = await service.getConversations('user-1', filter)

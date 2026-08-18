@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
 import { ScheduleModule } from '@nestjs/schedule'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { ContactsModule } from './modules/contacts/contacts.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { FinanceiroModule } from './modules/financeiro/financeiro.module'
 import { FollowUpModule } from './modules/followup/followup.module'
@@ -49,6 +50,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
         }
       }
     }),
+    ContactsModule,
     DashboardModule,
     FinanceiroModule,
     FollowUpModule,

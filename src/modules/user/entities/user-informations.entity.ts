@@ -33,6 +33,18 @@ export class UserInformations {
   @Column({ type: 'varchar', nullable: true })
   whatsappToken?: string | null
 
+  @Column({ name: 'messenger_page_id', type: 'varchar', nullable: true })
+  messengerPageId?: string | null
+
+  @Column({ name: 'messenger_token', type: 'varchar', nullable: true })
+  messengerToken?: string | null
+
+  @Column({ name: 'instagram_account_id', type: 'varchar', nullable: true })
+  instagramAccountId?: string | null
+
+  @Column({ name: 'instagram_token', type: 'varchar', nullable: true })
+  instagramToken?: string | null
+
   @Column({ type: 'json', nullable: true })
   messageShortcuts?: Record<string, string> | null
 

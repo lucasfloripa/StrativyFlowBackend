@@ -20,18 +20,18 @@ export class LeadFlowActionExecutor {
       lead: Lead
       to: LeadFlowState
     }) => Promise<void>
-    sendWhatsAppMessage: (params: {
+    sendMessage: (params: {
       context: LeadFlowActionContext
       to: string
       content: string
     }) => Promise<{
-      whatsappMessageId?: string | null
+      externalMessageId?: string | null
     }>
     persistAutomaticMessage: (params: {
       context: LeadFlowActionContext
       leadId: string
       content: string
-      whatsappMessageId?: string | null
+      externalMessageId?: string | null
     }) => Promise<void>
   }): Promise<void> {
     const {
@@ -39,7 +39,7 @@ export class LeadFlowActionExecutor {
       lead,
       actions,
       transitionLeadFlowState,
-      sendWhatsAppMessage,
+      sendMessage,
       persistAutomaticMessage
     } = params
 
@@ -64,9 +64,17 @@ export class LeadFlowActionExecutor {
           this.logger.debug(
             `[${context.correlationId}] Executing SEND_MESSAGE action`
           )
-          const { whatsappMessageId } = await sendWhatsAppMessage({
+          const destination =
+            context.externalUserId?.trim() || lead.phone?.trim()
+          if (!destination) {
+            throw new Error(
+              `Cannot send flow message for lead ${lead.id} without an external destination`
+            )
+          }
+
+          const { externalMessageId } = await sendMessage({
             context,
-            to: lead.phone,
+            to: destination,
             content: action.payload.content
           })
 
@@ -74,7 +82,7 @@ export class LeadFlowActionExecutor {
             context,
             leadId: lead.id,
             content: action.payload.content,
-            whatsappMessageId
+            externalMessageId
           })
           break
         }

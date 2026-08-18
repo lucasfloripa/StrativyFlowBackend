@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { LeadChannel } from '../../leads/entities/lead-channel-identity.entity'
 import { Lead, LeadRuntimeMode } from '../../leads/entities/lead.entity'
+import { LeadChannelIdentityService } from '../../leads/services/lead-channel-identity.service'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import { AutomationMessagingService } from '../services/automation-messaging.service'
 
@@ -19,7 +21,8 @@ export class AutomationActionExecutor {
     private readonly leadRepo: Repository<Lead>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
-    private readonly automationMessagingService: AutomationMessagingService
+    private readonly automationMessagingService: AutomationMessagingService,
+    private readonly leadChannelIdentityService: LeadChannelIdentityService
   ) {}
 
   private readonly logger = new Logger(AutomationActionExecutor.name)
@@ -70,20 +73,39 @@ export class AutomationActionExecutor {
               })
             : null
 
+          const whatsappIdentity =
+            await this.leadChannelIdentityService.findLatestIdentityForLead(
+              lead.id,
+              LeadChannel.WHATSAPP
+            )
+
           const phoneNumberId =
             typeof context?.metadata?.phoneNumberId === 'string'
               ? context.metadata.phoneNumberId
-              : undefined
+              : whatsappIdentity?.externalAccountId
 
           const whatsappToken = userInformations?.whatsappToken ?? undefined
+          const destinationPhone =
+            (typeof context?.metadata?.from === 'string'
+              ? context.metadata.from.trim()
+              : '') ||
+            whatsappIdentity?.externalUserId.trim() ||
+            lead.phone?.trim()
+
+          if (!destinationPhone) {
+            this.logger.warn(
+              `Skipping SEND_MESSAGE action because lead ${lead.id} has no WhatsApp phone`
+            )
+            break
+          }
 
           this.logger.log(
-            `Dispatching automation WhatsApp message. leadId=${lead.id} phone=${lead.phone} content=${content}`
+            `Dispatching automation WhatsApp message. leadId=${lead.id} phone=${destinationPhone} content=${content}`
           )
 
           const response =
             await this.automationMessagingService.sendWhatsAppMessage(
-              lead.phone,
+              destinationPhone,
               content,
               phoneNumberId,
               whatsappToken
@@ -99,7 +121,7 @@ export class AutomationActionExecutor {
           })
 
           this.logger.log(
-            `Automation WhatsApp message sent. leadId=${lead.id} phone=${lead.phone} content=${content} whatsappMessageId=${whatsappMessageId ?? 'unknown'}`
+            `Automation WhatsApp message sent. leadId=${lead.id} phone=${destinationPhone} content=${content} whatsappMessageId=${whatsappMessageId ?? 'unknown'}`
           )
 
           break

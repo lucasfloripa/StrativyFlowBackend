@@ -12,6 +12,18 @@ export type WhatsAppSendMessageResponse = {
   }[]
 }
 
+export type WhatsAppContact = {
+  name: {
+    formatted_name: string
+    first_name?: string
+    last_name?: string
+  }
+  phones: {
+    phone: string
+    type: 'CELL'
+  }[]
+}
+
 @Injectable()
 export class WhatsAppMessagingService {
   async sendWhatsAppMessage(
@@ -21,6 +33,31 @@ export class WhatsAppMessagingService {
     whatsappToken?: string
   ): Promise<{ data: WhatsAppSendMessageResponse }> {
     return sendWhatsAppMessage(to, reply, phoneNumberId, whatsappToken)
+  }
+
+  async sendWhatsAppContact(
+    to: string,
+    contacts: WhatsAppContact[],
+    phoneNumberId?: string,
+    whatsappToken?: string
+  ): Promise<{ data: WhatsAppSendMessageResponse }> {
+    const token = whatsappToken?.trim()
+    return axios.post(
+      `https://graph.facebook.com/v23.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to,
+        type: 'contacts',
+        contacts
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    )
   }
 }
 

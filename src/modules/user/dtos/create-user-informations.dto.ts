@@ -35,6 +35,22 @@ export class CreateUserInformationsDto {
   whatsappToken?: string
 
   @IsOptional()
+  @IsString()
+  messengerPageId?: string | null
+
+  @IsOptional()
+  @IsString()
+  messengerToken?: string | null
+
+  @IsOptional()
+  @IsString()
+  instagramAccountId?: string | null
+
+  @IsOptional()
+  @IsString()
+  instagramToken?: string | null
+
+  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   notificationWhatsAppNumbers?: string[]

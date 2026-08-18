@@ -13,6 +13,8 @@ import { UserInformations } from '../user/entities/user-informations.entity'
 import { ConversationContextBuilder } from './flow/conversation-context.builder'
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
+import { InstagramMessagingService } from './instagram-messaging.service'
+import { MessengerMessagingService } from './messenger-messaging.service'
 import { WebhookController } from './webhook.controller'
 import { WebhookService } from './webhook.service'
 
@@ -27,10 +29,13 @@ import { WebhookService } from './webhook.service'
   ],
   providers: [
     WebhookService,
+    MessengerMessagingService,
+    InstagramMessagingService,
     ConversationContextBuilder,
     LeadFlowEngine,
     LeadFlowActionExecutor
   ],
-  controllers: [WebhookController]
+  controllers: [WebhookController],
+  exports: [InstagramMessagingService]
 })
 export class WebhookModule {}

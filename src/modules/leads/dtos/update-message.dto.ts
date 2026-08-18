@@ -7,6 +7,7 @@ import {
 } from 'class-validator'
 
 import {
+  MessageChannel,
   MessageDirection,
   MessageStatus,
   MessageType,
@@ -23,6 +24,10 @@ export class UpdateMessageDto {
   direction?: MessageDirection
 
   @IsOptional()
+  @IsEnum(MessageChannel)
+  channel?: MessageChannel
+
+  @IsOptional()
   @IsString()
   content?: string | null
 
@@ -32,7 +37,7 @@ export class UpdateMessageDto {
 
   @IsOptional()
   @IsString()
-  whatsappMessageId?: string | null
+  externalMessageId?: string | null
 
   @IsOptional()
   @IsString()
@@ -65,6 +70,10 @@ export class UpdateMessageDto {
   @IsOptional()
   @IsEnum(MessageSource)
   source?: MessageSource
+
+  @IsOptional()
+  @IsString()
+  templateType?: string | null
 
   @IsOptional()
   @IsObject()

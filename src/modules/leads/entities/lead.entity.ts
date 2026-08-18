@@ -10,6 +10,8 @@ import {
 
 import { Negotiation } from '../../negotiation/entities/negotiation.entity'
 
+import { LeadChannelIdentity } from './lead-channel-identity.entity'
+
 export enum LeadState {
   ACTIVE = 'active',
   ARCHIVED = 'archived'
@@ -35,6 +37,7 @@ export enum LeadQualification {
 
 export enum LeadSocialLinks {
   INSTAGRAM = 'instagram',
+  FACEBOOK = 'facebook',
   URL = 'url'
 }
 
@@ -47,11 +50,11 @@ export class Lead {
   @Column({ nullable: true })
   userInformationsId?: string
 
-  @Column()
-  name!: string
+  @Column({ nullable: true })
+  name?: string
 
-  @Column()
-  phone!: string
+  @Column({ nullable: true })
+  phone?: string
 
   @Column({ nullable: true })
   email?: string
@@ -83,6 +86,11 @@ export class Lead {
 
   @OneToMany(() => Negotiation, (negotiation) => negotiation.lead)
   negotiations!: Negotiation[]
+
+  @OneToMany(() => LeadChannelIdentity, (identity) => identity.lead, {
+    cascade: true
+  })
+  channelIdentities!: LeadChannelIdentity[]
 
   @Column({ nullable: true })
   lastInboundMessageId?: string

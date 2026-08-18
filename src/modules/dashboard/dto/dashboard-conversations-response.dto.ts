@@ -14,6 +14,7 @@ export type DashboardConversationItemDto = {
   source: string | null
   leadCreatedAt: Date
   lastMessageAt: Date
+  lastInboundAt: Date | null
   lastMessage: string | null
   lastMessageDirection: MessageDirection
   lastMessageType: MessageType

@@ -18,28 +18,6 @@ export class NegotiationService {
     private readonly followUpRepository: Repository<FollowUp>
   ) {}
 
-  private createFollowUpDueDate(baseDate: Date, hoursToAdd: number): Date {
-    return new Date(baseDate.getTime() + hoursToAdd * 60 * 60 * 1000)
-  }
-
-  private buildDefaultFollowUps(
-    negotiationId: string,
-    createdAt: Date
-  ): FollowUp[] {
-    return [
-      this.followUpRepository.create({
-        negotiationId,
-        title: 'Próximo FollowUp',
-        templateId: null,
-        templateVariables: {},
-        dueAt: this.createFollowUpDueDate(createdAt, 72),
-        status: FollowUpStatus.PENDING,
-        completedAt: null,
-        reminder1hSentAt: null
-      })
-    ]
-  }
-
   private normalizeNoteCreatedAt(value?: string): string {
     if (value) {
       const parsedDate = new Date(value)
@@ -68,34 +46,21 @@ export class NegotiationService {
 
   async create(dto: CreateNegotiationDto): Promise<Negotiation> {
     const normalizedNotes = this.normalizeNotes(dto.notes)
+    const negotiation = this.negotiationRepository.create({
+      leadId: dto.leadId,
+      title: dto.title,
+      stage: dto.stage,
+      temperature: dto.temperature,
+      negotiationType: dto.negotiationType,
+      value: dto.value,
+      notes: normalizedNotes,
+      closedAt: dto.closedAt ? new Date(dto.closedAt) : null,
+      stageUpdatedAt: dto.stageUpdatedAt
+        ? new Date(dto.stageUpdatedAt)
+        : null
+    })
 
-    return await this.negotiationRepository.manager.transaction(
-      async (manager) => {
-        const negotiation = manager.create(Negotiation, {
-          leadId: dto.leadId,
-          title: dto.title,
-          stage: dto.stage,
-          temperature: dto.temperature,
-          negotiationType: dto.negotiationType,
-          value: dto.value,
-          notes: normalizedNotes,
-          closedAt: dto.closedAt ? new Date(dto.closedAt) : null,
-          stageUpdatedAt: dto.stageUpdatedAt
-            ? new Date(dto.stageUpdatedAt)
-            : null
-        })
-
-        const createdNegotiation = await manager.save(Negotiation, negotiation)
-        const defaultFollowUps = this.buildDefaultFollowUps(
-          createdNegotiation.id,
-          createdNegotiation.createdAt ?? new Date()
-        )
-
-        await manager.save(FollowUp, defaultFollowUps)
-
-        return createdNegotiation
-      }
-    )
+    return await this.negotiationRepository.save(negotiation)
   }
 
   async findAll(): Promise<Negotiation[]> {
