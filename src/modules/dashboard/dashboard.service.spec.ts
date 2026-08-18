@@ -85,6 +85,19 @@ describe('DashboardService conversations', () => {
         runtimeMode: LeadRuntimeMode.HUMAN
       },
       {
+        leadId: 'returning-unanswered',
+        leadName: 'Lead antigo que voltou a falar',
+        source: 'Instagram',
+        leadCreatedAt: '2026-07-08T10:00:00.000Z',
+        lastMessageAt: '2026-08-08T11:00:00.000Z',
+        lastMessage: 'Olá olá olá',
+        lastMessageDirection: MessageDirection.INBOUND,
+        lastMessageType: MessageType.TEXT,
+        lastInboundAt: '2026-08-08T11:00:00.000Z',
+        hasOutbound: false,
+        runtimeMode: LeadRuntimeMode.AUTOMATION
+      },
+      {
         leadId: 'established-open-window',
         leadName: 'Lead com janela aberta',
         source: 'WhatsApp',
@@ -139,6 +152,7 @@ describe('DashboardService conversations', () => {
     expect(result.items.map((item) => item.leadId)).toEqual([
       'recent-automation-replied',
       'recent-unanswered',
+      'returning-unanswered',
       'old-open-window',
       'recent-answered',
       'established-open-window',
@@ -146,8 +160,8 @@ describe('DashboardService conversations', () => {
       'old-automation-only'
     ])
     expect(result.counts).toEqual({
-      all: 7,
-      new: 2,
+      all: 8,
+      new: 3,
       today: 2,
       noResponse24h: 3
     })
@@ -163,6 +177,7 @@ describe('DashboardService conversations', () => {
     expect(result.items.map((item) => [item.leadId, item.status])).toEqual([
       ['recent-automation-replied', 'new'],
       ['recent-unanswered', 'new'],
+      ['returning-unanswered', 'new'],
       ['old-open-window', 'today'],
       ['recent-answered', 'noResponse24h'],
       ['established-open-window', 'today'],
@@ -174,7 +189,7 @@ describe('DashboardService conversations', () => {
   it.each([
     [
       DashboardConversationFilter.NEW,
-      ['recent-automation-replied', 'recent-unanswered']
+      ['recent-automation-replied', 'recent-unanswered', 'returning-unanswered']
     ],
     [
       DashboardConversationFilter.TODAY,

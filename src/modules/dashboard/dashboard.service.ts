@@ -318,7 +318,10 @@ export class DashboardService {
     const leadCreatedAt = new Date(row.leadCreatedAt)
     const lastMessageAt = new Date(row.lastMessageAt)
     const lastInboundAt = row.lastInboundAt ? new Date(row.lastInboundAt) : null
-    const isNew = leadCreatedAt >= twentyFourHoursAgo && !row.hasOutbound
+    const isNew =
+      lastInboundAt !== null &&
+      lastInboundAt > twentyFourHoursAgo &&
+      !row.hasOutbound
     const hasOpenMetaWindow =
       row.hasOutbound &&
       lastInboundAt !== null &&
