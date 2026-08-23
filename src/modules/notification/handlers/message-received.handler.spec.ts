@@ -1,6 +1,6 @@
 import { Repository } from 'typeorm'
 
-import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
+import { EvolutionService } from '../../evolution/evolution.service'
 import { Lead, LeadFlowState } from '../../leads/entities/lead.entity'
 import { Message, MessageDirection } from '../../leads/entities/message.entity'
 import { UserInformations } from '../../user/entities/user-informations.entity'
@@ -13,9 +13,7 @@ describe('MessageReceivedHandler', () => {
   let notificationService: jest.Mocked<
     Pick<NotificationService, 'createNotification'>
   >
-  let automationMessagingService: jest.Mocked<
-    Pick<AutomationMessagingService, 'sendWhatsAppMessage'>
-  >
+  let evolutionService: jest.Mocked<Pick<EvolutionService, 'sendText'>>
   let userInformationsRepo: jest.Mocked<
     Pick<Repository<UserInformations>, 'findOne'>
   >
@@ -27,8 +25,8 @@ describe('MessageReceivedHandler', () => {
       createNotification: jest.fn().mockResolvedValue({} as never)
     }
 
-    automationMessagingService = {
-      sendWhatsAppMessage: jest.fn().mockResolvedValue({} as never)
+    evolutionService = {
+      sendText: jest.fn().mockResolvedValue({} as never)
     }
 
     userInformationsRepo = {
@@ -52,7 +50,7 @@ describe('MessageReceivedHandler', () => {
 
     handler = new MessageReceivedHandler(
       notificationService as unknown as NotificationService,
-      automationMessagingService as unknown as AutomationMessagingService,
+      evolutionService as unknown as EvolutionService,
       userInformationsRepo as unknown as Repository<UserInformations>,
       messageRepo as unknown as Repository<Message>,
       leadRepo as unknown as Repository<Lead>
@@ -74,9 +72,7 @@ describe('MessageReceivedHandler', () => {
     } as never)
 
     expect(notificationService.createNotification).not.toHaveBeenCalled()
-    expect(
-      automationMessagingService.sendWhatsAppMessage
-    ).not.toHaveBeenCalled()
+    expect(evolutionService.sendText).not.toHaveBeenCalled()
   })
 
   it('creates message notifications after the lead reaches the in-conversation state', async () => {
@@ -85,9 +81,7 @@ describe('MessageReceivedHandler', () => {
     } as Lead)
     userInformationsRepo.findOne.mockResolvedValue({
       notificationPreferences: { MESSAGE_RECEIVED: ['APP', 'WHATSAPP'] },
-      notificationWhatsAppNumbers: ['+5511999999999'],
-      phoneNumberId: 'phone-id',
-      whatsappToken: 'token'
+      notificationWhatsAppNumbers: ['+5511999999999']
     } as UserInformations)
     messageRepo.findOne.mockResolvedValue({
       id: 'message-1',
@@ -107,11 +101,9 @@ describe('MessageReceivedHandler', () => {
     } as never)
 
     expect(notificationService.createNotification).toHaveBeenCalledTimes(1)
-    expect(automationMessagingService.sendWhatsAppMessage).toHaveBeenCalledWith(
+    expect(evolutionService.sendText).toHaveBeenCalledWith(
       '+5511999999999',
-      'Lead João Silva Gonçalves mandou mensagem no Flow!',
-      'phone-id',
-      'token'
+      'Lead João Silva Gonçalves mandou mensagem no Flow!'
     )
   })
 
@@ -121,9 +113,7 @@ describe('MessageReceivedHandler', () => {
     } as Lead)
     userInformationsRepo.findOne.mockResolvedValue({
       notificationPreferences: { MESSAGE_RECEIVED: ['WHATSAPP'] },
-      notificationWhatsAppNumbers: ['+5511999999999'],
-      phoneNumberId: 'phone-id',
-      whatsappToken: 'token'
+      notificationWhatsAppNumbers: ['+5511999999999']
     } as UserInformations)
     messageRepo.findOne.mockResolvedValue({
       id: 'message-1',
@@ -143,8 +133,6 @@ describe('MessageReceivedHandler', () => {
     } as never)
 
     expect(notificationService.createNotification).not.toHaveBeenCalled()
-    expect(
-      automationMessagingService.sendWhatsAppMessage
-    ).toHaveBeenCalledTimes(1)
+    expect(evolutionService.sendText).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,6 +1,6 @@
 import { Repository } from 'typeorm'
 
-import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
+import { EvolutionService } from '../../evolution/evolution.service'
 import { MailService } from '../../mail/mail.service'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import { NotificationService } from '../notification.service'
@@ -15,21 +15,19 @@ describe('LeadCreatedHandler', () => {
     const mailService = {
       send: jest.fn()
     }
-    const automationMessagingService = {
-      sendWhatsAppMessage: jest.fn().mockResolvedValue({})
+    const evolutionService = {
+      sendText: jest.fn().mockResolvedValue({})
     }
     const userInformationsRepo = {
       findOne: jest.fn().mockResolvedValue({
         notificationPreferences: { NEW_LEAD: ['WHATSAPP'] },
-        notificationWhatsAppNumbers: ['+5511999999999'],
-        phoneNumberId: 'phone-number-id',
-        whatsappToken: 'whatsapp-token'
+        notificationWhatsAppNumbers: ['+5511999999999']
       } as UserInformations)
     }
     const handler = new LeadCreatedHandler(
       notificationService as unknown as NotificationService,
       mailService as unknown as MailService,
-      automationMessagingService as unknown as AutomationMessagingService,
+      evolutionService as unknown as EvolutionService,
       userInformationsRepo as unknown as Repository<UserInformations>
     )
 
@@ -44,11 +42,9 @@ describe('LeadCreatedHandler', () => {
       }
     } as never)
 
-    expect(automationMessagingService.sendWhatsAppMessage).toHaveBeenCalledWith(
+    expect(evolutionService.sendText).toHaveBeenCalledWith(
       '+5511999999999',
-      'Tem novo Lead no Flow!',
-      'phone-number-id',
-      'whatsapp-token'
+      'Tem novo Lead no Flow!'
     )
     expect(notificationService.createNotification).not.toHaveBeenCalled()
     expect(mailService.send).not.toHaveBeenCalled()

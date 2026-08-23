@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Between, In, Repository } from 'typeorm'
 
-import { AutomationMessagingService } from '../automation/services/automation-messaging.service'
+import { EvolutionService } from '../evolution/evolution.service'
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { MailService } from '../mail/mail.service'
 import { NotificationChannel, NotificationType } from '../notification/enums'
@@ -12,8 +12,6 @@ import { UserInformations } from '../user/entities/user-informations.entity'
 type ReminderRecipientGroup = {
   emailRecipients: Set<string>
   whatsappRecipients: Set<string>
-  phoneNumberId: string | null
-  whatsappToken: string | null
   items: Array<{
     leadName: string
     followUpValue: string
@@ -39,7 +37,7 @@ export class ReminderCronService {
     @InjectRepository(UserInformations)
     private readonly userInformationsRepository: Repository<UserInformations>,
     private readonly mailService: MailService,
-    private readonly automationMessagingService: AutomationMessagingService
+    private readonly evolutionService: EvolutionService
   ) {}
 
   @Cron('0 0 7 * * *')
@@ -141,8 +139,6 @@ export class ReminderCronService {
       const existingGroup = groupedByUser.get(userId) ?? {
         emailRecipients: new Set<string>(),
         whatsappRecipients: new Set<string>(),
-        phoneNumberId: userInformations.phoneNumberId?.trim() || null,
-        whatsappToken: userInformations.whatsappToken?.trim() || null,
         items: []
       }
 
@@ -204,33 +200,28 @@ export class ReminderCronService {
       }
 
       if (whatsappRecipients.length) {
-        const phoneNumberId = group.phoneNumberId
-
-        if (!phoneNumberId) {
-          this.logger.warn(
-            `Skipping DAILY_FOLLOWUP_SUMMARY WhatsApp for user ${userId} because phoneNumberId is missing`
+        const message = this.buildReminderWhatsAppMessage(group.items)
+        const whatsappResults = await Promise.allSettled(
+          whatsappRecipients.map((recipient) =>
+            this.evolutionService.sendText(recipient, message)
           )
-        } else {
-          const message = this.buildReminderWhatsAppMessage(group.items)
-          const whatsappResults = await Promise.allSettled(
-            whatsappRecipients.map((recipient) =>
-              this.automationMessagingService.sendWhatsAppMessage(
-                recipient,
-                message,
-                phoneNumberId,
-                group.whatsappToken ?? undefined
-              )
+        )
+
+        const successCount = whatsappResults.filter(
+          (result) => result.status === 'fulfilled'
+        ).length
+
+        this.logger.log(
+          `DAILY_FOLLOWUP_SUMMARY WhatsApp dispatch for user ${userId}: success=${successCount}/${whatsappRecipients.length}`
+        )
+
+        whatsappResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            this.logger.warn(
+              `Failed to send DAILY_FOLLOWUP_SUMMARY WhatsApp notification to ${whatsappRecipients[index]} for user ${userId}: ${result.reason instanceof Error ? result.reason.message : 'unknown error'}`
             )
-          )
-
-          const successCount = whatsappResults.filter(
-            (result) => result.status === 'fulfilled'
-          ).length
-
-          this.logger.log(
-            `DAILY_FOLLOWUP_SUMMARY WhatsApp dispatch for user ${userId}: success=${successCount}/${whatsappRecipients.length}`
-          )
-        }
+          }
+        })
       }
 
       usersNotified += 1

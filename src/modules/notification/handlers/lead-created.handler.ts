@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
-import { AutomationMessagingService } from '../../automation/services/automation-messaging.service'
+import { EvolutionService } from '../../evolution/evolution.service'
 import { MailService } from '../../mail/mail.service'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
@@ -27,7 +27,7 @@ export class LeadCreatedHandler implements NotificationEventHandler {
   constructor(
     private readonly notificationService: NotificationService,
     private readonly mailService: MailService,
-    private readonly automationMessagingService: AutomationMessagingService,
+    private readonly evolutionService: EvolutionService,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>
   ) {}
@@ -173,23 +173,9 @@ export class LeadCreatedHandler implements NotificationEventHandler {
       return
     }
 
-    const phoneNumberId = userInformations?.phoneNumberId?.trim()
-
-    if (!phoneNumberId) {
-      this.logger.warn(
-        `Skipping NEW_LEAD WhatsApp notification because phoneNumberId is missing for userId=${userId}`
-      )
-      return
-    }
-
     const results = await Promise.allSettled(
       recipients.map((recipient) =>
-        this.automationMessagingService.sendWhatsAppMessage(
-          recipient,
-          'Tem novo Lead no Flow!',
-          phoneNumberId,
-          userInformations?.whatsappToken ?? undefined
-        )
+        this.evolutionService.sendText(recipient, 'Tem novo Lead no Flow!')
       )
     )
     const successCount = results.filter(
