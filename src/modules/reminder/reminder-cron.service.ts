@@ -6,6 +6,7 @@ import { Between, In, Repository } from 'typeorm'
 import { EvolutionService } from '../evolution/evolution.service'
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { MailService } from '../mail/mail.service'
+import { buildDailyFollowUpSummaryEmail } from '../mail/templates/notification-email.templates'
 import { NotificationChannel, NotificationType } from '../notification/enums'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -195,7 +196,7 @@ export class ReminderCronService {
           from: 'Strativy Flow <no-reply@strativyflow.com>',
           to: emailRecipients,
           subject: 'Lembrete de follow-ups do dia',
-          html: this.buildReminderHtml(group.items)
+          html: buildDailyFollowUpSummaryEmail(group.items)
         })
       }
 
@@ -243,27 +244,6 @@ export class ReminderCronService {
     }
   }
 
-  private buildReminderHtml(
-    items: Array<{ leadName: string; followUpValue: string; dueAt: Date }>
-  ): string {
-    const listItems = items
-      .map((item) => {
-        const dueAtLabel = item.dueAt.toLocaleTimeString('pt-BR', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-
-        return `<li><strong>${this.escapeHtml(item.leadName)}</strong> - ${this.escapeHtml(item.followUpValue)} (${dueAtLabel})</li>`
-      })
-      .join('')
-
-    return [
-      '<h2>Follow-ups do dia</h2>',
-      '<p>Segue a lista de follow-ups pendentes para hoje:</p>',
-      `<ul>${listItems}</ul>`
-    ].join('')
-  }
-
   private buildReminderWhatsAppMessage(
     items: Array<{ leadName: string; followUpValue: string; dueAt: Date }>
   ): string {
@@ -277,14 +257,5 @@ export class ReminderCronService {
     })
 
     return ['Follow-ups do dia', ...lines].join('\n')
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
   }
 }

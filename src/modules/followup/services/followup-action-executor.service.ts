@@ -14,6 +14,7 @@ import {
 } from '../../leads/entities/message.entity'
 import { LeadMessageDispatchService } from '../../leads/services/lead-message-dispatch.service'
 import { MailService, SendMailInput } from '../../mail/mail.service'
+import { buildFollowUpAutomationEmail } from '../../mail/templates/followup-automation-email.template'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import { InstagramMessagingService } from '../../webhook/instagram-messaging.service'
 import { MessengerMessagingService } from '../../webhook/messenger-messaging.service'
@@ -69,7 +70,7 @@ export class FollowUpActionExecutor {
     }
 
     if (action.type === FollowUpActionType.SEND_EMAIL) {
-      await this.mailService.send(this.toMailInput(action.payload))
+      await this.mailService.send(this.toMailInput(action.payload, lead))
       return FollowUpActionStatus.EXECUTED
     }
 
@@ -351,7 +352,10 @@ export class FollowUpActionExecutor {
     return message
   }
 
-  private toMailInput(payload?: Record<string, unknown> | null): SendMailInput {
+  private toMailInput(
+    payload: Record<string, unknown> | null | undefined,
+    lead: Lead
+  ): SendMailInput {
     if (!payload) {
       throw new Error('Email action payload is required')
     }
@@ -367,20 +371,43 @@ export class FollowUpActionExecutor {
     ) {
       recipients = to
     } else {
-      throw new Error('Email action payload requires to, subject and html')
+      throw new Error('Email action payload requires to, subject and content')
     }
 
-    if (typeof subject !== 'string' || typeof html !== 'string') {
-      throw new Error('Email action payload requires to, subject and html')
+    if (
+      typeof subject !== 'string' ||
+      (typeof text !== 'string' && typeof html !== 'string')
+    ) {
+      throw new Error('Email action payload requires to, subject and content')
     }
+
+    const message =
+      typeof text === 'string' ? text : this.extractTextFromHtml(html as string)
 
     return {
       to: recipients,
       subject,
-      html,
+      html: buildFollowUpAutomationEmail({
+        recipientName: lead.name,
+        message
+      }),
       from: typeof from === 'string' ? from : undefined,
-      text: typeof text === 'string' ? text : undefined,
+      text: message,
       replyTo: typeof replyTo === 'string' ? replyTo : undefined
     }
+  }
+
+  private extractTextFromHtml(html: string): string {
+    return html
+      .replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/p\s*>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&#039;', "'")
+      .replaceAll('&amp;', '&')
+      .trim()
   }
 }

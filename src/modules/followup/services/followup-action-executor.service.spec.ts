@@ -17,7 +17,8 @@ import { WhatsAppTemplateSender } from './whatsapp-template-sender.service'
 describe('FollowUpActionExecutor', () => {
   const lead = Object.assign(new Lead(), {
     id: 'lead-1',
-    userInformationsId: 'user-info-1'
+    userInformationsId: 'user-info-1',
+    name: 'Customer'
   })
 
   const createService = () => {
@@ -29,7 +30,9 @@ describe('FollowUpActionExecutor', () => {
     const whatsAppTemplateSender = { sendTemplate: jest.fn() }
     const instagramMessagingService = { sendMessage: jest.fn() }
     const messengerMessagingService = { sendMessengerMessage: jest.fn() }
-    const mailService = { send: jest.fn() }
+    const mailService: jest.Mocked<Pick<MailService, 'send'>> = {
+      send: jest.fn()
+    }
     const leadMessageDispatchService = {
       persistAndEmitOutboundMessage: jest
         .fn()
@@ -83,7 +86,16 @@ describe('FollowUpActionExecutor', () => {
     )
 
     expect(status).toBe(FollowUpActionStatus.EXECUTED)
-    expect(dependencies.mailService.send).toHaveBeenCalledWith(action.payload)
+    const sentMail = dependencies.mailService.send.mock.calls[0]?.[0]
+
+    expect(sentMail).toMatchObject({
+      to: 'customer@example.com',
+      subject: 'Proposal',
+      text: 'Proposal'
+    })
+    expect(sentMail?.html).toContain('Olá, Customer')
+    expect(sentMail?.html).toContain('>Proposal</div>')
+    expect(sentMail?.html).not.toContain('<p>Proposal</p>')
     expect(
       dependencies.conversationPolicy.isWithinMessagingWindow
     ).not.toHaveBeenCalled()

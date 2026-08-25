@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm'
 import { EvolutionService } from '../../evolution/evolution.service'
 import { Lead } from '../../leads/entities/lead.entity'
 import { MailService } from '../../mail/mail.service'
+import { buildConversationExpiringEmail } from '../../mail/templates/notification-email.templates'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
   Notification,
@@ -174,11 +175,7 @@ export class ConversationExpiring1hCron {
               from: 'Strativy Flow <no-reply@strativyflow.com>',
               to: recipients,
               subject: 'Conversa expirando em 1 hora',
-              html: [
-                '<h2>Conversa expirando em 1 hora</h2>',
-                `<p>A janela de atendimento de <strong>${this.escapeHtml(candidate.leadName)}</strong> expira em menos de 1 hora.</p>`,
-                '<p>Responda agora para manter a conversa ativa.</p>'
-              ].join('')
+              html: buildConversationExpiringEmail(candidate.leadName)
             })
 
             this.logger.log(
@@ -206,14 +203,5 @@ export class ConversationExpiring1hCron {
         `Generated ${candidates.length} conversation expiring reminder notification(s)`
       )
     })
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
   }
 }

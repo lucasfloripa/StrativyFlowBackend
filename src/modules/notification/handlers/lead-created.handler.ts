@@ -4,6 +4,7 @@ import { Repository } from 'typeorm'
 
 import { EvolutionService } from '../../evolution/evolution.service'
 import { MailService } from '../../mail/mail.service'
+import { buildNewLeadEmail } from '../../mail/templates/notification-email.templates'
 import { RabbitMessage } from '../../rabbit/interfaces/rabbit-message.interface'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
@@ -39,6 +40,8 @@ export class LeadCreatedHandler implements NotificationEventHandler {
     const leadName = this.getString(data, 'leadName')
     const description = this.getString(data, 'description') ?? leadName
     const origin = this.getString(data, 'origin')
+    const firstContactAt =
+      this.getDate(data, 'createdAt') ?? this.parseDate(message.occurredAt)
 
     if (!userId || !leadId) {
       this.logger.warn(
@@ -131,7 +134,10 @@ export class LeadCreatedHandler implements NotificationEventHandler {
           from: 'Strativy Flow <no-reply@strativyflow.com>',
           to: recipients,
           subject: 'Novo lead criado',
-          html: `<h2>Novo lead criado</h2><p>${this.escapeHtml(description)}</p>`
+          html: buildNewLeadEmail({
+            leadName: leadName ?? description,
+            firstContactAt
+          })
         })
         this.logger.log(
           `NEW_LEAD email notification sent for userId=${userId}, leadId=${leadId}`
@@ -217,6 +223,27 @@ export class LeadCreatedHandler implements NotificationEventHandler {
     return normalized ? normalized : null
   }
 
+  private getDate(
+    payload: Record<string, unknown>,
+    key: string
+  ): Date | undefined {
+    return this.parseDate(payload[key])
+  }
+
+  private parseDate(raw: unknown): Date | undefined {
+    if (raw instanceof Date) {
+      return Number.isNaN(raw.getTime()) ? undefined : raw
+    }
+
+    if (typeof raw !== 'string' && typeof raw !== 'number') {
+      return undefined
+    }
+
+    const date = new Date(raw)
+
+    return Number.isNaN(date.getTime()) ? undefined : date
+  }
+
   private hasValidLeadName(leadName: string | null): boolean {
     if (!leadName) {
       return false
@@ -229,14 +256,5 @@ export class LeadCreatedHandler implements NotificationEventHandler {
     }
 
     return !normalized.includes('sem nome') && !normalized.includes('sem nova')
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
   }
 }

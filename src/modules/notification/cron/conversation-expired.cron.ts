@@ -6,6 +6,7 @@ import { DataSource } from 'typeorm'
 import { EvolutionService } from '../../evolution/evolution.service'
 import { Lead } from '../../leads/entities/lead.entity'
 import { MailService } from '../../mail/mail.service'
+import { buildConversationExpiredEmail } from '../../mail/templates/notification-email.templates'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
   Notification,
@@ -160,11 +161,7 @@ export class ConversationExpiredCron {
               from: 'Strativy Flow <no-reply@strativyflow.com>',
               to: recipients,
               subject: 'Conversa expirada',
-              html: [
-                '<h2>Conversa expirada</h2>',
-                `<p>A conversa com <strong>${this.escapeHtml(candidate.leadName)}</strong> saiu da janela de atendimento.</p>`,
-                '<p>Agora será necessário enviar um template para retomar o contato.</p>'
-              ].join('')
+              html: buildConversationExpiredEmail(candidate.leadName)
             })
 
             this.logger.log(
@@ -192,14 +189,5 @@ export class ConversationExpiredCron {
         `Generated ${candidates.length} conversation expired notification(s)`
       )
     })
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
   }
 }

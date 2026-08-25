@@ -14,6 +14,7 @@ import {
   FollowUpStatus
 } from '../../followup/entities/followup.entity'
 import { MailService } from '../../mail/mail.service'
+import { buildFollowUpOneHourEmail } from '../../mail/templates/notification-email.templates'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import {
   Notification,
@@ -196,10 +197,11 @@ export class FollowUpReminder1hCron {
               from: 'Strativy Flow <no-reply@strativyflow.com>',
               to: recipients,
               subject: 'Follow-up em 1 hora',
-              html: [
-                '<h2>Follow-up em 1 hora</h2>',
-                `<p>${this.escapeHtml(reminderDescription)}</p>`
-              ].join('')
+              html: buildFollowUpOneHourEmail({
+                followUpTitle: candidate.followUpTitle,
+                leadName: candidate.leadName,
+                channelLabel: this.getActionLabel(candidate)
+              })
             })
 
             this.logger.log(
@@ -236,13 +238,17 @@ export class FollowUpReminder1hCron {
   private buildReminderDescription(
     candidate: FollowUpReminderCandidate
   ): string {
-    const channelLabel = candidate.actionChannel
-      ? this.getChannelLabel(candidate.actionChannel)
-      : candidate.actionType === FollowUpActionType.SEND_EMAIL
-        ? 'Email'
-        : 'Sem canal'
+    return `${candidate.followUpTitle} - ${this.getActionLabel(candidate)} - ${candidate.leadName}`
+  }
 
-    return `${candidate.followUpTitle} - ${channelLabel} - ${candidate.leadName}`
+  private getActionLabel(candidate: FollowUpReminderCandidate): string {
+    if (candidate.actionChannel) {
+      return this.getChannelLabel(candidate.actionChannel)
+    }
+
+    return candidate.actionType === FollowUpActionType.SEND_EMAIL
+      ? 'Email'
+      : 'Sem canal'
   }
 
   private getChannelLabel(channel: FollowUpActionChannel): string {
@@ -259,14 +265,5 @@ export class FollowUpReminder1hCron {
     }
 
     return 'Agenda'
-  }
-
-  private escapeHtml(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;')
   }
 }
