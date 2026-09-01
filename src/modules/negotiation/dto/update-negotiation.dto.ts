@@ -12,6 +12,7 @@ import {
 import {
   NegotiationType,
   NegotiationStage,
+  NegotiationStatus,
   NegotiationTemperature
 } from '../entities/negotiation.entity'
 
@@ -31,16 +32,16 @@ export class UpdateNegotiationDto {
   stage?: NegotiationStage
 
   @IsOptional()
+  @IsEnum(NegotiationStatus)
+  status?: NegotiationStatus
+
+  @IsOptional()
   @IsEnum(NegotiationTemperature)
   temperature?: NegotiationTemperature
 
   @IsOptional()
   @IsEnum(NegotiationType)
   negotiationType?: NegotiationType
-
-  @IsOptional()
-  @IsString()
-  value?: string
 
   @IsOptional()
   @IsArray()

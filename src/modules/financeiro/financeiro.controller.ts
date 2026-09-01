@@ -17,20 +17,28 @@ type AuthenticatedRequest = Request & {
 export class FinanceiroController {
   constructor(private readonly financeiroService: FinanceiroService) {}
 
-  @Get('kpis-topo')
-  async getTopKpis(
+  @Get('negocios/resumo')
+  async getBusinessSummary(
     @Req() req: AuthenticatedRequest,
     @Query() query: FinanceiroTopKpisQueryDto
   ) {
-    return await this.financeiroService.getTopKpis(req.user.id, query)
+    return await this.financeiroService.getBusinessSummary(req.user.id, query)
   }
 
-  @Get('kpis-distribuicao')
-  async getDistributionKpis(
+  @Get('negocios/receita')
+  async getRevenue(
     @Req() req: AuthenticatedRequest,
     @Query() query: FinanceiroTopKpisQueryDto
   ) {
-    return await this.financeiroService.getDistributionKpis(req.user.id, query)
+    return await this.financeiroService.getRevenue(req.user.id, query)
+  }
+
+  @Get('negocios/pagamentos')
+  async getPayments(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: FinanceiroTopKpisQueryDto
+  ) {
+    return await this.financeiroService.getPayments(req.user.id, query)
   }
 
   @Get('custos-templates')

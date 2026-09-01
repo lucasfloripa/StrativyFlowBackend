@@ -101,7 +101,7 @@ export class ConversationExpiring1hCron {
             userId: candidate.userId,
             type: NotificationType.CONVERSATION_EXPIRING_1H,
             title: 'Conversa expirando em 1 hora',
-            description: `A janela de atendimento de ${candidate.leadName} expira em breve`,
+            description: candidate.leadName,
             referenceType: NotificationReferenceType.FOLLOW_UP,
             referenceId: candidate.leadId,
             isRead: false,

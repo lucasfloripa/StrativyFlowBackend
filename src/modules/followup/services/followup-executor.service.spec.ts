@@ -29,7 +29,7 @@ describe('FollowUpExecutor', () => {
       id: 'action-1',
       followUpId: 'followup-1',
       type: FollowUpActionType.SEND_EMAIL,
-      status: FollowUpActionStatus.PENDING
+      status: FollowUpActionStatus.SCHEDULED
     })
 
   const createService = (action: FollowUpAction) => {
@@ -89,6 +89,22 @@ describe('FollowUpExecutor', () => {
     expect(dependencies.followUpRepository.update).not.toHaveBeenCalled()
   })
 
+  it('keeps the FollowUp pending while a sent message awaits a reply', async () => {
+    const action = createAction()
+    action.type = FollowUpActionType.SEND_MESSAGE
+    action.channel = FollowUpActionChannel.WHATSAPP
+    const dependencies = createService(action)
+    dependencies.actionExecutor.execute.mockResolvedValue(
+      FollowUpActionStatus.AWAITING_REPLY
+    )
+
+    await dependencies.service.execute(createFollowUp(action))
+
+    expect(action.status).toBe(FollowUpActionStatus.AWAITING_REPLY)
+    expect(action.executedAt).toBeInstanceOf(Date)
+    expect(dependencies.followUpRepository.update).not.toHaveBeenCalled()
+  })
+
   it('does not execute an Action that is no longer pending', async () => {
     const action = createAction()
     action.status = FollowUpActionStatus.EXECUTED
@@ -108,7 +124,7 @@ describe('FollowUpExecutor', () => {
 
     await dependencies.service.execute(createFollowUp(action))
 
-    expect(action.status).toBe(FollowUpActionStatus.PENDING)
+    expect(action.status).toBe(FollowUpActionStatus.SCHEDULED)
     expect(dependencies.actionExecutor.execute).not.toHaveBeenCalled()
     expect(dependencies.followUpActionRepository.save).not.toHaveBeenCalled()
     expect(dependencies.followUpRepository.update).not.toHaveBeenCalled()

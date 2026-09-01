@@ -6,6 +6,7 @@ import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead } from '../leads/entities/lead.entity'
 import { MailModule } from '../mail/mail.module'
 import { Negotiation } from '../negotiation/entities/negotiation.entity'
+import { NotificationModule } from '../notification/notification.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { ReminderCronService } from './reminder-cron.service'
@@ -15,7 +16,8 @@ import { ReminderController } from './reminder.controller'
   imports: [
     TypeOrmModule.forFeature([FollowUp, Negotiation, Lead, UserInformations]),
     EvolutionModule,
-    MailModule
+    MailModule,
+    NotificationModule
   ],
   controllers: [ReminderController],
   providers: [ReminderCronService]

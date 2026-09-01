@@ -34,6 +34,7 @@ describe('WebhookService', () => {
     messengerMessagingService?: object
     instagramMessagingService?: object
     realtimeService?: object
+    followUpReplyLinkerService?: object
   }) =>
     new WebhookService(
       (overrides?.leadRepo ?? {}) as never,
@@ -49,7 +50,10 @@ describe('WebhookService', () => {
       (overrides?.leadChannelIdentityService ?? {}) as never,
       (overrides?.messengerMessagingService ?? {}) as never,
       (overrides?.instagramMessagingService ?? {}) as never,
-      (overrides?.realtimeService ?? {}) as never
+      (overrides?.realtimeService ?? {}) as never,
+      (overrides?.followUpReplyLinkerService ?? {
+        linkReply: jest.fn()
+      }) as never
     )
 
   it('ignores payloads without a WhatsApp entry', async () => {

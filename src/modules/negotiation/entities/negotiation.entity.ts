@@ -8,6 +8,7 @@ import {
   JoinColumn,
   ManyToOne,
   OneToMany,
+  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn
 } from 'typeorm'
@@ -16,6 +17,7 @@ import { FollowUp } from '../../followup/entities/followup.entity'
 import { Lead } from '../../leads/entities/lead.entity'
 
 import { NegotiationAttachment } from './negotiation-attachment.entity'
+import { NegotiationFinancial } from './negotiation-financial.entity'
 
 export enum NegotiationStage {
   NEW = 'NEW',
@@ -23,6 +25,12 @@ export enum NegotiationStage {
   QUALIFIED = 'QUALIFIED',
   PROPOSAL_SENT = 'PROPOSAL_SENT',
   NEGOTIATION = 'NEGOTIATION',
+  WON = 'WON',
+  LOST = 'LOST'
+}
+
+export enum NegotiationStatus {
+  OPEN = 'OPEN',
   WON = 'WON',
   LOST = 'LOST'
 }
@@ -73,6 +81,9 @@ export class Negotiation {
   )
   attachments!: NegotiationAttachment[]
 
+  @OneToOne(() => NegotiationFinancial, (financial) => financial.negotiation)
+  financial?: NegotiationFinancial | null
+
   @Column({
     type: 'text',
     nullable: true
@@ -88,6 +99,13 @@ export class Negotiation {
 
   @Column({
     type: 'enum',
+    enum: NegotiationStatus,
+    default: NegotiationStatus.OPEN
+  })
+  status!: NegotiationStatus
+
+  @Column({
+    type: 'enum',
     enum: NegotiationTemperature,
     nullable: true
   })
@@ -99,14 +117,6 @@ export class Negotiation {
     nullable: true
   })
   negotiationType?: NegotiationType | null
-
-  @Column({
-    type: 'decimal',
-    precision: 12,
-    scale: 2,
-    nullable: true
-  })
-  value?: string | null
 
   @Column({ type: 'jsonb', nullable: true })
   notes?: NegotiationNote[] | null

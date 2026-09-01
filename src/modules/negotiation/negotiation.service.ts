@@ -7,7 +7,36 @@ import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { CreateNegotiationDto } from './dto/create-negotiation.dto'
 import { NegotiationNoteDto } from './dto/negotiation-note.dto'
 import { UpdateNegotiationDto } from './dto/update-negotiation.dto'
-import { Negotiation, NegotiationNote } from './entities/negotiation.entity'
+import {
+  Negotiation,
+  NegotiationNote,
+  NegotiationStage,
+  NegotiationStatus
+} from './entities/negotiation.entity'
+
+const getNegotiationStatus = (stage: NegotiationStage): NegotiationStatus => {
+  if (stage === NegotiationStage.WON) {
+    return NegotiationStatus.WON
+  }
+
+  if (stage === NegotiationStage.LOST) {
+    return NegotiationStatus.LOST
+  }
+
+  return NegotiationStatus.OPEN
+}
+
+const getNegotiationStage = (status: NegotiationStatus): NegotiationStage => {
+  if (status === NegotiationStatus.WON) {
+    return NegotiationStage.WON
+  }
+
+  if (status === NegotiationStatus.LOST) {
+    return NegotiationStage.LOST
+  }
+
+  return NegotiationStage.NEW
+}
 
 @Injectable()
 export class NegotiationService {
@@ -46,32 +75,46 @@ export class NegotiationService {
 
   async create(dto: CreateNegotiationDto): Promise<Negotiation> {
     const normalizedNotes = this.normalizeNotes(dto.notes)
+    const stage =
+      dto.stage ??
+      (dto.status ? getNegotiationStage(dto.status) : NegotiationStage.NEW)
+    const status = getNegotiationStatus(stage)
     const negotiation = this.negotiationRepository.create({
       leadId: dto.leadId,
       title: dto.title,
-      stage: dto.stage,
+      stage,
+      status,
       temperature: dto.temperature,
       negotiationType: dto.negotiationType,
-      value: dto.value,
       notes: normalizedNotes,
-      closedAt: dto.closedAt ? new Date(dto.closedAt) : null,
-      stageUpdatedAt: dto.stageUpdatedAt
-        ? new Date(dto.stageUpdatedAt)
-        : null
+      closedAt: dto.closedAt
+        ? new Date(dto.closedAt)
+        : status === NegotiationStatus.OPEN
+          ? null
+          : new Date(),
+      stageUpdatedAt: dto.stageUpdatedAt ? new Date(dto.stageUpdatedAt) : null
     })
 
     return await this.negotiationRepository.save(negotiation)
   }
 
-  async findAll(): Promise<Negotiation[]> {
+  async findAll(leadId?: string): Promise<Negotiation[]> {
     return await this.negotiationRepository.find({
+      where: leadId ? { leadId } : undefined,
+      relations: {
+        financial: {
+          costs: true,
+          payments: true
+        }
+      },
       order: { createdAt: 'DESC' }
     })
   }
 
   async findOne(id: string): Promise<Negotiation> {
     const negotiation = await this.negotiationRepository.findOne({
-      where: { id }
+      where: { id },
+      relations: { financial: true }
     })
 
     if (!negotiation) {
@@ -94,6 +137,10 @@ export class NegotiationService {
 
     if (dto.stage !== undefined) {
       negotiation.stage = dto.stage
+      negotiation.status = getNegotiationStatus(dto.stage)
+    } else if (dto.status !== undefined) {
+      negotiation.status = dto.status
+      negotiation.stage = getNegotiationStage(dto.status)
     }
 
     if (dto.temperature !== undefined) {
@@ -104,16 +151,20 @@ export class NegotiationService {
       negotiation.negotiationType = dto.negotiationType
     }
 
-    if (dto.value !== undefined) {
-      negotiation.value = dto.value
-    }
-
     if (dto.notes !== undefined) {
       negotiation.notes = this.normalizeNotes(dto.notes)
     }
 
     if (dto.closedAt !== undefined) {
       negotiation.closedAt = dto.closedAt ? new Date(dto.closedAt) : null
+    }
+
+    if (dto.stage !== undefined || dto.status !== undefined) {
+      if (negotiation.status === NegotiationStatus.OPEN) {
+        negotiation.closedAt = null
+      } else if (!negotiation.closedAt) {
+        negotiation.closedAt = new Date()
+      }
     }
 
     if (dto.stageUpdatedAt !== undefined) {
@@ -125,7 +176,9 @@ export class NegotiationService {
     const savedNegotiation = await this.negotiationRepository.save(negotiation)
 
     // When closing a negotiation, mark all pending follow-ups as done
-    const isBeingClosed = dto.closedAt != null
+    const isBeingClosed =
+      negotiation.status === NegotiationStatus.WON ||
+      negotiation.status === NegotiationStatus.LOST
     if (isBeingClosed) {
       await this.followUpRepository.update(
         { negotiationId: id, status: FollowUpStatus.PENDING },

@@ -99,6 +99,10 @@ export class NotificationController {
       return NotificationType.FOLLOW_UP_REMINDER_1H
     }
 
+    if (value === 'DAILY_FOLLOWUP_SUMMARY') {
+      return NotificationType.DAILY_FOLLOWUP_SUMMARY
+    }
+
     if (value === 'CONVERSATION_EXPIRING_1H') {
       return NotificationType.CONVERSATION_EXPIRING_1H
     }

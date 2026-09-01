@@ -7,12 +7,19 @@ import { EvolutionService } from '../evolution/evolution.service'
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { MailService } from '../mail/mail.service'
 import { buildDailyFollowUpSummaryEmail } from '../mail/templates/notification-email.templates'
+import {
+  NotificationReferenceType,
+  NotificationType as AppNotificationType
+} from '../notification/entities/notification.entity'
 import { NotificationChannel, NotificationType } from '../notification/enums'
+import { NotificationService } from '../notification/notification.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 type ReminderRecipientGroup = {
+  appEnabled: boolean
   emailRecipients: Set<string>
   whatsappRecipients: Set<string>
+  referenceFollowUpId: string
   items: Array<{
     leadName: string
     followUpValue: string
@@ -38,7 +45,8 @@ export class ReminderCronService {
     @InjectRepository(UserInformations)
     private readonly userInformationsRepository: Repository<UserInformations>,
     private readonly mailService: MailService,
-    private readonly evolutionService: EvolutionService
+    private readonly evolutionService: EvolutionService,
+    private readonly notificationService: NotificationService
   ) {}
 
   @Cron('0 0 7 * * *')
@@ -138,8 +146,10 @@ export class ReminderCronService {
       }
 
       const existingGroup = groupedByUser.get(userId) ?? {
+        appEnabled: false,
         emailRecipients: new Set<string>(),
         whatsappRecipients: new Set<string>(),
+        referenceFollowUpId: followUp.id,
         items: []
       }
 
@@ -147,6 +157,10 @@ export class ReminderCronService {
         userInformations.notificationPreferences?.[
           NotificationType.DAILY_FOLLOWUP_SUMMARY
         ] ?? []
+
+      if (enabledChannels.includes(NotificationChannel.APP)) {
+        existingGroup.appEnabled = true
+      }
 
       if (enabledChannels.includes(NotificationChannel.EMAIL)) {
         for (const email of userInformations.notificationEmails) {
@@ -184,11 +198,27 @@ export class ReminderCronService {
       const emailRecipients = Array.from(group.emailRecipients)
       const whatsappRecipients = Array.from(group.whatsappRecipients)
 
-      if (!emailRecipients.length && !whatsappRecipients.length) {
+      if (
+        !group.appEnabled &&
+        !emailRecipients.length &&
+        !whatsappRecipients.length
+      ) {
         this.logger.warn(
           `Skipping daily follow-up reminder for user ${userId} because DAILY_FOLLOWUP_SUMMARY channels are not configured`
         )
         continue
+      }
+
+      if (group.appEnabled) {
+        await this.notificationService.createNotification({
+          organizationId: null,
+          userId,
+          type: AppNotificationType.DAILY_FOLLOWUP_SUMMARY,
+          title: 'Lista Follow-Ups do dia',
+          description: '',
+          referenceType: NotificationReferenceType.FOLLOW_UP,
+          referenceId: group.referenceFollowUpId
+        })
       }
 
       if (emailRecipients.length) {

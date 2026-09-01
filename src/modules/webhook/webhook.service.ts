@@ -41,6 +41,7 @@ import {
   LeadFlowActionContext,
   LeadFlowProcessResult
 } from './flow/lead-flow.types'
+import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { canTransitionMessageStatus } from './message-status.policy'
 import { MessengerMessagingService } from './messenger-messaging.service'
@@ -271,7 +272,8 @@ export class WebhookService {
     private readonly leadChannelIdentityService: LeadChannelIdentityService,
     private readonly messengerMessagingService: MessengerMessagingService,
     private readonly instagramMessagingService: InstagramMessagingService,
-    private readonly realtimeService: RealtimeService
+    private readonly realtimeService: RealtimeService,
+    private readonly followUpReplyLinkerService: FollowUpReplyLinkerService
   ) {}
 
   private readonly logger = new Logger(WebhookService.name)
@@ -974,6 +976,8 @@ export class WebhookService {
       }
 
       const savedMessage = await this.messageRepo.save(inboundMessage)
+
+      await this.followUpReplyLinkerService.linkReply(savedMessage)
 
       await this.rabbitPublisherService.publish('message.received', {
         messageId: savedMessage.id,
@@ -1884,6 +1888,8 @@ export class WebhookService {
 
     try {
       const savedMessage = await this.messageRepo.save(inboundMessage)
+
+      await this.followUpReplyLinkerService.linkReply(savedMessage)
 
       await this.rabbitPublisherService.publish('message.received', {
         messageId: savedMessage.id,

@@ -25,7 +25,8 @@ export enum FollowUpActionChannel {
 }
 
 export enum FollowUpActionStatus {
-  PENDING = 'pending',
+  SCHEDULED = 'scheduled',
+  AWAITING_REPLY = 'awaiting_reply',
   EXECUTED = 'executed',
   FAILED = 'failed',
   SKIPPED = 'skipped',
@@ -54,7 +55,7 @@ export class FollowUpAction {
 
   @Column({
     type: 'varchar',
-    default: FollowUpActionStatus.PENDING
+    default: FollowUpActionStatus.SCHEDULED
   })
   status!: FollowUpActionStatus
 
@@ -66,6 +67,18 @@ export class FollowUpAction {
 
   @Column({ type: 'text', nullable: true })
   failureReason?: string | null
+
+  @Column({ type: 'uuid', nullable: true })
+  replyMessageId?: string | null
+
+  @Column({ type: 'text', nullable: true })
+  replyContent?: string | null
+
+  @Column({ type: 'varchar', nullable: true })
+  replyType?: string | null
+
+  @Column({ type: 'timestamptz', nullable: true })
+  repliedAt?: Date | null
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date

@@ -7,19 +7,22 @@ import {
   MessageDirection,
   MessageSource
 } from '../leads/entities/message.entity'
+import { NegotiationCost } from '../negotiation/entities/negotiation-cost.entity'
+import { NegotiationFinancial } from '../negotiation/entities/negotiation-financial.entity'
 import {
-  Negotiation,
-  NegotiationStage
-} from '../negotiation/entities/negotiation.entity'
+  NegotiationPayment,
+  NegotiationPaymentStatus
+} from '../negotiation/entities/negotiation-payment.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
-import { FinanceiroDistributionKpisResponseDto } from './dto/financeiro-distribution-kpis-response.dto'
+import { FinanceiroBusinessSummaryResponseDto } from './dto/financeiro-business-summary-response.dto'
+import { FinanceiroPaymentsResponseDto } from './dto/financeiro-payments-response.dto'
+import { FinanceiroRevenueResponseDto } from './dto/financeiro-revenue-response.dto'
 import {
   FinanceiroTemplateCostsResponseDto,
   FinanceiroTemplateCostType
 } from './dto/financeiro-template-costs-response.dto'
 import { FinanceiroTopKpisQueryDto } from './dto/financeiro-top-kpis-query.dto'
-import { FinanceiroTopSummaryResponseDto } from './dto/financeiro-top-summary-response.dto'
 
 const TEMPLATE_COSTS_IN_CENTS: Record<FinanceiroTemplateCostType, number> = {
   MARKETING: 30,
@@ -36,245 +39,110 @@ const TEMPLATE_TYPE_LABELS: Record<FinanceiroTemplateCostType, string> = {
 @Injectable()
 export class FinanceiroService {
   constructor(
-    @InjectRepository(Negotiation)
-    private readonly negotiationRepository: Repository<Negotiation>,
     @InjectRepository(Message)
     private readonly messageRepository: Repository<Message>,
+    @InjectRepository(NegotiationFinancial)
+    private readonly negotiationFinancialRepository: Repository<NegotiationFinancial>,
+    @InjectRepository(NegotiationCost)
+    private readonly negotiationCostRepository: Repository<NegotiationCost>,
+    @InjectRepository(NegotiationPayment)
+    private readonly negotiationPaymentRepository: Repository<NegotiationPayment>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepository: Repository<UserInformations>
   ) {}
 
-  async getTopKpis(
+  async getBusinessSummary(
     userId: string,
     query: FinanceiroTopKpisQueryDto
-  ): Promise<FinanceiroTopSummaryResponseDto> {
+  ): Promise<FinanceiroBusinessSummaryResponseDto> {
     const userInformationsIds = await this.findUserInformationsIds(userId)
-
-    if (!userInformationsIds.length) {
-      return {
-        receitaPrevista: 0,
-        receitaFaturada: 0,
-        receitaPerdida: 0,
-        ticketMedio: 0,
-        taxaConversao: 0,
-        negociosEmAberto: 0
-      }
-    }
-
-    const queryBuilder = this.createScopedNegotiationsQuery(
-      userInformationsIds,
-      query
-    )
-
-    const rawSummary = await queryBuilder
-      .select(
-        `COALESCE(SUM(CASE WHEN negotiation.stage NOT IN ('WON', 'LOST') THEN COALESCE(negotiation.value::numeric, 0) ELSE 0 END), 0)`,
-        'receitaPrevista'
-      )
-      .addSelect(
-        `COALESCE(SUM(CASE WHEN negotiation.stage = :wonStage THEN COALESCE(negotiation.value::numeric, 0) ELSE 0 END), 0)`,
-        'receitaFaturada'
-      )
-      .addSelect(
-        `COALESCE(SUM(CASE WHEN negotiation.stage = :lostStage THEN COALESCE(negotiation.value::numeric, 0) ELSE 0 END), 0)`,
-        'receitaPerdida'
-      )
-      .addSelect(
-        `COALESCE(SUM(CASE WHEN negotiation.stage NOT IN ('WON', 'LOST') THEN 1 ELSE 0 END), 0)`,
-        'negociosEmAberto'
-      )
-      .addSelect(
-        `COALESCE(SUM(CASE WHEN negotiation.stage = :wonStage THEN 1 ELSE 0 END), 0)`,
-        'negociosGanhos'
-      )
-      .addSelect(
-        `COALESCE(SUM(CASE WHEN negotiation.stage = :lostStage THEN 1 ELSE 0 END), 0)`,
-        'negociosPerdidos'
-      )
-      .setParameters({
-        wonStage: NegotiationStage.WON,
-        lostStage: NegotiationStage.LOST
-      })
-      .getRawOne<{
-        receitaPrevista: string
-        receitaFaturada: string
-        receitaPerdida: string
-        negociosEmAberto: string
-        negociosGanhos: string
-        negociosPerdidos: string
-      }>()
-
-    const receitaPrevista = Number(rawSummary?.receitaPrevista ?? 0)
-    const receitaFaturada = Number(rawSummary?.receitaFaturada ?? 0)
-    const receitaPerdida = Number(rawSummary?.receitaPerdida ?? 0)
-    const negociosEmAberto = Number(rawSummary?.negociosEmAberto ?? 0)
-    const negociosGanhos = Number(rawSummary?.negociosGanhos ?? 0)
-    const negociosPerdidos = Number(rawSummary?.negociosPerdidos ?? 0)
-
-    const ticketMedio =
-      negociosGanhos > 0 ? receitaFaturada / negociosGanhos : 0
-    const totalEncerrados = negociosGanhos + negociosPerdidos
-    const taxaConversao =
-      totalEncerrados > 0 ? (negociosGanhos / totalEncerrados) * 100 : 0
+    const revenue = await this.loadRevenue(userInformationsIds, query)
+    const totalCosts = await this.loadTotalCosts(userInformationsIds, query)
+    const netResult = revenue.netRevenue - totalCosts
 
     return {
-      receitaPrevista,
-      receitaFaturada,
-      receitaPerdida,
-      ticketMedio,
-      taxaConversao,
-      negociosEmAberto
+      netRevenue: revenue.netRevenue,
+      totalCosts,
+      netResult,
+      profitMargin:
+        revenue.netRevenue > 0 ? (netResult / revenue.netRevenue) * 100 : 0
     }
   }
 
-  async getDistributionKpis(
+  async getRevenue(
     userId: string,
     query: FinanceiroTopKpisQueryDto
-  ): Promise<FinanceiroDistributionKpisResponseDto> {
+  ): Promise<FinanceiroRevenueResponseDto> {
     const userInformationsIds = await this.findUserInformationsIds(userId)
 
+    return await this.loadRevenue(userInformationsIds, query)
+  }
+
+  async getPayments(
+    userId: string,
+    query: FinanceiroTopKpisQueryDto
+  ): Promise<FinanceiroPaymentsResponseDto> {
+    const userInformationsIds = await this.findUserInformationsIds(userId)
     if (!userInformationsIds.length) {
-      return {
-        temperatura: {
-          hot: 0,
-          warm: 0,
-          cold: 0,
-          none: 0
-        },
-        status: {
-          open: 0,
-          won: 0,
-          lost: 0
-        },
-        origem: {
-          whatsapp: 0,
-          metaads: 0,
-          googleads: 0,
-          indicacao: 0,
-          other: 0
-        },
-        etapas: this.getStageOrder().map((stage) => ({
-          stage,
-          count: 0,
-          totalValue: 0
-        }))
-      }
+      return this.emptyPayments()
     }
 
-    const [temperatureRaw, statusRaw, sourceRaw, stageRaw] = await Promise.all([
-      this.createScopedNegotiationsQuery(userInformationsIds, query)
-        .select(
-          `CASE WHEN negotiation.temperature IS NULL THEN 'none' ELSE negotiation.temperature::text END`,
-          'temperature'
-        )
-        .addSelect('COUNT(*)', 'count')
-        .groupBy('temperature')
-        .getRawMany<{
-          temperature: 'hot' | 'warm' | 'cold' | 'none'
-          count: string
-        }>(),
-      this.createScopedNegotiationsQuery(userInformationsIds, query)
-        .select(
-          `CASE WHEN negotiation.stage = 'WON' THEN 'won' WHEN negotiation.stage = 'LOST' THEN 'lost' ELSE 'open' END`,
-          'status'
-        )
-        .addSelect('COUNT(*)', 'count')
-        .groupBy('status')
-        .getRawMany<{ status: 'open' | 'won' | 'lost'; count: string }>(),
-      this.createScopedNegotiationsQuery(userInformationsIds, query)
-        .select('lead.source', 'source')
-        .addSelect('COUNT(*)', 'count')
-        .groupBy('lead.source')
-        .getRawMany<{ source: string | null; count: string }>(),
-      this.createScopedNegotiationsQuery(userInformationsIds, query)
-        .select('negotiation.stage', 'stage')
-        .addSelect('COUNT(*)', 'count')
-        .addSelect(
-          'COALESCE(SUM(COALESCE(negotiation.value::numeric, 0)), 0)',
-          'totalValue'
-        )
-        .groupBy('negotiation.stage')
-        .getRawMany<{
-          stage: NegotiationStage
-          count: string
-          totalValue: string
-        }>()
-    ])
-
-    const temperatura: FinanceiroDistributionKpisResponseDto['temperatura'] = {
-      hot: 0,
-      warm: 0,
-      cold: 0,
-      none: 0
-    }
-
-    for (const item of temperatureRaw) {
-      const key = item.temperature
-      if (key === 'hot' || key === 'warm' || key === 'cold' || key === 'none') {
-        temperatura[key] = Number(item.count)
-      }
-    }
-
-    const status: FinanceiroDistributionKpisResponseDto['status'] = {
-      open: 0,
-      won: 0,
-      lost: 0
-    }
-
-    for (const item of statusRaw) {
-      const key = item.status
-      if (key === 'open' || key === 'won' || key === 'lost') {
-        status[key] = Number(item.count)
-      }
-    }
-
-    const origem: FinanceiroDistributionKpisResponseDto['origem'] = {
-      whatsapp: 0,
-      metaads: 0,
-      googleads: 0,
-      indicacao: 0,
-      other: 0
-    }
-
-    for (const item of sourceRaw) {
-      const normalizedSource = this.normalizeSourceKey(item.source)
-      origem[normalizedSource] += Number(item.count)
-    }
-
-    const stageMap = new Map<
-      NegotiationStage,
-      {
-        count: number
-        totalValue: number
-      }
-    >()
-
-    for (const item of stageRaw) {
-      if (!item.stage) {
-        continue
-      }
-
-      stageMap.set(item.stage, {
-        count: Number(item.count),
-        totalValue: Number(item.totalValue)
+    const queryBuilder = this.negotiationPaymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.negotiationFinancial', 'financial')
+      .innerJoin('financial.negotiation', 'negotiation')
+      .innerJoin('negotiation.lead', 'lead')
+      .select(
+        `COALESCE(SUM(CASE WHEN payment.status = :paidStatus THEN payment.amount ELSE 0 END), 0)`,
+        'receivedAmount'
+      )
+      .addSelect(
+        `COUNT(CASE WHEN payment.status = :paidStatus THEN 1 END)`,
+        'receivedCount'
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN payment.status = :pendingStatus THEN payment.amount ELSE 0 END), 0)`,
+        'pendingAmount'
+      )
+      .addSelect(
+        `COUNT(CASE WHEN payment.status = :pendingStatus THEN 1 END)`,
+        'pendingCount'
+      )
+      .addSelect(
+        `COALESCE(SUM(CASE WHEN payment.status = :overdueStatus THEN payment.amount ELSE 0 END), 0)`,
+        'overdueAmount'
+      )
+      .addSelect(
+        `COUNT(CASE WHEN payment.status = :overdueStatus THEN 1 END)`,
+        'overdueCount'
+      )
+      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+        userInformationsIds
       })
-    }
+      .setParameters({
+        paidStatus: NegotiationPaymentStatus.PAID,
+        pendingStatus: NegotiationPaymentStatus.PENDING,
+        overdueStatus: NegotiationPaymentStatus.OVERDUE
+      })
 
-    const etapas = this.getStageOrder().map((stage) => {
-      const stageValue = stageMap.get(stage)
+    this.applyCreatedAtFilter(queryBuilder, 'negotiation', query)
 
-      return {
-        stage,
-        count: stageValue?.count ?? 0,
-        totalValue: stageValue?.totalValue ?? 0
-      }
-    })
+    const rawPayments = await queryBuilder.getRawOne<{
+      receivedAmount: string
+      receivedCount: string
+      pendingAmount: string
+      pendingCount: string
+      overdueAmount: string
+      overdueCount: string
+    }>()
 
     return {
-      temperatura,
-      status,
-      origem,
-      etapas
+      receivedAmount: Number(rawPayments?.receivedAmount ?? 0),
+      receivedCount: Number(rawPayments?.receivedCount ?? 0),
+      pendingAmount: Number(rawPayments?.pendingAmount ?? 0),
+      pendingCount: Number(rawPayments?.pendingCount ?? 0),
+      overdueAmount: Number(rawPayments?.overdueAmount ?? 0),
+      overdueCount: Number(rawPayments?.overdueCount ?? 0)
     }
   }
 
@@ -348,6 +216,79 @@ export class FinanceiroService {
     return userInformations.map((item) => item.id)
   }
 
+  private async loadRevenue(
+    userInformationsIds: string[],
+    query: FinanceiroTopKpisQueryDto
+  ): Promise<FinanceiroRevenueResponseDto> {
+    if (!userInformationsIds.length) {
+      return { grossRevenue: 0, totalDiscounts: 0, netRevenue: 0 }
+    }
+
+    const queryBuilder = this.negotiationFinancialRepository
+      .createQueryBuilder('financial')
+      .innerJoin('financial.negotiation', 'negotiation')
+      .innerJoin('negotiation.lead', 'lead')
+      .select('COALESCE(SUM(financial."saleAmount"), 0)', 'grossRevenue')
+      .addSelect(
+        'COALESCE(SUM(financial."discountAmount"), 0)',
+        'totalDiscounts'
+      )
+      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+        userInformationsIds
+      })
+
+    this.applyCreatedAtFilter(queryBuilder, 'negotiation', query)
+
+    const rawRevenue = await queryBuilder.getRawOne<{
+      grossRevenue: string
+      totalDiscounts: string
+    }>()
+    const grossRevenue = Number(rawRevenue?.grossRevenue ?? 0)
+    const totalDiscounts = Number(rawRevenue?.totalDiscounts ?? 0)
+
+    return {
+      grossRevenue,
+      totalDiscounts,
+      netRevenue: grossRevenue - totalDiscounts
+    }
+  }
+
+  private async loadTotalCosts(
+    userInformationsIds: string[],
+    query: FinanceiroTopKpisQueryDto
+  ): Promise<number> {
+    if (!userInformationsIds.length) {
+      return 0
+    }
+
+    const queryBuilder = this.negotiationCostRepository
+      .createQueryBuilder('cost')
+      .innerJoin('cost.negotiationFinancial', 'financial')
+      .innerJoin('financial.negotiation', 'negotiation')
+      .innerJoin('negotiation.lead', 'lead')
+      .select('COALESCE(SUM(cost.amount), 0)', 'totalCosts')
+      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+        userInformationsIds
+      })
+
+    this.applyCreatedAtFilter(queryBuilder, 'negotiation', query)
+
+    const rawCosts = await queryBuilder.getRawOne<{ totalCosts: string }>()
+
+    return Number(rawCosts?.totalCosts ?? 0)
+  }
+
+  private emptyPayments(): FinanceiroPaymentsResponseDto {
+    return {
+      receivedAmount: 0,
+      receivedCount: 0,
+      pendingAmount: 0,
+      pendingCount: 0,
+      overdueAmount: 0,
+      overdueCount: 0
+    }
+  }
+
   private parseDateOnly(value?: string): Date | null {
     if (!value) {
       return null
@@ -364,38 +305,6 @@ export class FinanceiroService {
     }
 
     return parsedDate
-  }
-
-  private createScopedNegotiationsQuery(
-    userInformationsIds: string[],
-    query: FinanceiroTopKpisQueryDto
-  ): SelectQueryBuilder<Negotiation> {
-    const createdAtFrom = this.parseDateOnly(query.createdAtFrom)
-    const createdAtTo = this.parseDateOnly(query.createdAtTo)
-
-    const queryBuilder = this.negotiationRepository
-      .createQueryBuilder('negotiation')
-      .innerJoin('negotiation.lead', 'lead')
-      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-        userInformationsIds
-      })
-
-    if (createdAtFrom) {
-      queryBuilder.andWhere('negotiation."createdAt" >= :createdAtFrom', {
-        createdAtFrom
-      })
-    }
-
-    if (createdAtTo) {
-      const createdAtToExclusive = new Date(createdAtTo)
-      createdAtToExclusive.setDate(createdAtToExclusive.getDate() + 1)
-
-      queryBuilder.andWhere('negotiation."createdAt" < :createdAtToExclusive', {
-        createdAtToExclusive
-      })
-    }
-
-    return queryBuilder
   }
 
   private applyCreatedAtFilter<T extends ObjectLiteral>(
@@ -420,35 +329,5 @@ export class FinanceiroService {
         createdAtToExclusive
       })
     }
-  }
-
-  private normalizeSourceKey(
-    source: string | null
-  ): 'whatsapp' | 'metaads' | 'googleads' | 'indicacao' | 'other' {
-    const normalizedSource = (source ?? '')
-      .trim()
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[\s_-]+/g, '')
-
-    if (normalizedSource === 'whatsapp') return 'whatsapp'
-    if (normalizedSource === 'metaads') return 'metaads'
-    if (normalizedSource === 'googleads') return 'googleads'
-    if (normalizedSource === 'indicacao') return 'indicacao'
-
-    return 'other'
-  }
-
-  private getStageOrder(): NegotiationStage[] {
-    return [
-      NegotiationStage.NEW,
-      NegotiationStage.CONTACTED,
-      NegotiationStage.QUALIFIED,
-      NegotiationStage.PROPOSAL_SENT,
-      NegotiationStage.NEGOTIATION,
-      NegotiationStage.WON,
-      NegotiationStage.LOST
-    ]
   }
 }

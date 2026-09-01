@@ -113,9 +113,16 @@ export class FollowUpService {
         }
 
         if (dto.actions !== undefined) {
+          const existingActions = followUp.actions ?? []
+
           await manager.delete(FollowUpAction, { followUpId: followUp.id })
-          followUp.actions = dto.actions.map((action) =>
-            manager.create(FollowUpAction, {
+          followUp.actions = dto.actions.map((action, index) => {
+            const existingAction = existingActions[index]
+            const keepsReply =
+              existingAction?.type === action.type &&
+              (existingAction.channel ?? null) === (action.channel ?? null)
+
+            return manager.create(FollowUpAction, {
               followUpId: followUp.id,
               type: action.type,
               channel: action.channel ?? null,
@@ -124,9 +131,17 @@ export class FollowUpService {
               executedAt: action.executedAt
                 ? new Date(action.executedAt)
                 : null,
-              failureReason: action.failureReason ?? null
+              failureReason: action.failureReason ?? null,
+              replyMessageId: keepsReply
+                ? (existingAction.replyMessageId ?? null)
+                : null,
+              replyContent: keepsReply
+                ? (existingAction.replyContent ?? null)
+                : null,
+              replyType: keepsReply ? (existingAction.replyType ?? null) : null,
+              repliedAt: keepsReply ? (existingAction.repliedAt ?? null) : null
             })
-          )
+          })
         }
 
         const savedFollowUp = await manager.save(FollowUp, followUp)

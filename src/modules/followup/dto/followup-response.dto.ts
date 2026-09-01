@@ -13,6 +13,10 @@ export type FollowUpActionResponseDto = {
   payload: Record<string, unknown> | null
   executedAt: string | null
   failureReason: string | null
+  replyMessageId: string | null
+  replyContent: string | null
+  replyType: string | null
+  repliedAt: string | null
   createdAt: string
   updatedAt: string
 }

@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { AutomationModule } from '../automation/automation.module'
+import { FollowUpAction } from '../followup/entities/followup-action.entity'
+import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { LeadsModule } from '../leads/leads.module'
@@ -13,6 +15,7 @@ import { UserInformations } from '../user/entities/user-informations.entity'
 import { ConversationContextBuilder } from './flow/conversation-context.builder'
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
+import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { MessengerMessagingService } from './messenger-messaging.service'
 import { WebhookController } from './webhook.controller'
@@ -20,7 +23,13 @@ import { WebhookService } from './webhook.service'
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Lead, Message, UserInformations]),
+    TypeOrmModule.forFeature([
+      FollowUp,
+      FollowUpAction,
+      Lead,
+      Message,
+      UserInformations
+    ]),
     AutomationModule,
     LeadsModule,
     RabbitModule,
@@ -29,6 +38,7 @@ import { WebhookService } from './webhook.service'
   ],
   providers: [
     WebhookService,
+    FollowUpReplyLinkerService,
     MessengerMessagingService,
     InstagramMessagingService,
     ConversationContextBuilder,

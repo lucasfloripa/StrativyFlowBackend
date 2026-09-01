@@ -1,4 +1,7 @@
-import { MessageChannel } from '../../leads/entities/message.entity'
+import {
+  MessageChannel,
+  MessageType
+} from '../../leads/entities/message.entity'
 import {
   FollowUpAction,
   FollowUpActionStatus,
@@ -25,13 +28,17 @@ describe('mapFollowUpToResponseDto', () => {
           id: 'action-1',
           type: FollowUpActionType.SEND_MESSAGE,
           channel: MessageChannel.WHATSAPP,
-          status: FollowUpActionStatus.PENDING,
+          status: FollowUpActionStatus.SCHEDULED,
           payload: {
             templateId: 'template-1',
             variables: { name: 'Lucas' }
           },
           executedAt: null,
           failureReason: null,
+          replyMessageId: 'message-1',
+          replyContent: 'Tenho interesse',
+          replyType: MessageType.TEXT,
+          repliedAt: new Date('2026-08-18T11:00:00.000Z'),
           createdAt: new Date('2026-08-15T10:00:00.000Z'),
           updatedAt: new Date('2026-08-15T10:00:00.000Z')
         })
@@ -45,11 +52,15 @@ describe('mapFollowUpToResponseDto', () => {
         id: 'action-1',
         type: FollowUpActionType.SEND_MESSAGE,
         channel: MessageChannel.WHATSAPP,
-        status: FollowUpActionStatus.PENDING,
+        status: FollowUpActionStatus.SCHEDULED,
         payload: {
           templateId: 'template-1',
           variables: { name: 'Lucas' }
-        }
+        },
+        replyMessageId: 'message-1',
+        replyContent: 'Tenho interesse',
+        replyType: MessageType.TEXT,
+        repliedAt: '2026-08-18T11:00:00.000Z'
       })
     ])
     expect(response).not.toHaveProperty('templateId')

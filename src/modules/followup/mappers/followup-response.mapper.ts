@@ -24,6 +24,10 @@ export const mapFollowUpToResponseDto = (
       payload: action.payload ?? null,
       executedAt: action.executedAt ? action.executedAt.toISOString() : null,
       failureReason: action.failureReason ?? null,
+      replyMessageId: action.replyMessageId ?? null,
+      replyContent: action.replyContent ?? null,
+      replyType: action.replyType ?? null,
+      repliedAt: action.repliedAt ? action.repliedAt.toISOString() : null,
       createdAt: action.createdAt.toISOString(),
       updatedAt: action.updatedAt.toISOString()
     })),

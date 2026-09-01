@@ -87,7 +87,7 @@ export class ConversationExpiredCron {
             userId: candidate.userId,
             type: NotificationType.CONVERSATION_EXPIRED,
             title: 'Conversa expirada',
-            description: `A conversa com ${candidate.leadName} saiu da janela de atendimento. Agora será necessário enviar um template para retomar o contato.`,
+            description: candidate.leadName,
             referenceType: NotificationReferenceType.FOLLOW_UP,
             referenceId: candidate.leadId,
             isRead: false,

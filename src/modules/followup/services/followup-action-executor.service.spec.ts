@@ -164,7 +164,7 @@ describe('FollowUpActionExecutor', () => {
       'negotiation-1'
     )
 
-    expect(status).toBe(FollowUpActionStatus.EXECUTED)
+    expect(status).toBe(FollowUpActionStatus.AWAITING_REPLY)
     expect(
       dependencies.whatsAppMessagingService.sendWhatsAppMessage
     ).toHaveBeenCalledWith('5511999999999', 'Hello', 'phone-number-id', 'token')
@@ -226,7 +226,7 @@ describe('FollowUpActionExecutor', () => {
       'negotiation-1'
     )
 
-    expect(status).toBe(FollowUpActionStatus.EXECUTED)
+    expect(status).toBe(FollowUpActionStatus.AWAITING_REPLY)
     expect(
       dependencies.whatsAppTemplateSender.sendTemplate
     ).toHaveBeenCalledWith(

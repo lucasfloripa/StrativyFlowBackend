@@ -13,7 +13,9 @@ import {
   StorageService,
   StorageUploadFile
 } from '../../storage/storage.service'
+import { UserInformations } from '../../user/entities/user-informations.entity'
 import { NegotiationAttachmentDownloadUrlDto } from '../dto/negotiation-attachment-download-url.dto'
+import { NegotiationAttachmentListItemDto } from '../dto/negotiation-attachment-list-item.dto'
 import { NegotiationAttachmentResponseDto } from '../dto/negotiation-attachment-response.dto'
 import { NegotiationAttachment } from '../entities/negotiation-attachment.entity'
 import { Negotiation } from '../entities/negotiation.entity'
@@ -110,6 +112,29 @@ export class NegotiationAttachmentService {
     })
 
     return attachments.map((attachment) => this.toResponseDto(attachment))
+  }
+
+  async listAttachmentsByUser(
+    userId: string
+  ): Promise<NegotiationAttachmentListItemDto[]> {
+    const attachments = await this.attachmentRepository
+      .createQueryBuilder('attachment')
+      .innerJoinAndSelect('attachment.negotiation', 'negotiation')
+      .innerJoin('negotiation.lead', 'lead')
+      .innerJoin(
+        UserInformations,
+        'userInformations',
+        'CAST("userInformations"."id" AS text) = "lead"."userInformationsId"'
+      )
+      .where('userInformations.userId = :userId', { userId })
+      .orderBy('attachment.createdAt', 'DESC')
+      .getMany()
+
+    return attachments.map((attachment) => ({
+      ...this.toResponseDto(attachment),
+      negotiationId: attachment.negotiationId,
+      leadId: attachment.negotiation.leadId
+    }))
   }
 
   async getDownloadUrl(

@@ -14,6 +14,7 @@ import { NegotiationModule } from './modules/negotiation/negotiation.module'
 import { NotificationModule } from './modules/notification/notification.module'
 import { RabbitModule } from './modules/rabbit/rabbit.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
+import { ReminderModule } from './modules/reminder/reminder.module'
 import { StorageModule } from './modules/storage/storage.module'
 import { UserModule } from './modules/user/user.module'
 import { WebhookModule } from './modules/webhook/webhook.module'
@@ -34,6 +35,8 @@ import { WebhookModule } from './modules/webhook/webhook.module'
         const dbPassword = config.get<string>('DB_PASSWORD')
         const dbName = config.get<string>('DB_NAME')
         const dbSynchronize = config.get<string>('DB_SYNCHRONIZE') === 'true'
+        const dbMigrationsRun =
+          config.get<string>('DB_MIGRATIONS_RUN') === 'true'
         const dbSsl = config.get<string>('DB_SSL') === 'true'
 
         return {
@@ -45,6 +48,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
           database: dbName,
           autoLoadEntities: true,
           migrations: [join(__dirname, '/database/migrations/*{.ts,.js}')],
+          migrationsRun: dbMigrationsRun,
           synchronize: dbSynchronize,
           ssl: dbSsl ? { rejectUnauthorized: false } : false
         }
@@ -59,6 +63,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
     NotificationModule,
     RabbitModule,
     RealtimeModule,
+    ReminderModule,
     StorageModule,
     UserModule,
     WebhookModule

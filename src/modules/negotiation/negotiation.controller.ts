@@ -5,7 +5,8 @@ import {
   Get,
   Param,
   Patch,
-  Post
+  Post,
+  Query
 } from '@nestjs/common'
 
 import { CreateNegotiationDto } from './dto/create-negotiation.dto'
@@ -22,8 +23,8 @@ export class NegotiationController {
   }
 
   @Get()
-  async findAll() {
-    return await this.negotiationService.findAll()
+  async findAll(@Query('leadId') leadId?: string) {
+    return await this.negotiationService.findAll(leadId)
   }
 
   @Get(':id')

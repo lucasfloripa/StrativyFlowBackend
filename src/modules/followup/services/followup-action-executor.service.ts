@@ -32,6 +32,7 @@ import { SendWhatsAppTemplateCommand } from './send-whatsapp-template.command'
 import { WhatsAppTemplateSender } from './whatsapp-template-sender.service'
 
 type FollowUpActionExecutionResult =
+  | FollowUpActionStatus.AWAITING_REPLY
   | FollowUpActionStatus.EXECUTED
   | FollowUpActionStatus.MANUAL_REQUIRED
 
@@ -117,7 +118,7 @@ export class FollowUpActionExecutor {
         identity.externalUserId,
         message
       )
-      return FollowUpActionStatus.EXECUTED
+      return FollowUpActionStatus.AWAITING_REPLY
     }
 
     if (channel === MessageChannel.MESSENGER) {
@@ -141,7 +142,7 @@ export class FollowUpActionExecutor {
         identity.externalAccountId,
         messengerToken
       )
-      return FollowUpActionStatus.EXECUTED
+      return FollowUpActionStatus.AWAITING_REPLY
     }
 
     throw new Error(`Unsupported messaging channel: ${action.channel}`)
@@ -206,7 +207,7 @@ export class FollowUpActionExecutor {
         whatsappMessageId: response.data.messages[0]?.id,
         metadata: { whatsappResponse: response.data }
       })
-      return FollowUpActionStatus.EXECUTED
+      return FollowUpActionStatus.AWAITING_REPLY
     }
 
     if (!payload.templateId?.trim()) {
@@ -257,7 +258,7 @@ export class FollowUpActionExecutor {
         whatsappResponse: response
       }
     })
-    return FollowUpActionStatus.EXECUTED
+    return FollowUpActionStatus.AWAITING_REPLY
   }
 
   private compileTemplateContent(

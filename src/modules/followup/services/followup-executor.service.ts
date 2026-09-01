@@ -34,9 +34,9 @@ export class FollowUpExecutor {
       .innerJoinAndSelect(
         'followUp.actions',
         'action',
-        'action.status = :pendingActionStatus AND (action.channel IS NULL OR action.channel != :agendaChannel)',
+        'action.status = :scheduledActionStatus AND (action.channel IS NULL OR action.channel != :agendaChannel)',
         {
-          pendingActionStatus: FollowUpActionStatus.PENDING,
+          scheduledActionStatus: FollowUpActionStatus.SCHEDULED,
           agendaChannel: FollowUpActionChannel.AGENDA
         }
       )
@@ -81,7 +81,7 @@ export class FollowUpExecutor {
       const action = await this.followUpActionRepository.findOne({
         where: {
           id: loadedAction.id,
-          status: FollowUpActionStatus.PENDING
+          status: FollowUpActionStatus.SCHEDULED
         }
       })
 
@@ -106,7 +106,10 @@ export class FollowUpExecutor {
 
         action.status = status
         action.executedAt =
-          status === FollowUpActionStatus.EXECUTED ? new Date() : null
+          status === FollowUpActionStatus.EXECUTED ||
+          status === FollowUpActionStatus.AWAITING_REPLY
+            ? new Date()
+            : null
         action.failureReason = null
         await this.followUpActionRepository.save(action)
       } catch (error: unknown) {
