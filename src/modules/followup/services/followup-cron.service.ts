@@ -11,24 +11,26 @@ export class FollowUpCron {
 
   @Cron(CronExpression.EVERY_MINUTE, { waitForCompletion: true })
   async processFollowUps(): Promise<void> {
-    this.logger.debug('Starting follow-up processing cycle')
+    const now = new Date()
 
-    const followUps = await this.followUpExecutor.findReadyForExecution()
+    this.logger.debug(`Running follow-up steps cron. now=${now.toISOString()}`)
 
-    this.logger.log(`Found ${followUps.length} follow-ups ready for execution`)
+    try {
+      const processedCount = await this.followUpExecutor.processReadyWork(now)
 
-    for (const followUp of followUps) {
-      try {
-        await this.followUpExecutor.execute(followUp)
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'unknown error'
-        const trace = error instanceof Error ? error.stack : undefined
-
-        this.logger.error(
-          `Failed to process follow-up. followUpId=${followUp.id}, negotiationId=${followUp.negotiationId}, error=${message}`,
-          trace
-        )
+      if (processedCount === 0) {
+        this.logger.debug('No follow-up steps matched the execution window')
+        return
       }
+
+      this.logger.log(`Processed ${processedCount} follow-ups in current cycle`)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'unknown error'
+      const trace = error instanceof Error ? error.stack : undefined
+      this.logger.error(
+        `Failed to process follow-up cycle. error=${message}`,
+        trace
+      )
     }
   }
 }

@@ -459,7 +459,7 @@ export class LeadsService {
 
     const followUps = await this.followUpRepo
       .createQueryBuilder('followUp')
-      .leftJoinAndSelect('followUp.actions', 'action')
+      .leftJoinAndSelect('followUp.steps', 'step')
       .innerJoin('followUp.negotiation', 'negotiation')
       .where('negotiation."leadId" = :leadId', { leadId: lead.id })
       .getMany()

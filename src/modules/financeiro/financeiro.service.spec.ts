@@ -53,7 +53,8 @@ describe('FinanceiroService', () => {
 
     const result = await service.getTemplateCosts('user-1', {
       createdAtFrom: '2026-08-01',
-      createdAtTo: '2026-08-15'
+      createdAtTo: '2026-08-15',
+      leadId: 'lead-1'
     })
 
     expect(result).toEqual({
@@ -87,6 +88,10 @@ describe('FinanceiroService', () => {
       'leads',
       'lead',
       'lead.id::text = message."leadId"'
+    )
+    expect(queryBuilder.andWhere).toHaveBeenCalledWith(
+      'message."leadId" = :leadId',
+      { leadId: 'lead-1' }
     )
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
       'message."createdAt" >= :createdAtFrom',

@@ -1,13 +1,12 @@
 import { Type } from 'class-transformer'
 import {
+  ArrayMinSize,
   IsArray,
-  IsDateString,
   IsEnum,
   IsIn,
   IsInt,
   IsObject,
   IsOptional,
-  IsString,
   IsUUID,
   Min,
   ValidateNested
@@ -20,15 +19,17 @@ import {
   FollowUpStepType,
   FollowUpWaitUnit
 } from '../entities/followup-step.entity'
-import { FollowUpStatus } from '../entities/followup.entity'
 
-import { CreateFollowUpStepTreeItemDto } from './create-followup-step-tree.dto'
-import { UpdateNestedFollowUpStepDto } from './create-followup-step.dto'
+export class CreateFollowUpStepTreeItemDto {
+  @IsUUID()
+  clientId!: string
 
-export class UpdatePrimaryFollowUpStepDto {
   @IsOptional()
+  @IsUUID()
+  parentClientId?: string | null
+
   @IsIn([FollowUpStepType.ACTION, FollowUpStepType.CONDITION])
-  type?: FollowUpStepType
+  type!: FollowUpStepType
 
   @IsOptional()
   @IsEnum(FollowUpActionType)
@@ -56,41 +57,13 @@ export class UpdatePrimaryFollowUpStepDto {
   payload?: Record<string, unknown> | null
 }
 
-export class UpdateFollowUpDto {
-  @IsOptional()
+export class CreateFollowUpStepTreeDto {
   @IsUUID()
-  negotiationId?: string
+  followUpId!: string
 
-  @IsOptional()
-  @IsString()
-  title?: string
-
-  @IsOptional()
-  @IsDateString()
-  dueAt?: string
-
-  @IsOptional()
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => UpdateNestedFollowUpStepDto)
-  steps?: UpdateNestedFollowUpStepDto[]
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => UpdatePrimaryFollowUpStepDto)
-  primaryStep?: UpdatePrimaryFollowUpStepDto
-
-  @IsOptional()
-  @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateFollowUpStepTreeItemDto)
-  automationSteps?: CreateFollowUpStepTreeItemDto[]
-
-  @IsOptional()
-  @IsEnum(FollowUpStatus)
-  status?: FollowUpStatus
-
-  @IsOptional()
-  @IsDateString()
-  completedAt?: string
+  steps!: CreateFollowUpStepTreeItemDto[]
 }

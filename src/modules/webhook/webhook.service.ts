@@ -621,6 +621,10 @@ export class WebhookService {
           await this.emitMessageCreated(persistedMessageResult.message)
         }
 
+        lead = await this.leadRepo.findOneOrFail({
+          where: { id: lead.id }
+        })
+
         lead.lastInboundMessageId = inboundMessageId ?? undefined
         lead.lastActivityAt = new Date()
         lead.conversationReminder1hSentAt = null
@@ -678,6 +682,10 @@ export class WebhookService {
       if (persistedMessageResult.wasCreated) {
         await this.emitMessageCreated(persistedMessageResult.message)
       }
+
+      lead = await this.leadRepo.findOneOrFail({
+        where: { id: lead.id }
+      })
 
       // CONTINUAÇÃO DA CONVERSA (já virou lead)
 
@@ -874,7 +882,15 @@ export class WebhookService {
       }
 
       message.status = newStatus
-      await this.messageRepo.save(message)
+      const updatedMessage = await this.messageRepo.save(message)
+      const responseMessage =
+        await this.leadsService.toResponseMessageDto(updatedMessage)
+
+      this.realtimeService.emitToLead(
+        updatedMessage.leadId,
+        'message.updated',
+        responseMessage
+      )
 
       processedCount += 1
       this.logger.log(
@@ -1075,13 +1091,17 @@ export class WebhookService {
       await this.emitMessageCreated(persistedMessage)
     }
 
-    lead.lastInboundMessageId = inboundMessageId
-    lead.lastActivityAt = new Date()
-    lead.conversationReminder1hSentAt = null
-    lead.conversationExpiredNotificationSentAt = null
+    const refreshedLead = await this.leadRepo.findOneOrFail({
+      where: { id: lead.id }
+    })
+
+    refreshedLead.lastInboundMessageId = inboundMessageId
+    refreshedLead.lastActivityAt = new Date()
+    refreshedLead.conversationReminder1hSentAt = null
+    refreshedLead.conversationExpiredNotificationSentAt = null
 
     this.logger.log('[10] Saving lead after media message processing')
-    await this.leadRepo.save(lead)
+    await this.leadRepo.save(refreshedLead)
 
     return {
       status: isContactMessage
@@ -1679,6 +1699,10 @@ export class WebhookService {
 
         await this.emitMessageCreated(persistedMessageResult.message)
 
+        lead = await this.leadRepo.findOneOrFail({
+          where: { id: lead.id }
+        })
+
         const automationTriggerContext: AutomationTriggerContext = {
           triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
           leadId: lead.id,
@@ -2141,6 +2165,10 @@ export class WebhookService {
         }
 
         await this.emitMessageCreated(persistedMessageResult.message)
+
+        lead = await this.leadRepo.findOneOrFail({
+          where: { id: lead.id }
+        })
 
         await this.automationTriggerDispatcher.dispatch({
           triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,

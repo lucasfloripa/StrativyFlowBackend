@@ -4,6 +4,7 @@ import { LeadChannel } from '../leads/entities/lead-channel-identity.entity'
 import {
   Lead,
   LeadFlowState,
+  LeadQualification,
   LeadRuntimeMode,
   LeadState
 } from '../leads/entities/lead.entity'
@@ -11,6 +12,7 @@ import {
   Message,
   MessageChannel,
   MessageDirection,
+  MessageStatus,
   MessageType
 } from '../leads/entities/message.entity'
 
@@ -64,6 +66,69 @@ describe('WebhookService', () => {
     })
   })
 
+  it('emits WhatsApp message status updates in realtime', async () => {
+    const message = {
+      id: 'message-1',
+      leadId: 'lead-1',
+      channel: MessageChannel.WHATSAPP,
+      externalMessageId: 'wamid.message-1',
+      status: MessageStatus.SENT
+    } as Message
+    const responseMessage = {
+      id: message.id,
+      leadId: message.leadId,
+      status: MessageStatus.DELIVERED
+    }
+    const messageRepo = {
+      findOne: jest.fn().mockResolvedValue(message),
+      save: jest.fn((updatedMessage: Message) =>
+        Promise.resolve(updatedMessage)
+      )
+    }
+    const leadsService = {
+      toResponseMessageDto: jest.fn().mockResolvedValue(responseMessage)
+    }
+    const realtimeService = { emitToLead: jest.fn() }
+    const service = createService({
+      messageRepo,
+      leadsService,
+      realtimeService
+    })
+
+    await expect(
+      service.handleIncomingMessage({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  statuses: [
+                    {
+                      id: 'wamid.message-1',
+                      status: 'delivered'
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      })
+    ).resolves.toEqual({
+      status: 'processed_status_updates',
+      processedCount: 1
+    })
+
+    expect(message.status).toBe(MessageStatus.DELIVERED)
+    expect(messageRepo.save).toHaveBeenCalledWith(message)
+    expect(leadsService.toResponseMessageDto).toHaveBeenCalledWith(message)
+    expect(realtimeService.emitToLead).toHaveBeenCalledWith(
+      message.leadId,
+      'message.updated',
+      responseMessage
+    )
+  })
+
   it('persists an inbound WhatsApp contact message as contact', async () => {
     const lead = {
       id: 'lead-1',
@@ -98,7 +163,10 @@ describe('WebhookService', () => {
       }
     ]
     const service = createService({
-      leadRepo: { save: jest.fn() },
+      leadRepo: {
+        findOneOrFail: jest.fn().mockResolvedValue(lead),
+        save: jest.fn()
+      },
       messageRepo,
       userInformationsRepo: {
         findOne: jest.fn().mockResolvedValue({
@@ -166,13 +234,132 @@ describe('WebhookService', () => {
       expect.objectContaining({
         type: MessageType.CONTACT,
         content: null,
-        metadata: expect.objectContaining({ contacts })
+        metadata: expect.objectContaining({ contacts }) as Record<
+          string,
+          unknown
+        >
       })
     )
     expect(realtimeService.emitToLead).toHaveBeenCalledWith(
       'lead-1',
       'message.created',
       expect.objectContaining({ type: MessageType.CONTACT })
+    )
+  })
+
+  it('preserves lead changes made while linking an inbound reply', async () => {
+    let persistedLead = {
+      id: 'lead-1',
+      name: 'Lucas',
+      userInformationsId: 'user-information-1',
+      runtimeMode: LeadRuntimeMode.HUMAN,
+      leadQualification: null,
+      lastInboundMessageId: 'wamid.previous'
+    } as Lead
+    const leadRepo = {
+      findOneOrFail: jest.fn(() => Promise.resolve({ ...persistedLead })),
+      save: jest.fn((lead: Lead) => {
+        persistedLead = { ...lead }
+        return Promise.resolve(lead)
+      })
+    }
+    const messageRepo = {
+      findOne: jest.fn().mockResolvedValue(null),
+      create: jest.fn((message: Partial<Message>) => message as Message),
+      save: jest.fn((message: Message) =>
+        Promise.resolve({
+          ...message,
+          id: 'message-1',
+          createdAt: new Date('2026-09-10T17:43:57.000Z')
+        } as Message)
+      )
+    }
+    const followUpReplyLinkerService = {
+      linkReply: jest.fn(() => {
+        persistedLead = {
+          ...persistedLead,
+          leadQualification: LeadQualification.QUALIFY
+        }
+        return Promise.resolve(1)
+      })
+    }
+    const service = createService({
+      leadRepo,
+      messageRepo,
+      userInformationsRepo: {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'user-information-1',
+          userId: 'flow-user-1',
+          phoneNumberId: 'phone-number-id-1',
+          whatsappToken: 'whatsapp-token'
+        })
+      },
+      conversationContextBuilder: {
+        build: jest.fn(({ lead }: { lead: Lead }) =>
+          Promise.resolve({ lead, recentMessages: [] })
+        )
+      },
+      automationTriggerDispatcher: { dispatch: jest.fn() },
+      rabbitPublisherService: { publish: jest.fn() },
+      leadsService: {
+        toResponseMessageDto: jest.fn((message: Message) =>
+          Promise.resolve(message)
+        )
+      },
+      realtimeService: { emitToLead: jest.fn() },
+      leadChannelIdentityService: {
+        findIdentity: jest.fn().mockResolvedValue({ id: 'identity-1' }),
+        findOrCreateLeadForIdentity: jest.fn().mockResolvedValue({
+          identity: { id: 'identity-1' },
+          lead: { ...persistedLead },
+          leadCreated: false
+        })
+      },
+      followUpReplyLinkerService
+    })
+
+    await expect(
+      service.handleIncomingMessage({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  metadata: {
+                    display_phone_number: '5548999999999',
+                    phone_number_id: 'phone-number-id-1'
+                  },
+                  contacts: [
+                    {
+                      profile: { name: 'Lucas' },
+                      wa_id: '5548888888888'
+                    }
+                  ],
+                  messages: [
+                    {
+                      from: '5548888888888',
+                      id: 'wamid.reply-1',
+                      timestamp: '1789062237',
+                      type: 'text',
+                      text: { body: 'Resposta' }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      })
+    ).resolves.toEqual({
+      status: 'updated_human_mode_skipped',
+      leadId: 'lead-1'
+    })
+
+    expect(followUpReplyLinkerService.linkReply).toHaveBeenCalledTimes(1)
+    expect(leadRepo.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        leadQualification: LeadQualification.QUALIFY
+      })
     )
   })
 

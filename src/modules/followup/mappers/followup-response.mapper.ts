@@ -1,5 +1,35 @@
-import { FollowUpResponseDto } from '../dto/followup-response.dto'
+import {
+  FollowUpResponseDto,
+  FollowUpStepResponseDto
+} from '../dto/followup-response.dto'
+import { FollowUpStep } from '../entities/followup-step.entity'
 import { FollowUp } from '../entities/followup.entity'
+
+export const mapFollowUpStepToResponseDto = (
+  step: FollowUpStep
+): FollowUpStepResponseDto => ({
+  id: step.id,
+  followUpId: step.followUpId,
+  parentId: step.parentId ?? null,
+  type: step.type,
+  actionType: step.actionType ?? null,
+  conditionType: step.conditionType ?? null,
+  channel: step.channel ?? null,
+  status: step.status,
+  waitTime: step.waitTime ?? null,
+  waitUnit: step.waitUnit ?? null,
+  scheduledAt: step.scheduledAt ? step.scheduledAt.toISOString() : null,
+  payload: step.payload ?? null,
+  result: step.result ?? null,
+  executedAt: step.executedAt ? step.executedAt.toISOString() : null,
+  failureReason: step.failureReason ?? null,
+  replyMessageId: step.replyMessageId ?? null,
+  replyContent: step.replyContent ?? null,
+  replyType: step.replyType ?? null,
+  repliedAt: step.repliedAt ? step.repliedAt.toISOString() : null,
+  createdAt: step.createdAt.toISOString(),
+  updatedAt: step.updatedAt.toISOString()
+})
 
 export const mapFollowUpToResponseDto = (
   followUp: FollowUp
@@ -16,21 +46,7 @@ export const mapFollowUpToResponseDto = (
     reminder1hSentAt: followUp.reminder1hSentAt
       ? followUp.reminder1hSentAt.toISOString()
       : null,
-    actions: (followUp.actions ?? []).map((action) => ({
-      id: action.id,
-      type: action.type,
-      channel: action.channel ?? null,
-      status: action.status,
-      payload: action.payload ?? null,
-      executedAt: action.executedAt ? action.executedAt.toISOString() : null,
-      failureReason: action.failureReason ?? null,
-      replyMessageId: action.replyMessageId ?? null,
-      replyContent: action.replyContent ?? null,
-      replyType: action.replyType ?? null,
-      repliedAt: action.repliedAt ? action.repliedAt.toISOString() : null,
-      createdAt: action.createdAt.toISOString(),
-      updatedAt: action.updatedAt.toISOString()
-    })),
+    steps: (followUp.steps ?? []).map(mapFollowUpStepToResponseDto),
     createdAt: followUp.createdAt.toISOString(),
     updatedAt: followUp.updatedAt.toISOString()
   }

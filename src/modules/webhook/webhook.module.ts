@@ -2,8 +2,9 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { AutomationModule } from '../automation/automation.module'
-import { FollowUpAction } from '../followup/entities/followup-action.entity'
+import { FollowUpStep } from '../followup/entities/followup-step.entity'
 import { FollowUp } from '../followup/entities/followup.entity'
+import { FollowUpModule } from '../followup/followup.module'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { LeadsModule } from '../leads/leads.module'
@@ -25,12 +26,13 @@ import { WebhookService } from './webhook.service'
   imports: [
     TypeOrmModule.forFeature([
       FollowUp,
-      FollowUpAction,
+      FollowUpStep,
       Lead,
       Message,
       UserInformations
     ]),
     AutomationModule,
+    FollowUpModule,
     LeadsModule,
     RabbitModule,
     RealtimeModule,

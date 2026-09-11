@@ -11,10 +11,12 @@ import {
 
 import { Negotiation } from '../../negotiation/entities/negotiation.entity'
 
-import { FollowUpAction } from './followup-action.entity'
+import { FollowUpStep } from './followup-step.entity'
 
 export enum FollowUpStatus {
   PENDING = 'pending',
+  AUTOMATING = 'automating',
+  AWAITING_REPLY = 'awaiting_reply',
   DONE = 'done',
   CANCELED = 'canceled',
   SKIPPED = 'skipped'
@@ -52,10 +54,10 @@ export class FollowUp {
   @Column({ name: 'remider1hSentAt', type: 'timestamptz', nullable: true })
   reminder1hSentAt?: Date | null
 
-  @OneToMany(() => FollowUpAction, (action) => action.followUp, {
+  @OneToMany(() => FollowUpStep, (action) => action.followUp, {
     cascade: true
   })
-  actions!: FollowUpAction[]
+  steps!: FollowUpStep[]
 
   @CreateDateColumn({
     type: 'timestamptz'

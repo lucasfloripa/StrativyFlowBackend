@@ -12,7 +12,7 @@ import {
 
 import { FollowUpStatus } from '../entities/followup.entity'
 
-import { CreateFollowUpActionDto } from './create-followup-action.dto'
+import { CreateNestedFollowUpStepDto } from './create-followup-step.dto'
 
 export class CreateFollowUpDto {
   @IsUUID()
@@ -28,8 +28,8 @@ export class CreateFollowUpDto {
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => CreateFollowUpActionDto)
-  actions?: CreateFollowUpActionDto[]
+  @Type(() => CreateNestedFollowUpStepDto)
+  steps?: CreateNestedFollowUpStepDto[]
 
   @IsOptional()
   @IsEnum(FollowUpStatus)

@@ -5,10 +5,10 @@ import { DataSource } from 'typeorm'
 
 import { EvolutionService } from '../../evolution/evolution.service'
 import {
-  FollowUpAction,
-  FollowUpActionChannel,
-  FollowUpActionType
-} from '../../followup/entities/followup-action.entity'
+  FollowUpStep,
+  FollowUpStepChannel,
+  FollowUpStepType
+} from '../../followup/entities/followup-step.entity'
 import {
   FollowUp,
   FollowUpStatus
@@ -29,8 +29,8 @@ import {
 type FollowUpReminderCandidate = {
   followUpId: string
   followUpTitle: string
-  actionChannel: FollowUpActionChannel | null
-  actionType: FollowUpActionType | null
+  actionChannel: FollowUpStepChannel | null
+  actionType: FollowUpStepType | null
   userId: string
   leadName: string
   userInformationsId: string
@@ -72,7 +72,7 @@ export class FollowUpReminder1hCron {
           (subQuery) =>
             subQuery
               .select('action.channel')
-              .from(FollowUpAction, 'action')
+              .from(FollowUpStep, 'action')
               .where('action."followUpId" = followUp.id')
               .orderBy('action."createdAt"', 'ASC')
               .limit(1),
@@ -82,7 +82,7 @@ export class FollowUpReminder1hCron {
           (subQuery) =>
             subQuery
               .select('action.type')
-              .from(FollowUpAction, 'action')
+              .from(FollowUpStep, 'action')
               .where('action."followUpId" = followUp.id')
               .orderBy('action."createdAt"', 'ASC')
               .limit(1),
@@ -246,21 +246,21 @@ export class FollowUpReminder1hCron {
       return this.getChannelLabel(candidate.actionChannel)
     }
 
-    return candidate.actionType === FollowUpActionType.SEND_EMAIL
+    return candidate.actionType === FollowUpStepType.SEND_EMAIL
       ? 'Email'
       : 'Sem canal'
   }
 
-  private getChannelLabel(channel: FollowUpActionChannel): string {
-    if (channel === FollowUpActionChannel.INSTAGRAM) {
+  private getChannelLabel(channel: FollowUpStepChannel): string {
+    if (channel === FollowUpStepChannel.INSTAGRAM) {
       return 'Direct'
     }
 
-    if (channel === FollowUpActionChannel.WHATSAPP) {
+    if (channel === FollowUpStepChannel.WHATSAPP) {
       return 'WhatsApp'
     }
 
-    if (channel === FollowUpActionChannel.MESSENGER) {
+    if (channel === FollowUpStepChannel.MESSENGER) {
       return 'Messenger'
     }
 

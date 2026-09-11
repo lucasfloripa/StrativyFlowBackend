@@ -43,7 +43,8 @@ export enum NegotiationTemperature {
 
 export enum NegotiationType {
   SERVICE = 'service',
-  PRODUCT = 'product'
+  PRODUCT = 'product',
+  RENTAL = 'rental'
 }
 
 export type NegotiationNote = {

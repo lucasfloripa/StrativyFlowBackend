@@ -1,16 +1,27 @@
 import {
-  FollowUpActionChannel,
-  FollowUpActionStatus,
-  FollowUpActionType
-} from '../entities/followup-action.entity'
+  FollowUpActionType,
+  FollowUpConditionType,
+  FollowUpStepChannel,
+  FollowUpStepStatus,
+  FollowUpStepType,
+  FollowUpWaitUnit
+} from '../entities/followup-step.entity'
 import { FollowUpStatus } from '../entities/followup.entity'
 
-export type FollowUpActionResponseDto = {
+export type FollowUpStepResponseDto = {
   id: string
-  type: FollowUpActionType
-  channel: FollowUpActionChannel | null
-  status: FollowUpActionStatus
+  followUpId: string
+  parentId: string | null
+  type: FollowUpStepType
+  actionType: FollowUpActionType | null
+  conditionType: FollowUpConditionType | null
+  channel: FollowUpStepChannel | null
+  status: FollowUpStepStatus
+  waitTime: number | null
+  waitUnit: FollowUpWaitUnit | null
+  scheduledAt: string | null
   payload: Record<string, unknown> | null
+  result: Record<string, unknown> | null
   executedAt: string | null
   failureReason: string | null
   replyMessageId: string | null
@@ -29,7 +40,7 @@ export type FollowUpResponseDto = {
   dueAt: string
   completedAt: string | null
   reminder1hSentAt: string | null
-  actions: FollowUpActionResponseDto[]
+  steps: FollowUpStepResponseDto[]
   createdAt: string
   updatedAt: string
 }

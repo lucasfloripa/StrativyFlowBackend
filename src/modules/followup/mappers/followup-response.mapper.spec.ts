@@ -3,16 +3,17 @@ import {
   MessageType
 } from '../../leads/entities/message.entity'
 import {
-  FollowUpAction,
-  FollowUpActionStatus,
-  FollowUpActionType
-} from '../entities/followup-action.entity'
+  FollowUpActionType,
+  FollowUpStep,
+  FollowUpStepStatus,
+  FollowUpStepType
+} from '../entities/followup-step.entity'
 import { FollowUp, FollowUpStatus } from '../entities/followup.entity'
 
 import { mapFollowUpToResponseDto } from './followup-response.mapper'
 
 describe('mapFollowUpToResponseDto', () => {
-  it('maps actions as the FollowUp execution intent', () => {
+  it('maps steps as the FollowUp execution intent', () => {
     const followUp = Object.assign(new FollowUp(), {
       id: 'followup-1',
       negotiationId: 'negotiation-1',
@@ -23,12 +24,19 @@ describe('mapFollowUpToResponseDto', () => {
       reminder1hSentAt: null,
       createdAt: new Date('2026-08-15T10:00:00.000Z'),
       updatedAt: new Date('2026-08-15T10:00:00.000Z'),
-      actions: [
-        Object.assign(new FollowUpAction(), {
-          id: 'action-1',
-          type: FollowUpActionType.SEND_MESSAGE,
+      steps: [
+        Object.assign(new FollowUpStep(), {
+          id: 'step-1',
+          followUpId: 'followup-1',
+          parentId: null,
+          type: FollowUpStepType.ACTION,
+          actionType: FollowUpActionType.SEND_MESSAGE,
+          conditionType: null,
           channel: MessageChannel.WHATSAPP,
-          status: FollowUpActionStatus.SCHEDULED,
+          status: FollowUpStepStatus.PENDING,
+          waitTime: null,
+          waitUnit: null,
+          scheduledAt: new Date('2026-08-18T10:00:00.000Z'),
           payload: {
             templateId: 'template-1',
             variables: { name: 'Lucas' }
@@ -47,12 +55,16 @@ describe('mapFollowUpToResponseDto', () => {
 
     const response = mapFollowUpToResponseDto(followUp)
 
-    expect(response.actions).toEqual([
+    expect(response.steps).toEqual([
       expect.objectContaining({
-        id: 'action-1',
-        type: FollowUpActionType.SEND_MESSAGE,
+        id: 'step-1',
+        followUpId: 'followup-1',
+        parentId: null,
+        type: FollowUpStepType.ACTION,
+        actionType: FollowUpActionType.SEND_MESSAGE,
         channel: MessageChannel.WHATSAPP,
-        status: FollowUpActionStatus.SCHEDULED,
+        status: FollowUpStepStatus.PENDING,
+        scheduledAt: '2026-08-18T10:00:00.000Z',
         payload: {
           templateId: 'template-1',
           variables: { name: 'Lucas' }

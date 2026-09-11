@@ -173,6 +173,12 @@ export class FinanceiroService {
         })
         .groupBy('"templateType"')
 
+      if (query.leadId) {
+        queryBuilder.andWhere('message."leadId" = :leadId', {
+          leadId: query.leadId
+        })
+      }
+
       this.applyCreatedAtFilter(queryBuilder, 'message', query)
 
       const rawCosts = await queryBuilder.getRawMany<{
