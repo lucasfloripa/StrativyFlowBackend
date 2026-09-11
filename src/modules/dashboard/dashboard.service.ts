@@ -4,7 +4,11 @@ import { In, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 import { Lead, LeadRuntimeMode, LeadState } from '../leads/entities/lead.entity'
-import { MessageDirection, MessageType } from '../leads/entities/message.entity'
+import {
+  MessageDirection,
+  MessageStatus,
+  MessageType
+} from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { DashboardConversationFilter } from './dto/dashboard-conversations-query.dto'
@@ -33,6 +37,7 @@ type DashboardConversationRow = {
   lastMessageAt: Date | string
   lastMessage: string | null
   lastMessageDirection: MessageDirection
+  lastMessageStatus: MessageStatus | null
   lastMessageType: MessageType
   lastInboundAt: Date | string | null
   hasOutbound: boolean
@@ -221,6 +226,7 @@ export class DashboardService {
           latest_message."createdAt" AS "lastMessageAt",
           latest_message.content AS "lastMessage",
           latest_message.direction AS "lastMessageDirection",
+          latest_message.status AS "lastMessageStatus",
           latest_message.type AS "lastMessageType",
           message_stats."lastInboundAt" AS "lastInboundAt",
           COALESCE(message_stats."hasOutbound", FALSE) AS "hasOutbound"
@@ -230,6 +236,7 @@ export class DashboardService {
             message."createdAt",
             message.content,
             message.direction,
+            message.status,
             message.type
           FROM messages message
           WHERE message."leadId" = lead.id::text
@@ -347,6 +354,7 @@ export class DashboardService {
       lastInboundAt,
       lastMessage: row.lastMessage,
       lastMessageDirection: row.lastMessageDirection,
+      lastMessageStatus: row.lastMessageStatus,
       lastMessageType: row.lastMessageType,
       isNew,
       status,
@@ -368,6 +376,7 @@ export class DashboardService {
       lastInboundAt: conversation.lastInboundAt,
       lastMessage: conversation.lastMessage,
       lastMessageDirection: conversation.lastMessageDirection,
+      lastMessageStatus: conversation.lastMessageStatus,
       lastMessageType: conversation.lastMessageType,
       isNew: conversation.isNew,
       status: conversation.status,

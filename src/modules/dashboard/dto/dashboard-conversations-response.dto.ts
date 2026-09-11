@@ -1,6 +1,7 @@
 import { LeadRuntimeMode } from '../../leads/entities/lead.entity'
 import {
   MessageDirection,
+  MessageStatus,
   MessageType
 } from '../../leads/entities/message.entity'
 
@@ -17,6 +18,7 @@ export type DashboardConversationItemDto = {
   lastInboundAt: Date | null
   lastMessage: string | null
   lastMessageDirection: MessageDirection
+  lastMessageStatus: MessageStatus | null
   lastMessageType: MessageType
   isNew: boolean
   status: DashboardConversationStatus | null

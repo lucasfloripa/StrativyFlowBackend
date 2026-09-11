@@ -2,7 +2,11 @@ import { Repository } from 'typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead, LeadRuntimeMode } from '../leads/entities/lead.entity'
-import { MessageDirection, MessageType } from '../leads/entities/message.entity'
+import {
+  MessageDirection,
+  MessageStatus,
+  MessageType
+} from '../leads/entities/message.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { DashboardService } from './dashboard.service'
@@ -53,6 +57,7 @@ describe('DashboardService conversations', () => {
         lastMessageAt: '2026-08-05T20:00:00.000Z',
         lastMessage: 'Olá, como posso ajudar?',
         lastMessageDirection: MessageDirection.OUTBOUND,
+        lastMessageStatus: MessageStatus.READ,
         lastMessageType: MessageType.TEXT,
         lastInboundAt: '2026-08-05T17:00:00.000Z',
         hasOutbound: true,
@@ -174,6 +179,10 @@ describe('DashboardService conversations', () => {
         lastMessageDirection: MessageDirection.AUTOMATIC
       })
     )
+    expect(
+      result.items.find((item) => item.leadId === 'recent-answered')
+        ?.lastMessageStatus
+    ).toBe(MessageStatus.READ)
     expect(result.items.map((item) => [item.leadId, item.status])).toEqual([
       ['recent-automation-replied', 'new'],
       ['recent-unanswered', 'new'],
