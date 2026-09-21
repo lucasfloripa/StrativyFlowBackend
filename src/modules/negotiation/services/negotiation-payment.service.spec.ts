@@ -79,6 +79,82 @@ describe('NegotiationPaymentService', () => {
     ).toBe(true)
   })
 
+  it('creates a pending payment as overdue when its due date has passed', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-12T12:00:00.000Z'))
+
+    const paymentRepository = {
+      create: jest.fn(
+        (payment: Partial<NegotiationPayment>) => payment as NegotiationPayment
+      ),
+      save: jest.fn((payment: NegotiationPayment) => Promise.resolve(payment))
+    } as unknown as Repository<NegotiationPayment>
+    const financialService = {
+      findOwnedFinancial: jest.fn().mockResolvedValue({ id: 'financial-1' })
+    } as unknown as NegotiationFinancialService
+    const service = new NegotiationPaymentService(
+      paymentRepository,
+      financialService,
+      {} as Repository<NegotiationAttachment>
+    )
+
+    const payment = await service.create('user-1', 'negotiation-1', {
+      amount: '100.00',
+      paymentMethod: NegotiationPaymentMethod.PIX,
+      dueDate: '2026-09-11',
+      paidAt: null,
+      status: NegotiationPaymentStatus.PENDING
+    })
+
+    expect(payment.status).toBe(NegotiationPaymentStatus.OVERDUE)
+  })
+
+  it('marks only past installments as overdue when creating them', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-09-12T12:00:00.000Z'))
+
+    const savedPayments: Partial<NegotiationPayment>[] = []
+    const manager = {
+      create: jest.fn(
+        (
+          _entity: typeof NegotiationPayment,
+          payment: Partial<NegotiationPayment>
+        ) => payment
+      ),
+      save: jest.fn((payment: Partial<NegotiationPayment>) => {
+        savedPayments.push(payment)
+        return Promise.resolve(payment)
+      })
+    }
+    const paymentRepository = {
+      manager: {
+        transaction: jest.fn(
+          (operation: (entityManager: EntityManager) => unknown) =>
+            operation(manager as unknown as EntityManager)
+        )
+      }
+    } as unknown as Repository<NegotiationPayment>
+    const financialService = {
+      findOwnedFinancial: jest.fn().mockResolvedValue({ id: 'financial-1' })
+    } as unknown as NegotiationFinancialService
+    const service = new NegotiationPaymentService(
+      paymentRepository,
+      financialService,
+      {} as Repository<NegotiationAttachment>
+    )
+
+    await service.createInstallments('user-1', 'negotiation-1', {
+      amount: '300.00',
+      paymentMethod: NegotiationPaymentMethod.CREDIT_CARD,
+      dueDate: '2026-08-12',
+      installmentCount: 3
+    })
+
+    expect(savedPayments.map((payment) => payment.status)).toEqual([
+      NegotiationPaymentStatus.OVERDUE,
+      NegotiationPaymentStatus.PENDING,
+      NegotiationPaymentStatus.PENDING
+    ])
+  })
+
   it('does not change payment statuses when listing', async () => {
     const payments = [
       {

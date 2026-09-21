@@ -50,6 +50,6 @@ import { NegotiationPaymentService } from './services/negotiation-payment.servic
     NegotiationPaymentCronService,
     NegotiationPaymentService
   ],
-  exports: [NegotiationService]
+  exports: [NegotiationService, NegotiationPaymentCronService]
 })
 export class NegotiationModule {}

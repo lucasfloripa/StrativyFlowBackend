@@ -1,7 +1,7 @@
 import { Repository } from 'typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
-import { Lead, LeadRuntimeMode } from '../leads/entities/lead.entity'
+import { Lead, LeadRuntimeMode, LeadState } from '../leads/entities/lead.entity'
 import {
   MessageDirection,
   MessageStatus,
@@ -52,6 +52,7 @@ describe('DashboardService conversations', () => {
       {
         leadId: 'recent-answered',
         leadName: 'Lead respondido',
+        leadState: LeadState.ARCHIVED,
         source: 'WhatsApp',
         leadCreatedAt: '2026-08-05T16:00:00.000Z',
         lastMessageAt: '2026-08-05T20:00:00.000Z',
@@ -183,6 +184,9 @@ describe('DashboardService conversations', () => {
       result.items.find((item) => item.leadId === 'recent-answered')
         ?.lastMessageStatus
     ).toBe(MessageStatus.READ)
+    expect(
+      result.items.find((item) => item.leadId === 'recent-answered')?.leadState
+    ).toBe(LeadState.ARCHIVED)
     expect(result.items.map((item) => [item.leadId, item.status])).toEqual([
       ['recent-automation-replied', 'new'],
       ['recent-unanswered', 'new'],

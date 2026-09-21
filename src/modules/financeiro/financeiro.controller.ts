@@ -3,6 +3,7 @@ import { Request } from 'express'
 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 
+import { FinanceiroPaymentsQueryDto } from './dto/financeiro-payments-query.dto'
 import { FinanceiroTopKpisQueryDto } from './dto/financeiro-top-kpis-query.dto'
 import { FinanceiroService } from './financeiro.service'
 
@@ -39,6 +40,14 @@ export class FinanceiroController {
     @Query() query: FinanceiroTopKpisQueryDto
   ) {
     return await this.financeiroService.getPayments(req.user.id, query)
+  }
+
+  @Get('pagamentos')
+  async listPayments(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: FinanceiroPaymentsQueryDto
+  ) {
+    return await this.financeiroService.listPayments(req.user.id, query)
   }
 
   @Get('custos-templates')

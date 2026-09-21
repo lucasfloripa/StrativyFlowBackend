@@ -48,14 +48,15 @@ export class NegotiationPaymentService {
       negotiationId
     )
     await this.validateProofAttachment(negotiationId, dto.proofAttachmentId)
+    const dueDate = new Date(dto.dueDate)
 
     const payment = this.paymentRepository.create({
       negotiationFinancialId: financial.id,
       amount: dto.amount,
       paymentMethod: dto.paymentMethod,
-      dueDate: new Date(dto.dueDate),
+      dueDate,
       paidAt: dto.paidAt ? new Date(dto.paidAt) : null,
-      status: dto.status,
+      status: this.resolveInitialStatus(dueDate, dto.status),
       proofAttachmentId: dto.proofAttachmentId ?? null
     })
 
@@ -92,7 +93,10 @@ export class NegotiationPaymentService {
             paymentMethod: dto.paymentMethod,
             dueDate,
             paidAt: null,
-            status: NegotiationPaymentStatus.PENDING
+            status: this.resolveInitialStatus(
+              dueDate,
+              NegotiationPaymentStatus.PENDING
+            )
           })
 
           createdPayments.push(await entityManager.save(payment))
@@ -156,6 +160,24 @@ export class NegotiationPaymentService {
     )
     await this.paymentRepository.remove(payment)
     return { success: true }
+  }
+
+  private resolveInitialStatus(
+    dueDate: Date,
+    requestedStatus: NegotiationPaymentStatus
+  ): NegotiationPaymentStatus {
+    if (requestedStatus !== NegotiationPaymentStatus.PENDING) {
+      return requestedStatus
+    }
+
+    const now = new Date()
+    const startOfToday = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    )
+
+    return dueDate < startOfToday
+      ? NegotiationPaymentStatus.OVERDUE
+      : requestedStatus
   }
 
   private async findOwnedPayment(

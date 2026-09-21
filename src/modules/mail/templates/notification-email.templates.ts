@@ -13,6 +13,15 @@ export type DailyFollowUpEmailItem = {
   dueAt: Date
 }
 
+export type PaymentDueTomorrowEmailItem = {
+  leadName: string
+  amount: number
+  paymentMethod: string
+  dueDate: Date
+}
+
+export type PaymentOverdueEmailItem = PaymentDueTomorrowEmailItem
+
 const brand = {
   primary: '#1D4D33',
   primaryLight: '#E8F4EC',
@@ -128,6 +137,73 @@ export function buildDailyFollowUpSummaryEmail(
   })
 }
 
+export function buildPaymentDueTomorrowEmail(
+  items: PaymentDueTomorrowEmailItem[]
+): string {
+  const rows = items
+    .map(
+      (item) => `
+        <tr>
+          <td style="padding:16px 0;border-bottom:1px solid ${brand.border};vertical-align:top;">
+            <div style="font-size:15px;font-weight:700;line-height:22px;color:${brand.text};">${escapeHtml(item.leadName)}</div>
+            <div style="margin-top:3px;font-size:14px;line-height:21px;color:${brand.muted};">${escapeHtml(item.paymentMethod)}</div>
+          </td>
+          <td style="padding:16px 0 16px 16px;border-bottom:1px solid ${brand.border};vertical-align:top;text-align:right;white-space:nowrap;">
+            <span style="display:block;font-size:14px;font-weight:700;color:${brand.text};">${escapeHtml(formatBrazilianCurrency(item.amount))}</span>
+            <span style="display:block;margin-top:4px;font-size:13px;color:${brand.muted};">${escapeHtml(formatBrazilianDate(item.dueDate))}</span>
+          </td>
+        </tr>`
+    )
+    .join('')
+  const itemLabel = items.length === 1 ? 'pagamento' : 'pagamentos'
+
+  return renderEmail({
+    preview: `Você tem ${items.length} ${itemLabel} vencendo amanhã`,
+    eyebrow: 'Pagamentos',
+    title: 'Pagamentos vencendo amanhã',
+    introduction: `Você tem ${items.length} ${itemLabel} com vencimento amanhã. Confira a lista e organize as cobranças.`,
+    accentColor: brand.primary,
+    content: `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        ${rows}
+      </table>`
+  })
+}
+
+export function buildPaymentOverdueEmail(
+  items: PaymentOverdueEmailItem[]
+): string {
+  const rows = items
+    .map(
+      (item) => `
+        <tr>
+          <td style="padding:16px 0;border-bottom:1px solid ${brand.border};vertical-align:top;">
+            <div style="font-size:15px;font-weight:700;line-height:22px;color:${brand.text};">${escapeHtml(item.leadName)}</div>
+            <div style="margin-top:3px;font-size:14px;line-height:21px;color:${brand.muted};">${escapeHtml(item.paymentMethod)}</div>
+          </td>
+          <td style="padding:16px 0 16px 16px;border-bottom:1px solid ${brand.border};vertical-align:top;text-align:right;white-space:nowrap;">
+            <span style="display:block;font-size:14px;font-weight:700;color:${brand.text};">${escapeHtml(formatBrazilianCurrency(item.amount))}</span>
+            <span style="display:block;margin-top:4px;font-size:13px;color:${brand.muted};">Venceu em ${escapeHtml(formatBrazilianDate(item.dueDate))}</span>
+          </td>
+        </tr>`
+    )
+    .join('')
+  const itemLabel =
+    items.length === 1 ? 'pagamento vencido' : 'pagamentos vencidos'
+
+  return renderEmail({
+    preview: `Você tem ${items.length} ${itemLabel}`,
+    eyebrow: 'Pagamentos em atraso',
+    title: 'Pagamentos vencidos',
+    introduction: `Você tem ${items.length} ${itemLabel}. Confira a lista e organize as cobranças pendentes.`,
+    accentColor: '#B45309',
+    content: `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+        ${rows}
+      </table>`
+  })
+}
+
 function renderEmail(input: EmailLayoutInput): string {
   return `<!doctype html>
 <html lang="pt-BR">
@@ -209,5 +285,21 @@ function formatBrazilianDateTime(value: Date): string {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
+  })
+}
+
+function formatBrazilianDate(value: Date): string {
+  return value.toLocaleDateString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  })
+}
+
+function formatBrazilianCurrency(value: number): string {
+  return value.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
   })
 }

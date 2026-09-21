@@ -32,6 +32,7 @@ type DashboardSummary = {
 type DashboardConversationRow = {
   leadId: string
   leadName: string
+  leadState: LeadState
   source: string | null
   leadCreatedAt: Date | string
   lastMessageAt: Date | string
@@ -220,6 +221,7 @@ export class DashboardService {
         SELECT
           lead.id AS "leadId",
           lead.name AS "leadName",
+          lead.state AS "leadState",
           lead.source AS source,
           lead."createdAt" AS "leadCreatedAt",
           lead."runtimeMode" AS "runtimeMode",
@@ -348,6 +350,7 @@ export class DashboardService {
     return {
       leadId: row.leadId,
       leadName: row.leadName,
+      leadState: row.leadState,
       source: row.source,
       leadCreatedAt,
       lastMessageAt,
@@ -370,6 +373,7 @@ export class DashboardService {
     return {
       leadId: conversation.leadId,
       leadName: conversation.leadName,
+      leadState: conversation.leadState,
       source: conversation.source,
       leadCreatedAt: conversation.leadCreatedAt,
       lastMessageAt: conversation.lastMessageAt,

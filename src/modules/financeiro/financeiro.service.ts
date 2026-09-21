@@ -11,11 +11,14 @@ import { NegotiationCost } from '../negotiation/entities/negotiation-cost.entity
 import { NegotiationFinancial } from '../negotiation/entities/negotiation-financial.entity'
 import {
   NegotiationPayment,
+  NegotiationPaymentMethod,
   NegotiationPaymentStatus
 } from '../negotiation/entities/negotiation-payment.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { FinanceiroBusinessSummaryResponseDto } from './dto/financeiro-business-summary-response.dto'
+import { FinanceiroPaymentListResponseDto } from './dto/financeiro-payment-list-response.dto'
+import { FinanceiroPaymentsQueryDto } from './dto/financeiro-payments-query.dto'
 import { FinanceiroPaymentsResponseDto } from './dto/financeiro-payments-response.dto'
 import { FinanceiroRevenueResponseDto } from './dto/financeiro-revenue-response.dto'
 import {
@@ -143,6 +146,77 @@ export class FinanceiroService {
       pendingCount: Number(rawPayments?.pendingCount ?? 0),
       overdueAmount: Number(rawPayments?.overdueAmount ?? 0),
       overdueCount: Number(rawPayments?.overdueCount ?? 0)
+    }
+  }
+
+  async listPayments(
+    userId: string,
+    query: FinanceiroPaymentsQueryDto
+  ): Promise<FinanceiroPaymentListResponseDto> {
+    const userInformationsIds = await this.findUserInformationsIds(userId)
+    if (!userInformationsIds.length) {
+      return { items: [] }
+    }
+
+    const queryBuilder = this.negotiationPaymentRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.negotiationFinancial', 'financial')
+      .innerJoin('financial.negotiation', 'negotiation')
+      .innerJoin('negotiation.lead', 'lead')
+      .select('payment.id', 'id')
+      .addSelect('lead.id', 'leadId')
+      .addSelect('lead.name', 'leadName')
+      .addSelect('negotiation.id', 'negotiationId')
+      .addSelect(
+        `COALESCE(NULLIF(TRIM(negotiation.title), ''), 'Negócio sem nome')`,
+        'negotiationTitle'
+      )
+      .addSelect('payment."paymentMethod"', 'paymentMethod')
+      .addSelect(
+        `ROW_NUMBER() OVER (
+          PARTITION BY financial.id
+          ORDER BY payment."dueDate" ASC, payment."createdAt" ASC, payment.id ASC
+        )`,
+        'installmentNumber'
+      )
+      .addSelect(
+        'COUNT(*) OVER (PARTITION BY financial.id)',
+        'totalInstallments'
+      )
+      .addSelect('payment."dueDate"', 'dueDate')
+      .addSelect('payment.amount', 'amount')
+      .addSelect('payment.status', 'status')
+      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
+        userInformationsIds
+      })
+      .orderBy('payment."dueDate"', 'ASC')
+      .addOrderBy('payment."createdAt"', 'ASC')
+      .addOrderBy('payment.id', 'ASC')
+
+    const rawPayments = await queryBuilder.getRawMany<{
+      id: string
+      leadId: string
+      leadName: string
+      negotiationId: string
+      negotiationTitle: string
+      paymentMethod: NegotiationPaymentMethod
+      installmentNumber: string
+      totalInstallments: string
+      dueDate: Date | string
+      amount: string
+      status: NegotiationPaymentStatus
+    }>()
+
+    return {
+      items: rawPayments
+        .map((payment) => ({
+          ...payment,
+          installmentNumber: Number(payment.installmentNumber),
+          totalInstallments: Number(payment.totalInstallments),
+          dueDate: new Date(payment.dueDate),
+          amount: Number(payment.amount)
+        }))
+        .filter((payment) => this.isDateWithinFilter(payment.dueDate, query))
     }
   }
 
@@ -311,6 +385,29 @@ export class FinanceiroService {
     }
 
     return parsedDate
+  }
+
+  private isDateWithinFilter(
+    date: Date,
+    query: FinanceiroPaymentsQueryDto
+  ): boolean {
+    const dateFrom = this.parseDateOnly(query.dueDateFrom)
+    const dateTo = this.parseDateOnly(query.dueDateTo)
+
+    if (dateFrom && date < dateFrom) {
+      return false
+    }
+
+    if (dateTo) {
+      const dateToExclusive = new Date(dateTo)
+      dateToExclusive.setDate(dateToExclusive.getDate() + 1)
+
+      if (date >= dateToExclusive) {
+        return false
+      }
+    }
+
+    return true
   }
 
   private applyCreatedAtFilter<T extends ObjectLiteral>(

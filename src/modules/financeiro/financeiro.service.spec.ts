@@ -3,7 +3,11 @@ import { Repository, SelectQueryBuilder } from 'typeorm'
 import { Message } from '../leads/entities/message.entity'
 import { NegotiationCost } from '../negotiation/entities/negotiation-cost.entity'
 import { NegotiationFinancial } from '../negotiation/entities/negotiation-financial.entity'
-import { NegotiationPayment } from '../negotiation/entities/negotiation-payment.entity'
+import {
+  NegotiationPayment,
+  NegotiationPaymentMethod,
+  NegotiationPaymentStatus
+} from '../negotiation/entities/negotiation-payment.entity'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { FinanceiroService } from './financeiro.service'
@@ -216,5 +220,79 @@ describe('FinanceiroService', () => {
       'negotiation."createdAt" < :createdAtToExclusive',
       { createdAtToExclusive: new Date('2026-08-16T00:00:00') }
     )
+  })
+
+  it('lists payments with installment positions', async () => {
+    const paymentsQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      getRawMany: jest.fn().mockResolvedValue([
+        {
+          id: 'payment-1',
+          leadId: 'lead-1',
+          leadName: 'Maria',
+          negotiationId: 'negotiation-1',
+          negotiationTitle: 'Projeto anual',
+          paymentMethod: NegotiationPaymentMethod.CREDIT_CARD,
+          installmentNumber: '3',
+          totalInstallments: '12',
+          dueDate: '2026-09-20T00:00:00.000Z',
+          amount: '250.50',
+          status: NegotiationPaymentStatus.PENDING
+        },
+        {
+          id: 'payment-2',
+          leadId: 'lead-1',
+          leadName: 'Maria',
+          negotiationId: 'negotiation-1',
+          negotiationTitle: 'Projeto anual',
+          paymentMethod: NegotiationPaymentMethod.CREDIT_CARD,
+          installmentNumber: '4',
+          totalInstallments: '12',
+          dueDate: '2026-10-20T00:00:00.000Z',
+          amount: '250.50',
+          status: NegotiationPaymentStatus.PENDING
+        }
+      ])
+    } as unknown as SelectQueryBuilder<NegotiationPayment>
+    const service = new FinanceiroService(
+      emptyRepository<Message>(),
+      emptyRepository<NegotiationFinancial>(),
+      emptyRepository<NegotiationCost>(),
+      {
+        createQueryBuilder: jest.fn().mockReturnValue(paymentsQueryBuilder)
+      } as unknown as Repository<NegotiationPayment>,
+      {
+        find: jest.fn().mockResolvedValue([{ id: 'information-1' }])
+      } as unknown as Repository<UserInformations>
+    )
+
+    await expect(
+      service.listPayments('user-1', {
+        dueDateFrom: '2026-09-01',
+        dueDateTo: '2026-09-30'
+      })
+    ).resolves.toEqual({
+      items: [
+        {
+          id: 'payment-1',
+          leadId: 'lead-1',
+          leadName: 'Maria',
+          negotiationId: 'negotiation-1',
+          negotiationTitle: 'Projeto anual',
+          paymentMethod: NegotiationPaymentMethod.CREDIT_CARD,
+          installmentNumber: 3,
+          totalInstallments: 12,
+          dueDate: new Date('2026-09-20T00:00:00.000Z'),
+          amount: 250.5,
+          status: NegotiationPaymentStatus.PENDING
+        }
+      ]
+    })
   })
 })

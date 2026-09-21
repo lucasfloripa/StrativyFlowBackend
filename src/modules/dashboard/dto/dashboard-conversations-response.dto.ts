@@ -1,4 +1,4 @@
-import { LeadRuntimeMode } from '../../leads/entities/lead.entity'
+import { LeadRuntimeMode, LeadState } from '../../leads/entities/lead.entity'
 import {
   MessageDirection,
   MessageStatus,
@@ -12,6 +12,7 @@ export type DashboardConversationStatus = 'new' | 'today' | 'noResponse24h'
 export type DashboardConversationItemDto = {
   leadId: string
   leadName: string
+  leadState: LeadState
   source: string | null
   leadCreatedAt: Date
   lastMessageAt: Date

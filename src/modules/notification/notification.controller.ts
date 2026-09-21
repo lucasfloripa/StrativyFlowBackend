@@ -103,6 +103,14 @@ export class NotificationController {
       return NotificationType.DAILY_FOLLOWUP_SUMMARY
     }
 
+    if (value === 'PAYMENT_DUE_TOMORROW') {
+      return NotificationType.PAYMENT_DUE_TOMORROW
+    }
+
+    if (value === 'PAYMENT_OVERDUE') {
+      return NotificationType.PAYMENT_OVERDUE
+    }
+
     if (value === 'CONVERSATION_EXPIRING_1H') {
       return NotificationType.CONVERSATION_EXPIRING_1H
     }
