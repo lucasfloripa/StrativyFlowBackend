@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Logger,
   Param,
   Post,
   Req,
@@ -17,6 +18,7 @@ import { SendContactLeadMessageDto } from '../dtos/send-contact-lead-message.dto
 import { SendMediaLeadMessageDto } from '../dtos/send-media-lead-message.dto'
 import { SendTemplateLeadMessageDto } from '../dtos/send-template-lead-message.dto'
 import { SendTextLeadMessageDto } from '../dtos/send-text-lead-message.dto'
+import { LeadChannel } from '../entities/lead-channel-identity.entity'
 import { SendContactLeadMessageCommand } from '../services/commands/send-contact-lead-message.command'
 import { SendMediaLeadMessageCommand } from '../services/commands/send-media-lead-message.command'
 import { SendTemplateLeadMessageCommand } from '../services/commands/send-template-lead-message.command'
@@ -34,6 +36,8 @@ type AuthenticatedRequest = Request & {
 @Controller('leads')
 @UseGuards(JwtAuthGuard)
 export class LeadMessagesController {
+  private readonly logger = new Logger(LeadMessagesController.name)
+
   constructor(
     private readonly leadMessageApplicationService: LeadMessageApplicationService
   ) {}
@@ -83,7 +87,7 @@ export class LeadMessagesController {
 
   @Post(':leadId/messages/media')
   @UseInterceptors(FileInterceptor('file'))
-  sendMediaMessage(
+  async sendMediaMessage(
     @Param('leadId') leadId: string,
     @UploadedFile() file: StorageUploadFile | undefined,
     @Body() body: SendMediaLeadMessageDto,
@@ -100,7 +104,47 @@ export class LeadMessagesController {
       channel: body.channel
     }
 
-    return this.leadMessageApplicationService.sendMediaMessage(command)
+    const shouldLogMediaUpload = body.type === 'image' || body.type === 'video'
+    const logContext = {
+      leadId,
+      mediaType: body.type,
+      mimeType: file?.mimetype ?? null,
+      mediaSize: file?.size ?? null,
+      channel: body.channel ?? LeadChannel.WHATSAPP
+    }
+
+    if (shouldLogMediaUpload) {
+      this.logger.log('Outbound media request received.', logContext)
+    }
+
+    try {
+      const message =
+        await this.leadMessageApplicationService.sendMediaMessage(command)
+
+      if (shouldLogMediaUpload) {
+        this.logger.log('Outbound media request completed.', logContext)
+      }
+
+      return message
+    } catch (error) {
+      if (shouldLogMediaUpload) {
+        const errorDetails = error as {
+          code?: string
+          response?: { status?: number }
+        }
+
+        this.logger.error('Outbound media request failed.', {
+          ...logContext,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorCode: errorDetails.code ?? null,
+          statusCode: errorDetails.response?.status ?? null,
+          stack: error instanceof Error ? error.stack : undefined
+        })
+      }
+
+      throw error
+    }
   }
 
   @Post(':leadId/messages/template')
