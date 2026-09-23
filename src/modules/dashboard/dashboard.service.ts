@@ -31,7 +31,7 @@ type DashboardSummary = {
 
 type DashboardConversationRow = {
   leadId: string
-  leadName: string
+  leadName: string | null
   leadState: LeadState
   source: string | null
   leadCreatedAt: Date | string
@@ -327,16 +327,13 @@ export class DashboardService {
     const leadCreatedAt = new Date(row.leadCreatedAt)
     const lastMessageAt = new Date(row.lastMessageAt)
     const lastInboundAt = row.lastInboundAt ? new Date(row.lastInboundAt) : null
-    const isNew =
-      lastInboundAt !== null &&
-      lastInboundAt > twentyFourHoursAgo &&
-      !row.hasOutbound
+    const isNew = leadCreatedAt > twentyFourHoursAgo && !row.hasOutbound
     const hasOpenMetaWindow =
-      row.hasOutbound &&
-      lastInboundAt !== null &&
-      lastInboundAt > twentyFourHoursAgo
+      !isNew && lastInboundAt !== null && lastInboundAt > twentyFourHoursAgo
     const hasNoResponse24h =
-      lastInboundAt !== null && lastInboundAt <= twentyFourHoursAgo
+      row.leadState !== LeadState.ARCHIVED &&
+      lastInboundAt !== null &&
+      lastInboundAt <= twentyFourHoursAgo
     let status: DashboardConversationStatus | null = null
 
     if (isNew) {
@@ -349,7 +346,7 @@ export class DashboardService {
 
     return {
       leadId: row.leadId,
-      leadName: row.leadName,
+      leadName: row.leadName?.trim() || 'Lead sem nome',
       leadState: row.leadState,
       source: row.source,
       leadCreatedAt,

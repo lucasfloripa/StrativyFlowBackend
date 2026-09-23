@@ -38,7 +38,7 @@ describe('DashboardService conversations', () => {
     leadRepo.query.mockResolvedValue([
       {
         leadId: 'recent-unanswered',
-        leadName: 'Lead novo',
+        leadName: null,
         source: 'Meta Ads',
         leadCreatedAt: '2026-08-08T12:00:00.000Z',
         lastMessageAt: '2026-08-08T12:10:00.000Z',
@@ -78,8 +78,22 @@ describe('DashboardService conversations', () => {
         runtimeMode: LeadRuntimeMode.AUTOMATION
       },
       {
+        leadId: 'recent-human-answered',
+        leadName: 'Lead respondido por usuário',
+        source: 'WhatsApp',
+        leadCreatedAt: '2026-08-08T13:00:00.000Z',
+        lastMessageAt: '2026-08-08T13:05:00.000Z',
+        lastMessage: 'Olá, como posso ajudar?',
+        lastMessageDirection: MessageDirection.OUTBOUND,
+        lastMessageType: MessageType.TEXT,
+        lastInboundAt: '2026-08-08T13:00:00.000Z',
+        hasOutbound: true,
+        runtimeMode: LeadRuntimeMode.HUMAN
+      },
+      {
         leadId: 'old-open-window',
         leadName: 'Janela aberta',
+        leadState: LeadState.ARCHIVED,
         source: 'Google Ads',
         leadCreatedAt: '2026-08-06T10:00:00.000Z',
         lastMessageAt: '2026-08-08T10:00:00.000Z',
@@ -158,18 +172,19 @@ describe('DashboardService conversations', () => {
     expect(result.items.map((item) => item.leadId)).toEqual([
       'recent-automation-replied',
       'recent-unanswered',
-      'returning-unanswered',
+      'recent-human-answered',
       'old-open-window',
       'recent-answered',
       'established-open-window',
       'old-expired-window',
-      'old-automation-only'
+      'old-automation-only',
+      'returning-unanswered'
     ])
     expect(result.counts).toEqual({
-      all: 8,
-      new: 3,
-      today: 2,
-      noResponse24h: 3
+      all: 9,
+      new: 2,
+      today: 4,
+      noResponse24h: 2
     })
     expect(result.items[0]).toEqual(
       expect.objectContaining({
@@ -187,30 +202,39 @@ describe('DashboardService conversations', () => {
     expect(
       result.items.find((item) => item.leadId === 'recent-answered')?.leadState
     ).toBe(LeadState.ARCHIVED)
+    expect(
+      result.items.find((item) => item.leadId === 'recent-unanswered')?.leadName
+    ).toBe('Lead sem nome')
     expect(result.items.map((item) => [item.leadId, item.status])).toEqual([
       ['recent-automation-replied', 'new'],
       ['recent-unanswered', 'new'],
-      ['returning-unanswered', 'new'],
+      ['recent-human-answered', 'today'],
       ['old-open-window', 'today'],
-      ['recent-answered', 'noResponse24h'],
+      ['recent-answered', null],
       ['established-open-window', 'today'],
       ['old-expired-window', 'noResponse24h'],
-      ['old-automation-only', 'noResponse24h']
+      ['old-automation-only', 'noResponse24h'],
+      ['returning-unanswered', 'today']
     ])
   })
 
   it.each([
     [
       DashboardConversationFilter.NEW,
-      ['recent-automation-replied', 'recent-unanswered', 'returning-unanswered']
+      ['recent-automation-replied', 'recent-unanswered']
     ],
     [
       DashboardConversationFilter.TODAY,
-      ['old-open-window', 'established-open-window']
+      [
+        'recent-human-answered',
+        'old-open-window',
+        'established-open-window',
+        'returning-unanswered'
+      ]
     ],
     [
       DashboardConversationFilter.NO_RESPONSE_24H,
-      ['recent-answered', 'old-expired-window', 'old-automation-only']
+      ['old-expired-window', 'old-automation-only']
     ]
   ])('filters conversations by %s', async (filter, expectedLeadIds) => {
     const result = await service.getConversations('user-1', filter)

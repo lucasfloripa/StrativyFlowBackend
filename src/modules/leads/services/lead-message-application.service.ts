@@ -222,8 +222,6 @@ export class LeadMessageApplicationService {
   }
 
   async sendMediaMessage(command: SendMediaLeadMessageCommand) {
-    const shouldLogMediaUpload =
-      command.type === 'image' || command.type === 'video'
     let validatedMedia =
       this.chatMediaPolicyService.validateOutboundMediaPayload({
         type: command.type,
@@ -277,16 +275,12 @@ export class LeadMessageApplicationService {
       }
     }
 
-    if (shouldLogMediaUpload) {
-      this.logger.log('Outbound media processing advanced.', {
-        stage: 'validated',
-        leadId: lead.id,
-        mediaType: validatedMedia.type,
-        mimeType: validatedMedia.mimeType,
-        mediaSize: validatedMedia.size,
-        channel: command.channel ?? LeadChannel.WHATSAPP
-      })
-    }
+    this.logger.debug('Outbound media file received.', {
+      fileOriginalName: file.originalname,
+      fileMimeType: file.mimetype,
+      fileSize: file.size,
+      requestedType: command.type
+    })
 
     const normalizedRequestMetadata =
       this.leadMessageMetadataService.normalizeMetadata(command.metadata)
@@ -295,17 +289,6 @@ export class LeadMessageApplicationService {
     const uploadResult = await this.storageService.uploadFile(file, {
       key: storageKey
     })
-
-    if (shouldLogMediaUpload) {
-      this.logger.log('Outbound media processing advanced.', {
-        stage: 'storage_uploaded',
-        leadId: lead.id,
-        mediaType: validatedMedia.type,
-        mimeType: validatedMedia.mimeType,
-        mediaSize: validatedMedia.size,
-        channel: command.channel ?? LeadChannel.WHATSAPP
-      })
-    }
 
     try {
       if ('instagramUserId' in outboundContext) {
@@ -323,15 +306,6 @@ export class LeadMessageApplicationService {
             instagramAttachmentTypeByMediaType[validatedMedia.type],
             presignedUrl
           )
-
-        if (shouldLogMediaUpload) {
-          this.logger.log('Outbound media processing advanced.', {
-            stage: 'channel_message_sent',
-            leadId: lead.id,
-            mediaType: validatedMedia.type,
-            channel: LeadChannel.INSTAGRAM
-          })
-        }
 
         await this.leadMessageContextService.markLeadActivity(lead)
 
@@ -378,15 +352,6 @@ export class LeadMessageApplicationService {
             outboundContext.messengerToken
           )
 
-        if (shouldLogMediaUpload) {
-          this.logger.log('Outbound media processing advanced.', {
-            stage: 'channel_message_sent',
-            leadId: lead.id,
-            mediaType: validatedMedia.type,
-            channel: LeadChannel.MESSENGER
-          })
-        }
-
         await this.leadMessageContextService.markLeadActivity(lead)
 
         const normalizedCaption = command.caption?.trim() || null
@@ -422,15 +387,6 @@ export class LeadMessageApplicationService {
         whatsappToken
       )
 
-      if (shouldLogMediaUpload) {
-        this.logger.log('Outbound media processing advanced.', {
-          stage: 'whatsapp_media_uploaded',
-          leadId: lead.id,
-          mediaType: validatedMedia.type,
-          channel: LeadChannel.WHATSAPP
-        })
-      }
-
       const outboundResponse =
         await this.whatsappOutboundService.sendMediaMessage({
           to: destinationPhone,
@@ -441,15 +397,6 @@ export class LeadMessageApplicationService {
           fileName: validatedMedia.originalName,
           whatsappToken
         })
-
-      if (shouldLogMediaUpload) {
-        this.logger.log('Outbound media processing advanced.', {
-          stage: 'channel_message_sent',
-          leadId: lead.id,
-          mediaType: validatedMedia.type,
-          channel: LeadChannel.WHATSAPP
-        })
-      }
 
       await this.leadMessageContextService.markLeadActivity(lead)
 
