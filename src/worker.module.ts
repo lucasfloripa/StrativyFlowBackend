@@ -20,7 +20,6 @@ import { FollowUpReminderScheduler } from './worker/notifications/followup-remin
 import { NotificationWorker } from './worker/notifications/notification-worker.service'
 import { PaymentScheduler } from './worker/payments/payment-scheduler.service'
 import { PaymentWorker } from './worker/payments/payment-worker.service'
-import { WorkerHeartbeatService } from './worker/worker-heartbeat.service'
 
 @Module({
   imports: [
@@ -40,7 +39,6 @@ import { WorkerHeartbeatService } from './worker/worker-heartbeat.service'
     ScheduleModule.forRoot()
   ],
   providers: [
-    WorkerHeartbeatService,
     PaymentScheduler,
     PaymentWorker,
     NotificationRepository,
