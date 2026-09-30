@@ -111,14 +111,6 @@ export class NotificationController {
       return NotificationType.PAYMENT_OVERDUE
     }
 
-    if (value === 'CONVERSATION_EXPIRING_1H') {
-      return NotificationType.CONVERSATION_EXPIRING_1H
-    }
-
-    if (value === 'CONVERSATION_EXPIRED') {
-      return NotificationType.CONVERSATION_EXPIRED
-    }
-
     throw new BadRequestException('Invalid notification type')
   }
 }

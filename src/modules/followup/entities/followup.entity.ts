@@ -54,6 +54,9 @@ export class FollowUp {
   @Column({ name: 'remider1hSentAt', type: 'timestamptz', nullable: true })
   reminder1hSentAt?: Date | null
 
+  @Column({ type: 'timestamptz', nullable: true })
+  reminder1hScheduledAt?: Date | null
+
   @OneToMany(() => FollowUpStep, (action) => action.followUp, {
     cascade: true
   })

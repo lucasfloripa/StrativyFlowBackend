@@ -418,6 +418,7 @@ export class FollowUpStepExecutor {
       status: FollowUpStatus.PENDING,
       completedAt: null,
       reminder1hSentAt: null,
+      reminder1hScheduledAt: null,
       steps: [
         this.followUpRepository.manager.create(FollowUpStep, {
           parentId: null,

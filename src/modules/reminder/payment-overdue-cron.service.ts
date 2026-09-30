@@ -14,7 +14,6 @@ import {
   NegotiationPaymentMethod,
   NegotiationPaymentStatus
 } from '../negotiation/entities/negotiation-payment.entity'
-import { NegotiationPaymentCronService } from '../negotiation/services/negotiation-payment-cron.service'
 import {
   NotificationReferenceType,
   NotificationType as AppNotificationType
@@ -55,7 +54,6 @@ export class PaymentOverdueCronService {
     private readonly paymentRepository: Repository<NegotiationPayment>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepository: Repository<UserInformations>,
-    private readonly paymentStatusCronService: NegotiationPaymentCronService,
     private readonly mailService: MailService,
     private readonly evolutionService: EvolutionService,
     private readonly notificationService: NotificationService
@@ -70,8 +68,6 @@ export class PaymentOverdueCronService {
     source: 'cron' | 'manual' = 'cron'
   ): Promise<PaymentOverdueDispatchSummary> {
     this.logger.log(`Starting overdue payment reminder dispatch via ${source}`)
-
-    await this.paymentStatusCronService.markOverduePayments()
 
     const payments = await this.paymentRepository.find({
       where: { status: NegotiationPaymentStatus.OVERDUE },

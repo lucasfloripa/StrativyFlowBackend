@@ -1,11 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 
-import { FollowUpExecutor } from './followup-executor.service'
+import { FollowUpExecutor } from '../../modules/followup/services/followup-executor.service'
 
 @Injectable()
-export class FollowUpCron {
-  private readonly logger = new Logger(FollowUpCron.name)
+export class FollowUpExecutionScheduler {
+  private readonly logger = new Logger(FollowUpExecutionScheduler.name)
 
   constructor(private readonly followUpExecutor: FollowUpExecutor) {}
 

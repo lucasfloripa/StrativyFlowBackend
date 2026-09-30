@@ -4,7 +4,6 @@ import {
   NegotiationPayment,
   NegotiationPaymentMethod
 } from '../negotiation/entities/negotiation-payment.entity'
-import { NegotiationPaymentCronService } from '../negotiation/services/negotiation-payment-cron.service'
 import {
   NotificationReferenceType,
   NotificationType as AppNotificationType
@@ -53,10 +52,6 @@ describe('PaymentOverdueCronService', () => {
         }
       ])
     } as unknown as Repository<UserInformations>
-    const markOverduePayments = jest.fn().mockResolvedValue(undefined)
-    const paymentStatusCronService = {
-      markOverduePayments
-    } as unknown as NegotiationPaymentCronService
     const mailService = { send: jest.fn().mockResolvedValue(undefined) }
     const evolutionService = {
       sendText: jest.fn().mockResolvedValue(undefined)
@@ -67,7 +62,6 @@ describe('PaymentOverdueCronService', () => {
     const service = new PaymentOverdueCronService(
       paymentRepository,
       userInformationsRepository,
-      paymentStatusCronService,
       mailService as never,
       evolutionService as never,
       notificationService
@@ -76,10 +70,6 @@ describe('PaymentOverdueCronService', () => {
     const summary = await service.dispatchOverduePaymentReminders('manual')
     const findOptions = jest.mocked(paymentRepository.find).mock.calls[0]?.[0]
 
-    expect(markOverduePayments).toHaveBeenCalledTimes(1)
-    expect(markOverduePayments.mock.invocationCallOrder[0]).toBeLessThan(
-      find.mock.invocationCallOrder[0]
-    )
     expect(findOptions?.where).toEqual({ status: 'OVERDUE' })
     expect(notificationService.createNotification).toHaveBeenCalledWith({
       organizationId: null,

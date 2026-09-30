@@ -75,30 +75,6 @@ export function buildFollowUpOneHourEmail(input: {
   })
 }
 
-export function buildConversationExpiringEmail(leadName: string): string {
-  return renderEmail({
-    preview: `A janela de atendimento de ${leadName} expira em menos de uma hora`,
-    eyebrow: 'Atenção ao prazo',
-    title: 'A conversa expira em 1 hora',
-    introduction:
-      'Responda agora para manter a janela de atendimento ativa e continuar a conversa normalmente.',
-    accentColor: brand.primary,
-    content: renderDetails([{ label: 'Lead', value: leadName }])
-  })
-}
-
-export function buildConversationExpiredEmail(leadName: string): string {
-  return renderEmail({
-    preview: `A conversa com ${leadName} saiu da janela de atendimento`,
-    eyebrow: 'Janela encerrada',
-    title: 'A conversa expirou',
-    introduction:
-      'A janela de atendimento de 24 horas foi encerrada. Para retomar o contato, será necessário enviar um template aprovado.',
-    accentColor: brand.primary,
-    content: renderDetails([{ label: 'Lead', value: leadName }])
-  })
-}
-
 export function buildDailyFollowUpSummaryEmail(
   items: DailyFollowUpEmailItem[]
 ): string {

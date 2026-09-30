@@ -31,6 +31,19 @@
 $ npm install
 ```
 
+## RabbitMQ configuration
+
+```bash
+RABBIT_PREFETCH=10
+RABBIT_PUBLISH_CONCURRENCY=10
+RABBIT_MAX_RETRY_ATTEMPTS=3
+RABBIT_RETRY_DELAYS_MS=5000,30000,120000
+```
+
+`RABBIT_MAX_RETRY_ATTEMPTS` counts retries after the original processing
+attempt. Retry delays are comma-separated milliseconds; if fewer delays than
+attempts are configured, the final delay is reused.
+
 ## Compile and run the project
 
 ```bash

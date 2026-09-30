@@ -1,6 +1,4 @@
 import {
-  buildConversationExpiredEmail,
-  buildConversationExpiringEmail,
   buildDailyFollowUpSummaryEmail,
   buildFollowUpOneHourEmail,
   buildNewLeadEmail
@@ -37,16 +35,6 @@ describe('notification email templates', () => {
     expect(html).toContain('Email')
     expect(html).toContain('background:#D8EBDD')
     expect(html).toContain('background:#EEF7F0')
-  })
-
-  it('builds different conversation warning and expiration messages', () => {
-    const expiringHtml = buildConversationExpiringEmail('Lead Teste')
-    const expiredHtml = buildConversationExpiredEmail('Lead Teste')
-
-    expect(expiringHtml).toContain('A conversa expira em 1 hora')
-    expect(expiringHtml).toContain('Responda agora')
-    expect(expiredHtml).toContain('A conversa expirou')
-    expect(expiredHtml).toContain('template aprovado')
   })
 
   it('builds the daily summary with every follow-up and its time', () => {

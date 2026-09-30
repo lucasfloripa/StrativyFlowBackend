@@ -627,8 +627,6 @@ export class WebhookService {
 
         lead.lastInboundMessageId = inboundMessageId ?? undefined
         lead.lastActivityAt = new Date()
-        lead.conversationReminder1hSentAt = null
-        lead.conversationExpiredNotificationSentAt = null
         await this.leadRepo.save(lead)
 
         this.logger.log(
@@ -714,8 +712,6 @@ export class WebhookService {
 
         lead.lastInboundMessageId = inboundMessageId ?? undefined
         lead.lastActivityAt = new Date()
-        lead.conversationReminder1hSentAt = null
-        lead.conversationExpiredNotificationSentAt = null
 
         this.logger.log(
           '[10] Saving lead after HUMAN runtime mode inbound update'
@@ -807,8 +803,6 @@ export class WebhookService {
       }
 
       lead.lastInboundMessageId = inboundMessageId ?? undefined
-      lead.conversationReminder1hSentAt = null
-      lead.conversationExpiredNotificationSentAt = null
 
       this.logger.log('[10] Saving lead after FlowEngine execution')
       await this.leadRepo.save(lead)
@@ -1097,8 +1091,6 @@ export class WebhookService {
 
     refreshedLead.lastInboundMessageId = inboundMessageId
     refreshedLead.lastActivityAt = new Date()
-    refreshedLead.conversationReminder1hSentAt = null
-    refreshedLead.conversationExpiredNotificationSentAt = null
 
     this.logger.log('[10] Saving lead after media message processing')
     await this.leadRepo.save(refreshedLead)
@@ -1763,8 +1755,6 @@ export class WebhookService {
         if (!messageText) {
           lead.lastInboundMessageId = inboundMessageId
           lead.lastActivityAt = interactionAt
-          lead.conversationReminder1hSentAt = null
-          lead.conversationExpiredNotificationSentAt = null
           await this.leadRepo.save(lead)
           continue
         }
@@ -1781,8 +1771,6 @@ export class WebhookService {
         if (!shouldRunAutomation) {
           lead.lastInboundMessageId = inboundMessageId
           lead.lastActivityAt = interactionAt
-          lead.conversationReminder1hSentAt = null
-          lead.conversationExpiredNotificationSentAt = null
           await this.leadRepo.save(lead)
           continue
         }
@@ -1854,8 +1842,6 @@ export class WebhookService {
 
         lead.lastInboundMessageId = inboundMessageId
         lead.lastActivityAt = interactionAt
-        lead.conversationReminder1hSentAt = null
-        lead.conversationExpiredNotificationSentAt = null
         await this.leadRepo.save(lead)
       }
     }
@@ -2224,8 +2210,6 @@ export class WebhookService {
         if (!messageText) {
           lead.lastInboundMessageId = inboundMessageId
           lead.lastActivityAt = interactionAt
-          lead.conversationReminder1hSentAt = null
-          lead.conversationExpiredNotificationSentAt = null
           await this.leadRepo.save(lead)
           continue
         }
@@ -2242,8 +2226,6 @@ export class WebhookService {
         if (!shouldRunAutomation) {
           lead.lastInboundMessageId = inboundMessageId
           lead.lastActivityAt = interactionAt
-          lead.conversationReminder1hSentAt = null
-          lead.conversationExpiredNotificationSentAt = null
           await this.leadRepo.save(lead)
           continue
         }
@@ -2313,8 +2295,6 @@ export class WebhookService {
 
         lead.lastInboundMessageId = inboundMessageId
         lead.lastActivityAt = interactionAt
-        lead.conversationReminder1hSentAt = null
-        lead.conversationExpiredNotificationSentAt = null
         await this.leadRepo.save(lead)
       }
     }

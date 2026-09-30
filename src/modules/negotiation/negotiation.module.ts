@@ -14,12 +14,12 @@ import { NegotiationCost } from './entities/negotiation-cost.entity'
 import { NegotiationFinancial } from './entities/negotiation-financial.entity'
 import { NegotiationPayment } from './entities/negotiation-payment.entity'
 import { Negotiation } from './entities/negotiation.entity'
+import { NegotiationPaymentDomainModule } from './negotiation-payment-domain.module'
 import { NegotiationController } from './negotiation.controller'
 import { NegotiationService } from './negotiation.service'
 import { NegotiationAttachmentService } from './services/negotiation-attachment.service'
 import { NegotiationCostService } from './services/negotiation-cost.service'
 import { NegotiationFinancialService } from './services/negotiation-financial.service'
-import { NegotiationPaymentCronService } from './services/negotiation-payment-cron.service'
 import { NegotiationPaymentService } from './services/negotiation-payment.service'
 
 @Module({
@@ -32,7 +32,8 @@ import { NegotiationPaymentService } from './services/negotiation-payment.servic
       NegotiationCost,
       NegotiationPayment
     ]),
-    StorageModule
+    StorageModule,
+    NegotiationPaymentDomainModule
   ],
   controllers: [
     NegotiationController,
@@ -47,9 +48,8 @@ import { NegotiationPaymentService } from './services/negotiation-payment.servic
     NegotiationAttachmentService,
     NegotiationFinancialService,
     NegotiationCostService,
-    NegotiationPaymentCronService,
     NegotiationPaymentService
   ],
-  exports: [NegotiationService, NegotiationPaymentCronService]
+  exports: [NegotiationService]
 })
 export class NegotiationModule {}

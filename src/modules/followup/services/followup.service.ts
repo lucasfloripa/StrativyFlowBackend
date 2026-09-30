@@ -51,6 +51,7 @@ export class FollowUpService {
       status: dto.status,
       completedAt: dto.completedAt ? new Date(dto.completedAt) : null,
       reminder1hSentAt: null,
+      reminder1hScheduledAt: null,
       steps: (dto.steps ?? []).map((step) =>
         this.followUpRepository.manager.create(FollowUpStep, {
           parentId: step.parentId ?? null,
@@ -135,6 +136,7 @@ export class FollowUpService {
         const followUp = await this.findEntityById(id, manager)
 
         followUp.reminder1hSentAt = null
+        followUp.reminder1hScheduledAt = null
 
         if (dto.negotiationId !== undefined) {
           followUp.negotiationId = dto.negotiationId
