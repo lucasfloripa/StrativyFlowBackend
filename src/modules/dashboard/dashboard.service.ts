@@ -309,7 +309,18 @@ export class DashboardService {
           return first.isNew ? -1 : 1
         }
 
-        return second.leadCreatedAt.getTime() - first.leadCreatedAt.getTime()
+        const sortByLastMessage =
+          filter === DashboardConversationFilter.TODAY ||
+          filter === DashboardConversationFilter.NO_RESPONSE_24H
+
+        const firstTimestamp = sortByLastMessage
+          ? first.lastMessageAt.getTime()
+          : first.leadCreatedAt.getTime()
+        const secondTimestamp = sortByLastMessage
+          ? second.lastMessageAt.getTime()
+          : second.leadCreatedAt.getTime()
+
+        return secondTimestamp - firstTimestamp
       })
       .map((conversation) => this.toConversationItem(conversation))
 

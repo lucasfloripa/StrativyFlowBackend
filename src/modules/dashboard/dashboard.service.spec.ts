@@ -147,7 +147,7 @@ describe('DashboardService conversations', () => {
         leadId: 'old-automation-only',
         leadName: 'Lead atendido apenas pela automação',
         source: 'Messenger',
-        leadCreatedAt: '2026-08-04T09:00:00.000Z',
+        leadCreatedAt: '2026-08-04T11:00:00.000Z',
         lastMessageAt: '2026-08-06T15:00:00.000Z',
         lastMessage: 'Resposta automática',
         lastMessageDirection: MessageDirection.AUTOMATIC,
@@ -176,8 +176,8 @@ describe('DashboardService conversations', () => {
       'old-open-window',
       'recent-answered',
       'established-open-window',
-      'old-expired-window',
       'old-automation-only',
+      'old-expired-window',
       'returning-unanswered'
     ])
     expect(result.counts).toEqual({
@@ -212,8 +212,8 @@ describe('DashboardService conversations', () => {
       ['old-open-window', 'today'],
       ['recent-answered', null],
       ['established-open-window', 'today'],
-      ['old-expired-window', 'noResponse24h'],
       ['old-automation-only', 'noResponse24h'],
+      ['old-expired-window', 'noResponse24h'],
       ['returning-unanswered', 'today']
     ])
   })
@@ -227,9 +227,9 @@ describe('DashboardService conversations', () => {
       DashboardConversationFilter.TODAY,
       [
         'recent-human-answered',
+        'returning-unanswered',
         'old-open-window',
-        'established-open-window',
-        'returning-unanswered'
+        'established-open-window'
       ]
     ],
     [
