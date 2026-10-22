@@ -1,3 +1,4 @@
+import { Company } from '../../company/company.entity'
 import { Lead } from '../../leads/entities/lead.entity'
 import {
   MessageChannel,
@@ -27,7 +28,7 @@ import { WhatsAppTemplateSender } from './whatsapp-template-sender.service'
 describe('FollowUpStepExecutor', () => {
   const lead = Object.assign(new Lead(), {
     id: 'lead-1',
-    userInformationsId: 'user-info-1',
+    companyId: 'company-1',
     name: 'Customer'
   })
 
@@ -58,7 +59,17 @@ describe('FollowUpStepExecutor', () => {
     }
     const identityRepository = { findOne: jest.fn() }
     const templateRepository = { findOne: jest.fn() }
-    const userInformationsRepository = { findOne: jest.fn() }
+    const companyRepository = {
+      findOne: jest.fn().mockResolvedValue(
+        Object.assign(new Company(), {
+          id: 'company-1',
+          companyPhoneNumberId: 'phone-number-id',
+          whatsappToken: 'token',
+          messengerPageId: 'page-1',
+          messengerToken: 'messenger-token'
+        })
+      )
+    }
     const conversationPolicy = { isWithinMessagingWindow: jest.fn() }
     const whatsAppMessagingService = { sendWhatsAppMessage: jest.fn() }
     const whatsAppTemplateSender = { sendTemplate: jest.fn() }
@@ -80,7 +91,7 @@ describe('FollowUpStepExecutor', () => {
       followUpStepRepository as never,
       identityRepository as never,
       templateRepository as never,
-      userInformationsRepository as never,
+      companyRepository as never,
       conversationPolicy as unknown as FollowUpConversationPolicy,
       whatsAppMessagingService as never,
       whatsAppTemplateSender as unknown as WhatsAppTemplateSender,
@@ -98,7 +109,7 @@ describe('FollowUpStepExecutor', () => {
       followUpStepRepository,
       identityRepository,
       templateRepository,
-      userInformationsRepository,
+      companyRepository,
       conversationPolicy,
       whatsAppMessagingService,
       whatsAppTemplateSender,
@@ -533,6 +544,97 @@ describe('FollowUpStepExecutor', () => {
     }
   )
 
+  it('sends a Messenger follow-up using the Company Page and token', async () => {
+    const dependencies = createService()
+    dependencies.conversationPolicy.isWithinMessagingWindow.mockResolvedValue(
+      true
+    )
+    dependencies.identityRepository.findOne.mockResolvedValue({
+      externalAccountId: 'page-1',
+      externalUserId: 'messenger-user-1'
+    })
+    const action = Object.assign(new FollowUpStep(), {
+      type: FollowUpStepType.SEND_MESSAGE,
+      channel: MessageChannel.MESSENGER,
+      payload: { message: 'Hello from follow-up' }
+    })
+
+    await expect(
+      dependencies.service.execute(action, lead, 'negotiation-1')
+    ).resolves.toBe(FollowUpStepStatus.AWAITING_REPLY)
+
+    expect(dependencies.companyRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 'company-1' }
+    })
+    expect(
+      dependencies.messengerMessagingService.sendMessengerMessage
+    ).toHaveBeenCalledWith(
+      'messenger-user-1',
+      'Hello from follow-up',
+      'page-1',
+      'messenger-token'
+    )
+  })
+
+  it('uses the Instagram messaging service backed by Company credentials', async () => {
+    const dependencies = createService()
+    dependencies.conversationPolicy.isWithinMessagingWindow.mockResolvedValue(
+      true
+    )
+    dependencies.identityRepository.findOne.mockResolvedValue({
+      externalAccountId: 'instagram-account-1',
+      externalUserId: 'instagram-user-1'
+    })
+    const action = Object.assign(new FollowUpStep(), {
+      type: FollowUpStepType.SEND_MESSAGE,
+      channel: MessageChannel.INSTAGRAM,
+      payload: { message: 'Hello from follow-up' }
+    })
+
+    await expect(
+      dependencies.service.execute(action, lead, 'negotiation-1')
+    ).resolves.toBe(FollowUpStepStatus.AWAITING_REPLY)
+    expect(
+      dependencies.instagramMessagingService.sendMessage
+    ).toHaveBeenCalledWith(
+      'instagram-account-1',
+      'instagram-user-1',
+      'Hello from follow-up'
+    )
+  })
+
+  it('does not send WhatsApp when Company credentials are missing or mismatched', async () => {
+    const missingCompany = createService()
+    missingCompany.conversationPolicy.isWithinMessagingWindow.mockResolvedValue(
+      true
+    )
+    missingCompany.companyRepository.findOne.mockResolvedValue(null)
+    const action = Object.assign(new FollowUpStep(), {
+      type: FollowUpStepType.SEND_MESSAGE,
+      channel: MessageChannel.WHATSAPP,
+      payload: { message: 'Hello' }
+    })
+    await expect(
+      missingCompany.service.execute(action, lead, 'negotiation-1')
+    ).rejects.toThrow('Company not found for lead')
+    expect(
+      missingCompany.whatsAppMessagingService.sendWhatsAppMessage
+    ).not.toHaveBeenCalled()
+
+    const mismatch = createService()
+    mismatch.conversationPolicy.isWithinMessagingWindow.mockResolvedValue(true)
+    mismatch.identityRepository.findOne.mockResolvedValue({
+      externalAccountId: 'other-phone-id',
+      externalUserId: '5511999999999'
+    })
+    await expect(
+      mismatch.service.execute(action, lead, 'negotiation-1')
+    ).rejects.toThrow('WhatsApp identity does not match Company account')
+    expect(
+      mismatch.whatsAppMessagingService.sendWhatsAppMessage
+    ).not.toHaveBeenCalled()
+  })
+
   it('sends a plain WhatsApp message inside its channel window', async () => {
     const dependencies = createService()
     dependencies.conversationPolicy.isWithinMessagingWindow.mockResolvedValue(
@@ -542,10 +644,13 @@ describe('FollowUpStepExecutor', () => {
       externalAccountId: 'phone-number-id',
       externalUserId: '5511999999999'
     })
-    dependencies.userInformationsRepository.findOne.mockResolvedValue({
-      id: 'user-info-1',
-      whatsappToken: 'token'
-    })
+    dependencies.companyRepository.findOne.mockResolvedValue(
+      Object.assign(new Company(), {
+        id: 'company-1',
+        companyPhoneNumberId: 'phone-number-id',
+        whatsappToken: 'token'
+      })
+    )
     dependencies.whatsAppMessagingService.sendWhatsAppMessage.mockResolvedValue(
       {
         data: {
@@ -595,10 +700,13 @@ describe('FollowUpStepExecutor', () => {
       externalAccountId: 'phone-number-id',
       externalUserId: '5511999999999'
     })
-    dependencies.userInformationsRepository.findOne.mockResolvedValue({
-      id: 'user-info-1',
-      whatsappToken: 'token'
-    })
+    dependencies.companyRepository.findOne.mockResolvedValue(
+      Object.assign(new Company(), {
+        id: 'company-1',
+        companyPhoneNumberId: 'phone-number-id',
+        whatsappToken: 'token'
+      })
+    )
     dependencies.templateRepository.findOne.mockResolvedValue({
       id: 'template-1',
       name: 'Proposal',

@@ -1,6 +1,7 @@
 import {
   IsDateString,
   IsEmail,
+  IsEmpty,
   IsEnum,
   IsObject,
   IsOptional,
@@ -14,6 +15,9 @@ import {
 } from '../entities/lead.entity'
 
 export class UpdateLeadDto {
+  @IsEmpty({ message: 'companyId cannot be changed through lead updates' })
+  companyId?: never
+
   @IsOptional()
   @IsString()
   name?: string

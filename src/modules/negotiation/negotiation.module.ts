@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { CompanyAccessModule } from '../auth/company-access.module'
 import { FollowUp } from '../followup/entities/followup.entity'
 import { StorageModule } from '../storage/storage.module'
 
@@ -24,6 +25,7 @@ import { NegotiationPaymentService } from './services/negotiation-payment.servic
 
 @Module({
   imports: [
+    CompanyAccessModule,
     TypeOrmModule.forFeature([
       Negotiation,
       FollowUp,

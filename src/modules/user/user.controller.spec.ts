@@ -29,6 +29,28 @@ describe('UserController', () => {
     expect(response[0]).not.toHaveProperty('instagramToken')
   })
 
+  it('returns the Company name without exposing the Company relation', async () => {
+    const userService = {
+      findByUserId: jest.fn().mockResolvedValue([
+        Object.assign(new UserInformations(), configuredUser, {
+          company: {
+            id: 'company-1',
+            name: 'Acme',
+            whatsappToken: 'company-secret'
+          }
+        })
+      ])
+    }
+    const controller = new UserController(userService as unknown as UserService)
+
+    const response = await controller.listUserInformations({
+      user: { id: 'user-1' }
+    } as never)
+
+    expect(response[0]).toHaveProperty('companyName', 'Acme')
+    expect(response[0]).not.toHaveProperty('company')
+  })
+
   it('does not expose instagramToken after creating UserInformations', async () => {
     const userService = {
       createUserInformations: jest.fn().mockResolvedValue(configuredUser)

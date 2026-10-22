@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
 import { FollowUp, FollowUpStatus } from '../followup/entities/followup.entity'
 
@@ -98,9 +98,15 @@ export class NegotiationService {
     return await this.negotiationRepository.save(negotiation)
   }
 
-  async findAll(leadId?: string): Promise<Negotiation[]> {
+  async findAll(
+    leadId?: string,
+    companyIds?: string[]
+  ): Promise<Negotiation[]> {
     return await this.negotiationRepository.find({
-      where: leadId ? { leadId } : undefined,
+      where: {
+        ...(leadId ? { leadId } : {}),
+        ...(companyIds ? { lead: { companyId: In(companyIds) } } : {})
+      },
       relations: {
         financial: {
           costs: true,

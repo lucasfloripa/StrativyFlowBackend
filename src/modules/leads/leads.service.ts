@@ -86,37 +86,55 @@ export class LeadsService {
     }
   }
 
-  private async findUserInformationsIds(userId: string): Promise<string[]> {
+  private async findCompanyIds(userId: string): Promise<string[]> {
     const mappings = await this.userInformationsRepo.find({
       where: { userId },
-      select: ['id']
+      select: ['companyId']
     })
 
-    return mappings.map((mapping) => mapping.id)
+    return [
+      ...new Set(
+        mappings
+          .map((mapping) => mapping.companyId)
+          .filter((companyId): companyId is string => Boolean(companyId))
+      )
+    ]
   }
 
-  private async findDefaultUserInformationsId(userId: string): Promise<string> {
-    const mapping = await this.userInformationsRepo.findOne({
-      where: { userId },
-      order: { createdAt: 'ASC' }
-    })
+  private async resolveCompanyId(
+    userId: string,
+    requestedCompanyId?: string
+  ): Promise<string> {
+    const companyIds = await this.findCompanyIds(userId)
 
-    if (!mapping) {
+    if (requestedCompanyId !== undefined) {
+      if (!companyIds.includes(requestedCompanyId)) {
+        throw new ForbiddenException('User does not belong to this company')
+      }
+
+      return requestedCompanyId
+    }
+
+    if (!companyIds.length) {
+      throw new BadRequestException('User has no company configured for leads')
+    }
+
+    if (companyIds.length > 1) {
       throw new BadRequestException(
-        'User has no phone mapping configured for leads'
+        'companyId is required when user belongs to multiple companies'
       )
     }
 
-    return mapping.id
+    return companyIds[0]
   }
 
   async searchByUser(
     userId: string,
     filters: Record<string, string | string[] | undefined>
   ) {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
+    const companyIds = await this.findCompanyIds(userId)
 
-    if (!userInformationsIds.length) {
+    if (!companyIds.length) {
       return []
     }
 
@@ -133,8 +151,8 @@ export class LeadsService {
             .andWhere('message.direction IN (:...messageDirections)'),
         'lastMessageAt'
       )
-      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-        userInformationsIds
+      .where('lead."companyId" IN (:...companyIds)', {
+        companyIds
       })
       .setParameter('messageDirections', [
         MessageDirection.INBOUND,
@@ -193,14 +211,14 @@ export class LeadsService {
   }
 
   async listByUser(userId: string) {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
-    if (!userInformationsIds.length) {
+    const companyIds = await this.findCompanyIds(userId)
+    if (!companyIds.length) {
       return []
     }
 
     const leads = await this.leadRepo.find({
       where: {
-        userInformationsId: In(userInformationsIds)
+        companyId: In(companyIds)
       },
       order: {
         createdAt: 'DESC'
@@ -302,14 +320,14 @@ export class LeadsService {
   }
 
   async create(userId: string, dto: CreateLeadDto) {
-    const userInformationsId = await this.findDefaultUserInformationsId(userId)
+    const companyId = await this.resolveCompanyId(userId, dto.companyId)
     const nextLeadQualification = this.normalizeLeadQualification(
       dto.leadQualification
     )
     const nextSocialLinks = this.normalizeLeadSocialLinks(dto.socialLinks)
     const phone = dto.phone.trim()
     const phoneVariants = buildBrazilianPhoneVariants(phone)
-    const phoneLockKey = `${userInformationsId}:${toCanonicalBrazilianPhone(phone)}`
+    const phoneLockKey = `${companyId}:${toCanonicalBrazilianPhone(phone)}`
     const createdLead = await this.leadRepo.manager.transaction(
       async (manager) => {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
@@ -318,7 +336,7 @@ export class LeadsService {
 
         const existingLead = await manager.getRepository(Lead).findOne({
           where: phoneVariants.map((phoneVariant) => ({
-            userInformationsId,
+            companyId,
             phone: phoneVariant
           }))
         })
@@ -330,7 +348,7 @@ export class LeadsService {
         }
 
         const lead = manager.create(Lead, {
-          userInformationsId,
+          companyId,
           name: dto.name,
           phone,
           email: dto.email,
@@ -352,7 +370,7 @@ export class LeadsService {
       userId,
       origin: 'app',
       organizationId: null,
-      userInformationsId: createdLead.userInformationsId,
+      companyId: createdLead.companyId,
       leadName: createdLead.name,
       description: createdLead.name,
       source: createdLead.source ?? null,
@@ -366,19 +384,19 @@ export class LeadsService {
     const lead = await this.leadRepo.findOne({ where: { id } })
     if (!lead) throw new NotFoundException('Lead not found')
 
-    if (!lead.userInformationsId) {
-      throw new ForbiddenException('Lead has no user informations')
+    if (!lead.companyId) {
+      throw new ForbiddenException('Lead has no company')
     }
 
     const ownershipMapping = await this.userInformationsRepo.findOne({
       where: {
-        id: lead.userInformationsId,
+        companyId: lead.companyId,
         userId
       }
     })
 
     if (!ownershipMapping) {
-      throw new ForbiddenException('Lead does not belong to user')
+      throw new ForbiddenException('User does not belong to lead company')
     }
 
     return lead
@@ -821,11 +839,11 @@ export class LeadsService {
     const phone = (dto.phone ?? '').trim()
     if (!phone) throw new BadRequestException('phone is required')
 
-    const userInformationsId = await this.findDefaultUserInformationsId(userId)
+    const companyId = await this.resolveCompanyId(userId, dto.companyId)
 
     const existing = await this.leadRepo.findOne({
       where: {
-        userInformationsId,
+        companyId,
         phone,
         state: LeadState.ACTIVE
       }
@@ -851,7 +869,7 @@ export class LeadsService {
     }
 
     const lead = this.leadRepo.create({
-      userInformationsId,
+      companyId,
       name: dto.name,
       phone,
       email: dto.email,
@@ -870,7 +888,7 @@ export class LeadsService {
       userId,
       origin: 'whatsapp',
       organizationId: null,
-      userInformationsId: createdLead.userInformationsId,
+      companyId: createdLead.companyId,
       leadName: createdLead.name,
       description: createdLead.name,
       source: createdLead.source ?? null,

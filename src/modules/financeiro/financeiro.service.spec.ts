@@ -45,7 +45,13 @@ describe('FinanceiroService', () => {
       createQueryBuilder: jest.fn().mockReturnValue(queryBuilder)
     } as unknown as Repository<Message>
     const userInformationsRepository = {
-      find: jest.fn().mockResolvedValue([{ id: 'information-1' }])
+      find: jest
+        .fn()
+        .mockResolvedValue([
+          { companyId: 'company-1' },
+          { companyId: 'company-1' },
+          { companyId: null }
+        ])
     } as unknown as Repository<UserInformations>
     const service = new FinanceiroService(
       messageRepository,
@@ -93,6 +99,10 @@ describe('FinanceiroService', () => {
       'lead',
       'lead.id::text = message."leadId"'
     )
+    expect(queryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
       'message."leadId" = :leadId',
       { leadId: 'lead-1' }
@@ -126,7 +136,7 @@ describe('FinanceiroService', () => {
       } as unknown as Repository<NegotiationCost>,
       emptyRepository<NegotiationPayment>(),
       {
-        find: jest.fn().mockResolvedValue([{ id: 'information-1' }])
+        find: jest.fn().mockResolvedValue([{ companyId: 'company-1' }])
       } as unknown as Repository<UserInformations>
     )
 
@@ -141,6 +151,14 @@ describe('FinanceiroService', () => {
       netResult: 62820,
       profitMargin: (62820 / 85250) * 100
     })
+    expect(revenueQueryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
+    expect(costsQueryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
     expect(revenueQueryBuilder.andWhere).toHaveBeenCalledWith(
       'negotiation."createdAt" >= :createdAtFrom',
       { createdAtFrom: new Date('2026-08-01T00:00:00') }
@@ -165,7 +183,7 @@ describe('FinanceiroService', () => {
       emptyRepository<NegotiationCost>(),
       emptyRepository<NegotiationPayment>(),
       {
-        find: jest.fn().mockResolvedValue([{ id: 'information-1' }])
+        find: jest.fn().mockResolvedValue([{ companyId: 'company-1' }])
       } as unknown as Repository<UserInformations>
     )
 
@@ -179,6 +197,10 @@ describe('FinanceiroService', () => {
       totalDiscounts: 9000,
       netRevenue: 85250
     })
+    expect(revenueQueryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
   })
 
   it('calculates payment totals and quantities for the selected period', async () => {
@@ -199,7 +221,7 @@ describe('FinanceiroService', () => {
         createQueryBuilder: jest.fn().mockReturnValue(paymentsQueryBuilder)
       } as unknown as Repository<NegotiationPayment>,
       {
-        find: jest.fn().mockResolvedValue([{ id: 'information-1' }])
+        find: jest.fn().mockResolvedValue([{ companyId: 'company-1' }])
       } as unknown as Repository<UserInformations>
     )
 
@@ -216,6 +238,10 @@ describe('FinanceiroService', () => {
       overdueAmount: 3200,
       overdueCount: 2
     })
+    expect(paymentsQueryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
     expect(paymentsQueryBuilder.andWhere).toHaveBeenCalledWith(
       'negotiation."createdAt" < :createdAtToExclusive',
       { createdAtToExclusive: new Date('2026-08-16T00:00:00') }
@@ -268,7 +294,7 @@ describe('FinanceiroService', () => {
         createQueryBuilder: jest.fn().mockReturnValue(paymentsQueryBuilder)
       } as unknown as Repository<NegotiationPayment>,
       {
-        find: jest.fn().mockResolvedValue([{ id: 'information-1' }])
+        find: jest.fn().mockResolvedValue([{ companyId: 'company-1' }])
       } as unknown as Repository<UserInformations>
     )
 
@@ -294,5 +320,9 @@ describe('FinanceiroService', () => {
         }
       ]
     })
+    expect(paymentsQueryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
   })
 })

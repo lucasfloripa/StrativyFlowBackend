@@ -27,7 +27,7 @@ describe('PaymentDueTomorrowCronService', () => {
             negotiation: {
               lead: {
                 name: 'Maria',
-                userInformationsId: 'user-information-id'
+                companyId: 'company-1'
               }
             }
           }
@@ -38,6 +38,7 @@ describe('PaymentDueTomorrowCronService', () => {
       find: jest.fn().mockResolvedValue([
         {
           id: 'user-information-id',
+          companyId: 'company-1',
           userId: 'user-id',
           notificationEmails: ['MARIA@example.com'],
           notificationWhatsAppNumbers: ['5511999999999'],

@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule'
 import { InjectDataSource } from '@nestjs/typeorm'
 import { DataSource } from 'typeorm'
 
+import { Company } from '../../modules/company/company.entity'
 import {
   FollowUpStep,
   FollowUpStepChannel,
@@ -13,7 +14,6 @@ import {
   FollowUpStatus
 } from '../../modules/followup/entities/followup.entity'
 import { RabbitPublisherService } from '../../modules/rabbit/services/rabbit-publisher.service'
-import { UserInformations } from '../../modules/user/entities/user-informations.entity'
 
 import { FOLLOWUP_REMINDER_1H_EVENT } from './notification-job.constants'
 
@@ -22,9 +22,8 @@ export type FollowUpReminderCandidate = {
   followUpTitle: string
   actionChannel: FollowUpStepChannel | null
   actionType: FollowUpStepType | null
-  userId: string
+  companyId: string
   leadName: string
-  userInformationsId: string
 }
 
 @Injectable()
@@ -50,11 +49,7 @@ export class FollowUpReminderScheduler {
         .createQueryBuilder(FollowUp, 'followUp')
         .innerJoin('followUp.negotiation', 'negotiation')
         .innerJoin('negotiation.lead', 'lead')
-        .innerJoin(
-          UserInformations,
-          'userInformations',
-          '"userInformations"."id"::text = "lead"."userInformationsId"'
-        )
+        .innerJoin(Company, 'company', '"company"."id" = "lead"."companyId"')
         .select('followUp.id', 'followUpId')
         .addSelect('followUp.title', 'followUpTitle')
         .addSelect(
@@ -78,8 +73,7 @@ export class FollowUpReminderScheduler {
           'actionType'
         )
         .addSelect('lead.name', 'leadName')
-        .addSelect('userInformations.userId', 'userId')
-        .addSelect('userInformations.id', 'userInformationsId')
+        .addSelect('lead."companyId"', 'companyId')
         .where('"followUp"."status" = :pendingStatus', {
           pendingStatus: FollowUpStatus.PENDING
         })

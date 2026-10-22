@@ -26,12 +26,13 @@ type AuthenticatedRequest = Request & {
 }
 
 const toPublicUserInformations = (userInformations: UserInformations) => {
-  const publicUserInformations: Partial<UserInformations> = {
-    ...userInformations
-  }
+  const { company, ...publicUserInformations } = userInformations
   delete publicUserInformations.instagramToken
 
-  return publicUserInformations
+  return {
+    ...publicUserInformations,
+    companyName: company?.name ?? null
+  }
 }
 
 @Controller('user')

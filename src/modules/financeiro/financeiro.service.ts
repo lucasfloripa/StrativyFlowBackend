@@ -58,9 +58,9 @@ export class FinanceiroService {
     userId: string,
     query: FinanceiroTopKpisQueryDto
   ): Promise<FinanceiroBusinessSummaryResponseDto> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
-    const revenue = await this.loadRevenue(userInformationsIds, query)
-    const totalCosts = await this.loadTotalCosts(userInformationsIds, query)
+    const companyIds = await this.findCompanyIds(userId)
+    const revenue = await this.loadRevenue(companyIds, query)
+    const totalCosts = await this.loadTotalCosts(companyIds, query)
     const netResult = revenue.netRevenue - totalCosts
 
     return {
@@ -76,17 +76,17 @@ export class FinanceiroService {
     userId: string,
     query: FinanceiroTopKpisQueryDto
   ): Promise<FinanceiroRevenueResponseDto> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
+    const companyIds = await this.findCompanyIds(userId)
 
-    return await this.loadRevenue(userInformationsIds, query)
+    return await this.loadRevenue(companyIds, query)
   }
 
   async getPayments(
     userId: string,
     query: FinanceiroTopKpisQueryDto
   ): Promise<FinanceiroPaymentsResponseDto> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
-    if (!userInformationsIds.length) {
+    const companyIds = await this.findCompanyIds(userId)
+    if (!companyIds.length) {
       return this.emptyPayments()
     }
 
@@ -119,8 +119,8 @@ export class FinanceiroService {
         `COUNT(CASE WHEN payment.status = :overdueStatus THEN 1 END)`,
         'overdueCount'
       )
-      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-        userInformationsIds
+      .where('lead."companyId" IN (:...companyIds)', {
+        companyIds
       })
       .setParameters({
         paidStatus: NegotiationPaymentStatus.PAID,
@@ -153,8 +153,8 @@ export class FinanceiroService {
     userId: string,
     query: FinanceiroPaymentsQueryDto
   ): Promise<FinanceiroPaymentListResponseDto> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
-    if (!userInformationsIds.length) {
+    const companyIds = await this.findCompanyIds(userId)
+    if (!companyIds.length) {
       return { items: [] }
     }
 
@@ -186,8 +186,8 @@ export class FinanceiroService {
       .addSelect('payment."dueDate"', 'dueDate')
       .addSelect('payment.amount', 'amount')
       .addSelect('payment.status', 'status')
-      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-        userInformationsIds
+      .where('lead."companyId" IN (:...companyIds)', {
+        companyIds
       })
       .orderBy('payment."dueDate"', 'ASC')
       .addOrderBy('payment."createdAt"', 'ASC')
@@ -224,10 +224,10 @@ export class FinanceiroService {
     userId: string,
     query: FinanceiroTopKpisQueryDto
   ): Promise<FinanceiroTemplateCostsResponseDto> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
+    const companyIds = await this.findCompanyIds(userId)
     const quantities = new Map<FinanceiroTemplateCostType, number>()
 
-    if (userInformationsIds.length) {
+    if (companyIds.length) {
       const queryBuilder = this.messageRepository
         .createQueryBuilder('message')
         .innerJoin('leads', 'lead', 'lead.id::text = message."leadId"')
@@ -236,8 +236,8 @@ export class FinanceiroService {
           'templateType'
         )
         .addSelect('COUNT(*)', 'quantity')
-        .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-          userInformationsIds
+        .where('lead."companyId" IN (:...companyIds)', {
+          companyIds
         })
         .andWhere('message.direction = :direction', {
           direction: MessageDirection.OUTBOUND
@@ -287,20 +287,26 @@ export class FinanceiroService {
     }
   }
 
-  private async findUserInformationsIds(userId: string): Promise<string[]> {
+  private async findCompanyIds(userId: string): Promise<string[]> {
     const userInformations = await this.userInformationsRepository.find({
       where: { userId },
-      select: ['id']
+      select: ['companyId']
     })
 
-    return userInformations.map((item) => item.id)
+    return [
+      ...new Set(
+        userInformations
+          .map((item) => item.companyId)
+          .filter((companyId): companyId is string => Boolean(companyId))
+      )
+    ]
   }
 
   private async loadRevenue(
-    userInformationsIds: string[],
+    companyIds: string[],
     query: FinanceiroTopKpisQueryDto
   ): Promise<FinanceiroRevenueResponseDto> {
-    if (!userInformationsIds.length) {
+    if (!companyIds.length) {
       return { grossRevenue: 0, totalDiscounts: 0, netRevenue: 0 }
     }
 
@@ -313,8 +319,8 @@ export class FinanceiroService {
         'COALESCE(SUM(financial."discountAmount"), 0)',
         'totalDiscounts'
       )
-      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-        userInformationsIds
+      .where('lead."companyId" IN (:...companyIds)', {
+        companyIds
       })
 
     this.applyCreatedAtFilter(queryBuilder, 'negotiation', query)
@@ -334,10 +340,10 @@ export class FinanceiroService {
   }
 
   private async loadTotalCosts(
-    userInformationsIds: string[],
+    companyIds: string[],
     query: FinanceiroTopKpisQueryDto
   ): Promise<number> {
-    if (!userInformationsIds.length) {
+    if (!companyIds.length) {
       return 0
     }
 
@@ -347,8 +353,8 @@ export class FinanceiroService {
       .innerJoin('financial.negotiation', 'negotiation')
       .innerJoin('negotiation.lead', 'lead')
       .select('COALESCE(SUM(cost.amount), 0)', 'totalCosts')
-      .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-        userInformationsIds
+      .where('lead."companyId" IN (:...companyIds)', {
+        companyIds
       })
 
     this.applyCreatedAtFilter(queryBuilder, 'negotiation', query)

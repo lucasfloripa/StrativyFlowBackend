@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ScheduleModule } from '@nestjs/schedule'
 
 import { DatabaseModule } from './database/database.module'
+import { CompanyModule } from './modules/company/company.module'
 import { ContactsModule } from './modules/contacts/contacts.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { FinanceiroModule } from './modules/financeiro/financeiro.module'
@@ -21,6 +22,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
     ScheduleModule.forRoot(),
     DatabaseModule,
     ContactsModule,
+    CompanyModule,
     DashboardModule,
     FinanceiroModule,
     FollowUpModule,

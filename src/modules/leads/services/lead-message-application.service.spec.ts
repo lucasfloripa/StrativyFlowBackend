@@ -10,7 +10,7 @@ import { LeadMessageApplicationService } from './lead-message-application.servic
 
 describe('LeadMessageApplicationService', () => {
   const createService = () => {
-    const lead = { id: 'lead-1' } as Lead
+    const lead = { id: 'lead-1', companyId: 'company-1' } as Lead
     const leadMessageContextService = {
       resolveInstagramOutboundContextOrFail: jest.fn().mockResolvedValue({
         lead,
@@ -243,7 +243,8 @@ describe('LeadMessageApplicationService', () => {
 
     expect(dependencies.contactsService.findMany).toHaveBeenCalledWith(
       'user-1',
-      ['contact-1', 'contact-2']
+      ['contact-1', 'contact-2'],
+      'company-1'
     )
     expect(
       dependencies.whatsAppMessagingService.sendWhatsAppContact
@@ -471,6 +472,10 @@ describe('LeadMessageApplicationService', () => {
         variables: { name: 'Lucas' }
       })
 
+      expect(dependencies.messageTemplateService.findOne).toHaveBeenCalledWith(
+        'template-1',
+        'user-1'
+      )
       expect(
         dependencies.leadMessageDispatchService.persistAndEmitOutboundMessage
       ).toHaveBeenCalledWith({

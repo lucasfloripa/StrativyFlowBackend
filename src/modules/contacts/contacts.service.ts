@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm'
 import { In, Not, QueryFailedError, Repository } from 'typeorm'
 
+import { CompanyAccessService } from '../auth/company-access.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { Contact } from './contact.entity'
@@ -19,7 +20,8 @@ export class ContactsService {
     @InjectRepository(Contact)
     private readonly contactRepository: Repository<Contact>,
     @InjectRepository(UserInformations)
-    private readonly userInformationsRepository: Repository<UserInformations>
+    private readonly userInformationsRepository: Repository<UserInformations>,
+    private readonly companyAccessService: CompanyAccessService
   ) {}
 
   async create(userId: string, dto: CreateContactDto): Promise<Contact> {
@@ -65,8 +67,15 @@ export class ContactsService {
     return await this.findOwnedContact(userId, id)
   }
 
-  async findMany(userId: string, ids: string[]): Promise<Contact[]> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
+  async findMany(
+    userId: string,
+    ids: string[],
+    companyId?: string
+  ): Promise<Contact[]> {
+    const userInformationsIds = await this.findUserInformationsIds(
+      userId,
+      companyId
+    )
 
     if (!userInformationsIds.length) {
       throw new NotFoundException('Contact not found')
@@ -127,17 +136,32 @@ export class ContactsService {
   }
 
   private async findUserInformations(
-    userId: string
+    userId: string,
+    companyId?: string
   ): Promise<UserInformations[]> {
+    const accessibleCompanyIds =
+      await this.companyAccessService.companyIdsForUser(userId)
+    const companyIds = companyId
+      ? accessibleCompanyIds.includes(companyId)
+        ? [companyId]
+        : []
+      : accessibleCompanyIds
+    if (!companyIds.length) {
+      return []
+    }
+
     return await this.userInformationsRepository.find({
-      where: { userId },
+      where: { companyId: In(companyIds) },
       select: ['id'],
       order: { createdAt: 'ASC' }
     })
   }
 
-  private async findUserInformationsIds(userId: string): Promise<string[]> {
-    const userInformations = await this.findUserInformations(userId)
+  private async findUserInformationsIds(
+    userId: string,
+    companyId?: string
+  ): Promise<string[]> {
+    const userInformations = await this.findUserInformations(userId, companyId)
     return userInformations.map((item) => item.id)
   }
 

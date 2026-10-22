@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 
+import { CompanyAccessGuard } from '../../auth/company-access.guard'
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { StorageUploadFile } from '../../storage/storage.service'
 import { NegotiationAttachmentDownloadUrlDto } from '../dto/negotiation-attachment-download-url.dto'
@@ -26,7 +27,7 @@ type AuthenticatedRequest = Request & {
 }
 
 @Controller('negotiations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CompanyAccessGuard)
 export class NegotiationAttachmentController {
   constructor(
     private readonly negotiationAttachmentService: NegotiationAttachmentService

@@ -124,7 +124,7 @@ export class NegotiationAttachmentService {
       .innerJoin(
         UserInformations,
         'userInformations',
-        'CAST("userInformations"."id" AS text) = "lead"."userInformationsId"'
+        '"userInformations"."companyId" = "lead"."companyId"'
       )
       .where('userInformations.userId = :userId', { userId })
       .orderBy('attachment.createdAt', 'DESC')

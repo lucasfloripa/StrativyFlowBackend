@@ -4,7 +4,7 @@ import {
   NotFoundException
 } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
 import {
   CreateFollowUpStepTreeDto,
@@ -170,9 +170,19 @@ export class FollowUpStepService {
     )
   }
 
-  async findAll(followUpId?: string): Promise<FollowUpStepResponseDto[]> {
+  async findAll(
+    followUpId?: string,
+    companyIds?: string[]
+  ): Promise<FollowUpStepResponseDto[]> {
     const steps = await this.followUpStepRepository.find({
-      where: followUpId ? { followUpId } : undefined,
+      where: {
+        ...(followUpId ? { followUpId } : {}),
+        ...(companyIds
+          ? {
+              followUp: { negotiation: { lead: { companyId: In(companyIds) } } }
+            }
+          : {})
+      },
       order: { createdAt: 'ASC' }
     })
 

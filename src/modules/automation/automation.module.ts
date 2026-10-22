@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { Company } from '../company/company.entity'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { LeadsModule } from '../leads/leads.module'
-import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { AutomationRuleController } from './automation-rule.controller'
 import { AutomationRuleService } from './automation-rule.service'
@@ -16,7 +16,7 @@ import { AutomationMessagingService } from './services/automation-messaging.serv
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([AutomationRule, Lead, Message, UserInformations]),
+    TypeOrmModule.forFeature([AutomationRule, Company, Lead, Message]),
     LeadsModule
   ],
   providers: [

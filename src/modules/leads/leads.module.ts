@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { Company } from '../company/company.entity'
 import { ContactsModule } from '../contacts/contacts.module'
 import { FollowUp } from '../followup/entities/followup.entity'
 import { FollowUpModule } from '../followup/followup.module'
@@ -30,6 +31,7 @@ import { WhatsAppOutboundService } from './services/whatsapp-outbound.service'
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Company,
       Lead,
       LeadChannelIdentity,
       Message,

@@ -7,7 +7,7 @@ import {
 import axios from 'axios'
 import { Repository } from 'typeorm'
 
-import { UserInformations } from '../user/entities/user-informations.entity'
+import { Company } from '../company/company.entity'
 
 import { InstagramMessagingService } from './instagram-messaging.service'
 
@@ -15,26 +15,25 @@ jest.mock('axios')
 
 describe('InstagramMessagingService', () => {
   const mockedAxios = axios as jest.Mocked<typeof axios>
-  let userInformationsRepo: jest.Mocked<
-    Pick<Repository<UserInformations>, 'findOne'>
-  >
+  let companyRepo: jest.Mocked<Pick<Repository<Company>, 'findOne'>>
   let service: InstagramMessagingService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    userInformationsRepo = {
+    companyRepo = {
       findOne: jest.fn()
     }
     service = new InstagramMessagingService(
-      userInformationsRepo as unknown as Repository<UserInformations>
+      companyRepo as unknown as Repository<Company>
     )
   })
 
   it('gets a typed Instagram profile using the configured account token', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.get.mockResolvedValue({
       data: {
         id: '2135646367302892',
@@ -56,7 +55,7 @@ describe('InstagramMessagingService', () => {
       profile_pic: 'https://instagram.example/profile.jpg'
     })
 
-    expect(userInformationsRepo.findOne).toHaveBeenCalledWith({
+    expect(companyRepo.findOne).toHaveBeenCalledWith({
       where: { instagramAccountId: '17841436895629883' }
     })
     expect(mockedAxios.get).toHaveBeenCalledWith(
@@ -75,18 +74,18 @@ describe('InstagramMessagingService', () => {
     await expect(
       service.getInstagramUserProfile(' ', '2135646367302892')
     ).rejects.toBeInstanceOf(BadRequestException)
-    expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
+    expect(companyRepo.findOne).not.toHaveBeenCalled()
   })
 
   it('rejects an empty Instagram User ID', async () => {
     await expect(
       service.getInstagramUserProfile('17841436895629883', ' ')
     ).rejects.toBeInstanceOf(BadRequestException)
-    expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
+    expect(companyRepo.findOne).not.toHaveBeenCalled()
   })
 
   it('rejects an unknown Instagram Account ID', async () => {
-    userInformationsRepo.findOne.mockResolvedValue(null)
+    companyRepo.findOne.mockResolvedValue(null)
 
     await expect(
       service.getInstagramUserProfile('17841436895629883', '2135646367302892')
@@ -94,10 +93,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('rejects an account without an Instagram token', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: null
-    } as UserInformations)
+    } as Company)
 
     await expect(
       service.getInstagramUserProfile('17841436895629883', '2135646367302892')
@@ -106,10 +106,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('translates invalid or expired tokens without exposing the token', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'secret-instagram-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.get.mockRejectedValue({
       response: {
         status: 400,
@@ -127,10 +128,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('translates an invalid Instagram User ID', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.get.mockRejectedValue({
       response: {
         status: 400,
@@ -147,10 +149,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('rejects an invalid Meta response', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.get.mockResolvedValue({ data: { username: 123 } })
 
     await expect(
@@ -159,10 +162,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('sends a text message using the token configured for the Instagram account', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.post.mockResolvedValue({
       data: {
         recipient_id: '2135646367302892',
@@ -181,7 +185,7 @@ describe('InstagramMessagingService', () => {
       message_id: 'instagram-message-1'
     })
 
-    expect(userInformationsRepo.findOne).toHaveBeenCalledWith({
+    expect(companyRepo.findOne).toHaveBeenCalledWith({
       where: { instagramAccountId: '17841436895629883' }
     })
     expect(mockedAxios.post).toHaveBeenCalledWith(
@@ -205,7 +209,7 @@ describe('InstagramMessagingService', () => {
     await expect(
       service.sendMessage('17841436895629883', '2135646367302892', ' ')
     ).rejects.toBeInstanceOf(BadRequestException)
-    expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
+    expect(companyRepo.findOne).not.toHaveBeenCalled()
     expect(mockedAxios.post).not.toHaveBeenCalled()
   })
 
@@ -213,14 +217,15 @@ describe('InstagramMessagingService', () => {
     await expect(
       service.sendMessage('17841436895629883', ' ', 'Olá')
     ).rejects.toBeInstanceOf(BadRequestException)
-    expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
+    expect(companyRepo.findOne).not.toHaveBeenCalled()
   })
 
   it('does not send when the Instagram token is not configured', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: null
-    } as UserInformations)
+    } as Company)
 
     await expect(
       service.sendMessage('17841436895629883', '2135646367302892', 'Olá')
@@ -229,10 +234,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('translates send failures caused by an invalid token', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'secret-instagram-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.post.mockRejectedValue({
       response: {
         status: 401,
@@ -251,10 +257,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('rejects an invalid send message response from Meta', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.post.mockResolvedValue({ data: { recipient_id: null } })
 
     await expect(
@@ -263,10 +270,11 @@ describe('InstagramMessagingService', () => {
   })
 
   it('sends a reusable attachment through the Instagram Graph API', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.post.mockResolvedValue({
       data: {
         recipient_id: '2135646367302892',
@@ -317,15 +325,16 @@ describe('InstagramMessagingService', () => {
         ' '
       )
     ).rejects.toBeInstanceOf(BadRequestException)
-    expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
+    expect(companyRepo.findOne).not.toHaveBeenCalled()
     expect(mockedAxios.post).not.toHaveBeenCalled()
   })
 
   it('reports invalid attachment media without blaming the recipient', async () => {
-    userInformationsRepo.findOne.mockResolvedValue({
+    companyRepo.findOne.mockResolvedValue({
+      id: 'company-1',
       instagramAccountId: '17841436895629883',
       instagramToken: 'instagram-user-access-token'
-    } as UserInformations)
+    } as Company)
     mockedAxios.post.mockRejectedValue({
       response: {
         status: 400,

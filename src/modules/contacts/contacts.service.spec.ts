@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common'
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
+import { CompanyAccessService } from '../auth/company-access.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { Contact } from './contact.entity'
@@ -40,15 +41,22 @@ describe('ContactsService', () => {
           Object.assign(new UserInformations(), { id: 'user-info-1' })
         ])
     }
+    const companyAccessService = {
+      companyIdsForUser: jest.fn((userId: string) =>
+        Promise.resolve(userId === 'user-2' ? ['company-2'] : ['company-1'])
+      )
+    }
     const service = new ContactsService(
       contactRepository as unknown as Repository<Contact>,
-      userInformationsRepository as unknown as Repository<UserInformations>
+      userInformationsRepository as unknown as Repository<UserInformations>,
+      companyAccessService as unknown as CompanyAccessService
     )
 
     return {
       service,
       contactRepository,
-      userInformationsRepository
+      userInformationsRepository,
+      companyAccessService
     }
   }
 
@@ -73,7 +81,7 @@ describe('ContactsService', () => {
     expect(created.id).toBe('contact-created')
   })
 
-  it('lists only Contacts from the authenticated user mappings in newest-first order', async () => {
+  it('lists contacts from every mapping in the authenticated company', async () => {
     const dependencies = createService()
     dependencies.userInformationsRepository.find.mockResolvedValue([
       Object.assign(new UserInformations(), { id: 'user-info-1' }),
@@ -84,6 +92,14 @@ describe('ContactsService', () => {
     await expect(dependencies.service.findAll('user-1')).resolves.toEqual([
       contact
     ])
+    expect(
+      dependencies.companyAccessService.companyIdsForUser
+    ).toHaveBeenCalledWith('user-1')
+    expect(dependencies.userInformationsRepository.find).toHaveBeenCalledWith({
+      where: { companyId: In(['company-1']) },
+      select: ['id'],
+      order: { createdAt: 'ASC' }
+    })
     expect(dependencies.contactRepository.find).toHaveBeenCalledTimes(1)
   })
 
@@ -95,6 +111,27 @@ describe('ContactsService', () => {
       dependencies.service.findOne('user-1', contact.id)
     ).resolves.toBe(contact)
     expect(dependencies.contactRepository.findOne).toHaveBeenCalledTimes(1)
+  })
+
+  it('limits selected contacts to the Company of the active lead', async () => {
+    const dependencies = createService()
+    dependencies.companyAccessService.companyIdsForUser.mockResolvedValue([
+      'company-1',
+      'company-2'
+    ])
+    dependencies.userInformationsRepository.find.mockResolvedValue([
+      Object.assign(new UserInformations(), { id: 'company-2-info' })
+    ])
+    dependencies.contactRepository.find.mockResolvedValue([contact])
+
+    await expect(
+      dependencies.service.findMany('user-1', [contact.id], 'company-2')
+    ).resolves.toEqual([contact])
+    expect(dependencies.userInformationsRepository.find).toHaveBeenCalledWith({
+      where: { companyId: In(['company-2']) },
+      select: ['id'],
+      order: { createdAt: 'ASC' }
+    })
   })
 
   it('updates Contact name, phone, company, and instagram', async () => {

@@ -23,7 +23,7 @@ describe('ReminderCronService', () => {
           negotiation: {
             lead: {
               name: 'Maria',
-              userInformationsId: 'user-information-id'
+              companyId: 'company-1'
             }
           }
         }
@@ -33,6 +33,7 @@ describe('ReminderCronService', () => {
       find: jest.fn().mockResolvedValue([
         {
           id: 'user-information-id',
+          companyId: 'company-1',
           userId: 'user-id',
           notificationEmails: [],
           notificationWhatsAppNumbers: [],

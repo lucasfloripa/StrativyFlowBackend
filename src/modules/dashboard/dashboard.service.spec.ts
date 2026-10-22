@@ -1,4 +1,4 @@
-import { Repository } from 'typeorm'
+import { In, Repository } from 'typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
 import { Lead, LeadRuntimeMode, LeadState } from '../leads/entities/lead.entity'
@@ -26,7 +26,9 @@ describe('DashboardService conversations', () => {
       query: jest.fn()
     }
     userInformationsRepo = {
-      find: jest.fn().mockResolvedValue([{ id: 'mapping-1' }])
+      find: jest
+        .fn()
+        .mockResolvedValue([{ id: 'mapping-1', companyId: 'company-1' }])
     }
 
     service = new DashboardService(
@@ -240,5 +242,187 @@ describe('DashboardService conversations', () => {
     const result = await service.getConversations('user-1', filter)
 
     expect(result.items.map((item) => item.leadId)).toEqual(expectedLeadIds)
+  })
+
+  it('filters conversation SQL by Company instead of legacy user information ownership', async () => {
+    await service.getConversations('user-1', DashboardConversationFilter.ALL)
+
+    expect(userInformationsRepo.find).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      select: ['companyId']
+    })
+    expect(leadRepo.query).toHaveBeenCalledWith(
+      expect.stringContaining('WHERE lead."companyId"::text = ANY($1::text[])'),
+      [
+        ['company-1'],
+        MessageDirection.INBOUND,
+        MessageDirection.OUTBOUND,
+        LeadRuntimeMode.AUTOMATION,
+        MessageDirection.AUTOMATIC
+      ]
+    )
+    const sql: unknown = leadRepo.query.mock.calls[0][0]
+    expect(sql).not.toContain('lead."userInformationsId"')
+  })
+
+  it('shares conversations between users linked to the same Company', async () => {
+    const firstUser = await service.getConversations(
+      'user-1',
+      DashboardConversationFilter.ALL
+    )
+    userInformationsRepo.find.mockResolvedValue([
+      Object.assign(new UserInformations(), {
+        id: 'mapping-2',
+        companyId: 'company-1'
+      })
+    ])
+    const secondUser = await service.getConversations(
+      'user-2',
+      DashboardConversationFilter.ALL
+    )
+
+    expect(secondUser.items).toEqual(firstUser.items)
+    expect(secondUser.counts).toEqual(firstUser.counts)
+    expect(userInformationsRepo.find).toHaveBeenLastCalledWith({
+      where: { userId: 'user-2' },
+      select: ['companyId']
+    })
+    expect(leadRepo.query.mock.calls[1][1]).toEqual(
+      leadRepo.query.mock.calls[0][1]
+    )
+  })
+
+  it('uses only linked Companies and ignores null and duplicate mappings', async () => {
+    userInformationsRepo.find.mockResolvedValue([
+      Object.assign(new UserInformations(), { companyId: null }),
+      Object.assign(new UserInformations(), { companyId: 'company-1' }),
+      Object.assign(new UserInformations(), { companyId: 'company-1' }),
+      Object.assign(new UserInformations(), { companyId: 'company-2' })
+    ])
+
+    await service.getConversations('user-1', DashboardConversationFilter.ALL)
+
+    expect(leadRepo.query).toHaveBeenCalledWith(expect.any(String), [
+      ['company-1', 'company-2'],
+      MessageDirection.INBOUND,
+      MessageDirection.OUTBOUND,
+      LeadRuntimeMode.AUTOMATION,
+      MessageDirection.AUTOMATIC
+    ])
+  })
+
+  it('returns no conversations without querying leads when no Company is linked', async () => {
+    userInformationsRepo.find.mockResolvedValue([
+      Object.assign(new UserInformations(), {
+        id: 'legacy-mapping',
+        companyId: null
+      })
+    ])
+
+    await expect(
+      service.getConversations('user-1', DashboardConversationFilter.TODAY)
+    ).resolves.toEqual({
+      filter: DashboardConversationFilter.TODAY,
+      items: [],
+      counts: { all: 0, new: 0, today: 0, noResponse24h: 0 }
+    })
+    expect(leadRepo.query).not.toHaveBeenCalled()
+  })
+})
+
+describe('DashboardService Company summary', () => {
+  const createService = () => {
+    const leadQueryBuilder = {
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(2)
+    }
+    const followUpQueryBuilder = {
+      innerJoin: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      setParameters: jest.fn().mockReturnThis(),
+      getRawOne: jest
+        .fn()
+        .mockResolvedValue({ overdue: '1', today: '2', scheduled: '3' })
+    }
+    const leadRepository = {
+      count: jest.fn().mockResolvedValue(5),
+      createQueryBuilder: jest.fn().mockReturnValue(leadQueryBuilder)
+    }
+    const followUpRepository = {
+      createQueryBuilder: jest.fn().mockReturnValue(followUpQueryBuilder)
+    }
+    const userInformationsRepository = {
+      find: jest.fn().mockResolvedValue([
+        { id: 'mapping-1', companyId: 'company-1' },
+        { id: 'mapping-2', companyId: 'company-1' },
+        { id: 'mapping-3', companyId: null }
+      ])
+    }
+    const service = new DashboardService(
+      leadRepository as unknown as Repository<Lead>,
+      followUpRepository as unknown as Repository<FollowUp>,
+      userInformationsRepository as unknown as Repository<UserInformations>
+    )
+
+    return {
+      service,
+      leadRepository,
+      followUpRepository,
+      userInformationsRepository,
+      leadQueryBuilder,
+      followUpQueryBuilder
+    }
+  }
+
+  it('scopes every Home counter to the user Companies without duplicating memberships', async () => {
+    const dependencies = createService()
+
+    await expect(dependencies.service.getSummary('user-1')).resolves.toEqual({
+      activeLeads: 5,
+      newToday: 2,
+      withoutConversation24h: 2,
+      followUps: { overdue: 1, today: 2, scheduled: 3 }
+    })
+    expect(dependencies.leadRepository.count).toHaveBeenCalledWith({
+      where: { companyId: In(['company-1']), state: LeadState.ACTIVE }
+    })
+    expect(dependencies.leadQueryBuilder.where).toHaveBeenCalledTimes(2)
+    expect(dependencies.leadQueryBuilder.where).toHaveBeenNthCalledWith(
+      1,
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
+    expect(dependencies.leadQueryBuilder.where).toHaveBeenNthCalledWith(
+      2,
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
+    expect(dependencies.followUpQueryBuilder.where).toHaveBeenCalledWith(
+      'lead."companyId" IN (:...companyIds)',
+      { companyIds: ['company-1'] }
+    )
+  })
+
+  it('returns zero counters without Company membership and does not query tenant data', async () => {
+    const dependencies = createService()
+    dependencies.userInformationsRepository.find.mockResolvedValue([])
+
+    await expect(dependencies.service.getSummary('user-1')).resolves.toEqual({
+      activeLeads: 0,
+      newToday: 0,
+      withoutConversation24h: 0,
+      followUps: { overdue: 0, today: 0, scheduled: 0 }
+    })
+    expect(dependencies.leadRepository.count).not.toHaveBeenCalled()
+    expect(
+      dependencies.leadRepository.createQueryBuilder
+    ).not.toHaveBeenCalled()
+    expect(
+      dependencies.followUpRepository.createQueryBuilder
+    ).not.toHaveBeenCalled()
   })
 })

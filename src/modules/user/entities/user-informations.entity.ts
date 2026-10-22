@@ -3,9 +3,13 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn
 } from 'typeorm'
+
+import { Company } from '../../company/company.entity'
 
 import type { NotificationPreferences } from '../../notification/types'
 
@@ -17,6 +21,16 @@ export class UserInformations {
 
   @Column()
   userId!: string
+
+  @Column({ type: 'uuid', nullable: true })
+  companyId?: string | null
+
+  @ManyToOne(() => Company, (company) => company.userInformations, {
+    nullable: true,
+    onDelete: 'SET NULL'
+  })
+  @JoinColumn({ name: 'companyId' })
+  company?: Company | null
 
   @Column({ type: 'varchar', nullable: true })
   name?: string | null

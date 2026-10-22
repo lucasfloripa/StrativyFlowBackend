@@ -13,9 +13,8 @@ describe('FollowUpReminderScheduler', () => {
       followUpTitle: 'Retornar proposta',
       actionChannel: FollowUpStepChannel.WHATSAPP,
       actionType: null,
-      userId: 'user-1',
-      leadName: 'Cliente',
-      userInformationsId: 'user-information-1'
+      companyId: 'company-1',
+      leadName: 'Cliente'
     }
     const queryBuilder = {
       innerJoin: jest.fn().mockReturnThis(),
@@ -61,6 +60,10 @@ describe('FollowUpReminderScheduler', () => {
     )
     expect(queryBuilder.setLock).toHaveBeenCalledWith('pessimistic_write')
     expect(queryBuilder.setOnLocked).toHaveBeenCalledWith('skip_locked')
+    expect(queryBuilder.addSelect).toHaveBeenCalledWith(
+      'lead."companyId"',
+      'companyId'
+    )
     jest.useRealTimers()
   })
 })

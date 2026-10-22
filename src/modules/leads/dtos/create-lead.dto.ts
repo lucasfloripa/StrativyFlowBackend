@@ -6,7 +6,9 @@ import {
   IsObject,
   IsOptional,
   Matches,
-  IsString
+  IsString,
+  IsUUID,
+  ValidateIf
 } from 'class-validator'
 
 import {
@@ -17,6 +19,10 @@ import {
 } from '../entities/lead.entity'
 
 export class CreateLeadDto {
+  @ValidateIf((dto: CreateLeadDto) => dto.companyId !== undefined)
+  @IsUUID()
+  companyId?: string
+
   @IsOptional()
   @IsString()
   name?: string

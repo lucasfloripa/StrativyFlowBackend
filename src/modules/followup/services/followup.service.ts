@@ -80,8 +80,11 @@ export class FollowUpService {
     return mapFollowUpToResponseDto(reloadedFollowUp)
   }
 
-  async findAll(): Promise<FollowUpResponseDto[]> {
+  async findAll(companyIds?: string[]): Promise<FollowUpResponseDto[]> {
     const followUps = await this.followUpRepository.find({
+      ...(companyIds
+        ? { where: { negotiation: { lead: { companyId: In(companyIds) } } } }
+        : {}),
       relations: {
         steps: true
       },

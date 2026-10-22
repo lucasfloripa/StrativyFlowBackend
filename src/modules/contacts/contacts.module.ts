@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { CompanyAccessModule } from '../auth/company-access.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { Contact } from './contact.entity'
@@ -8,7 +9,10 @@ import { ContactsController } from './contacts.controller'
 import { ContactsService } from './contacts.service'
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Contact, UserInformations])],
+  imports: [
+    CompanyAccessModule,
+    TypeOrmModule.forFeature([Contact, UserInformations])
+  ],
   controllers: [ContactsController],
   providers: [ContactsService],
   exports: [ContactsService]

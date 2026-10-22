@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable } from '@nestjs/common'
 import axios from 'axios'
 
 import { StorageUploadFile } from '../../storage/storage.service'
@@ -200,6 +200,11 @@ export class WhatsAppOutboundService {
   }): Promise<{ data: TResponse }> {
     const includeJsonContentType = params.includeJsonContentType ?? true
     const token = params.whatsappToken?.trim()
+
+    if (!token) {
+      throw new BadRequestException('WhatsApp token is not configured')
+    }
+
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`
     }

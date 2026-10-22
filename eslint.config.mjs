@@ -34,7 +34,7 @@ export default tseslint.config(
         ...globals.jest,
       },
       parserOptions: {
-        project: ['./tsconfig.json', './tsconfig-test.json'],
+        project: ['./tsconfig.json'],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -42,7 +42,7 @@ export default tseslint.config(
     settings: {
       'import/resolver': {
         typescript: {
-          project: ['./tsconfig.json', './tsconfig-test.json'],
+          project: ['./tsconfig.json'],
         },
       },
     },

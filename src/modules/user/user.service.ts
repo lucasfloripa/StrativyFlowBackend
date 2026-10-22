@@ -165,6 +165,7 @@ export class UserService {
 
     return this.userInformationsRepo.find({
       where: { userId: normalizedUserId },
+      relations: { company: true },
       order: { createdAt: 'ASC' }
     })
   }

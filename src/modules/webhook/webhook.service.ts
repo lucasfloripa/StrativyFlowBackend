@@ -10,6 +10,7 @@ import {
   AutomationTriggerContext,
   AutomationTriggerType
 } from '../automation/flow/automation-trigger.types'
+import { Company } from '../company/company.entity'
 import { LeadChannel } from '../leads/entities/lead-channel-identity.entity'
 import {
   Lead,
@@ -273,7 +274,9 @@ export class WebhookService {
     private readonly messengerMessagingService: MessengerMessagingService,
     private readonly instagramMessagingService: InstagramMessagingService,
     private readonly realtimeService: RealtimeService,
-    private readonly followUpReplyLinkerService: FollowUpReplyLinkerService
+    private readonly followUpReplyLinkerService: FollowUpReplyLinkerService,
+    @InjectRepository(Company)
+    private readonly companyRepo: Repository<Company>
   ) {}
 
   private readonly logger = new Logger(WebhookService.name)
@@ -395,37 +398,50 @@ export class WebhookService {
         return { status: 'ignored_missing_text' }
       }
 
-      if (!displayPhoneNumber) {
+      const eventPhoneNumberId = phoneNumberId?.trim()
+      const businessPhoneNumber = displayPhoneNumber?.trim()
+
+      if (!businessPhoneNumber && !eventPhoneNumberId) {
         this.logger.warn(
           `Stopping webhook processing: inbound message ${inboundMessageId} is missing display_phone_number`
         )
         return { status: 'ignored_missing_business_phone' }
       }
 
-      const userInformations = await this.userInformationsRepo.findOne({
-        where: {
-          phoneNumber: displayPhoneNumber
-        }
-      })
+      let company = eventPhoneNumberId
+        ? await this.companyRepo.findOne({
+            where: { companyPhoneNumberId: eventPhoneNumberId }
+          })
+        : null
 
-      if (!userInformations) {
-        this.logger.warn(
-          `Stopping webhook processing: no UserInformations found for business phone ${displayPhoneNumber}`
-        )
-        return { status: 'ignored_missing_user_informations' }
+      if (!company && businessPhoneNumber) {
+        company = await this.companyRepo.findOne({
+          where: { companyPhoneNumber: businessPhoneNumber }
+        })
       }
 
-      const eventPhoneNumberId = phoneNumberId?.trim()
+      if (!company) {
+        this.logger.warn(
+          'Stopping WhatsApp webhook processing: no Company matches the receiving account'
+        )
+        return { status: 'ignored_missing_company' }
+      }
+
       if (
         eventPhoneNumberId &&
-        userInformations.phoneNumberId !== eventPhoneNumberId
+        company.companyPhoneNumberId?.trim() &&
+        company.companyPhoneNumberId.trim() !== eventPhoneNumberId
       ) {
-        userInformations.phoneNumberId = eventPhoneNumberId
-        await this.userInformationsRepo.save(userInformations)
+        return { status: 'ignored_company_account_mismatch' }
+      }
+
+      if (eventPhoneNumberId && !company.companyPhoneNumberId?.trim()) {
+        company.companyPhoneNumberId = eventPhoneNumberId
+        await this.companyRepo.save(company)
       }
 
       const externalAccountId =
-        eventPhoneNumberId || userInformations.phoneNumberId?.trim()
+        eventPhoneNumberId || company.companyPhoneNumberId?.trim()
       if (!externalAccountId) {
         this.logger.warn(
           `Stopping webhook processing: inbound message ${inboundMessageId} is missing phone_number_id`
@@ -453,7 +469,7 @@ export class WebhookService {
         })
       const legacyLead = existingIdentity
         ? null
-        : await this.findLeadByPhone(userInformations.id, from)
+        : await this.findLeadByPhone(company.id, from)
       const isButtonMessage = message?.type === 'button'
 
       if (isButtonMessage && !existingIdentity && !legacyLead) {
@@ -474,7 +490,7 @@ export class WebhookService {
             this.parseWhatsAppTimestamp(message?.timestamp) ?? new Date(),
           legacyLeadId: legacyLead?.id,
           leadDraft: {
-            userInformationsId: userInformations.id,
+            companyId: company.id,
             name: shouldUseProfileName ? profileName!.trim() : undefined,
             flowState: shouldUseProfileName
               ? LeadFlowState.ASKING_LOCATION
@@ -491,7 +507,7 @@ export class WebhookService {
         })
       let lead = identityResolution.lead
 
-      if (lead.userInformationsId !== userInformations.id) {
+      if (lead.companyId !== company.id) {
         this.logger.error(
           `Stopping webhook processing: channel identity ${identityResolution.identity.id} belongs to a different Flow account`
         )
@@ -523,10 +539,9 @@ export class WebhookService {
 
         await this.rabbitPublisherService.publish('lead.created', {
           leadId: lead.id,
-          userId: userInformations.userId,
+          companyId: company.id,
           origin: 'webhook',
           organizationId: null,
-          userInformationsId: lead.userInformationsId,
           leadName: lead.name,
           description: lead.name,
           source: lead.source ?? null,
@@ -536,17 +551,17 @@ export class WebhookService {
         if (!isTextMessage) {
           return this.processInboundMediaMessage({
             lead,
-            userId: userInformations.userId,
+            companyId: company.id,
             message,
             inboundMessageId,
-            whatsappToken: userInformations.whatsappToken ?? undefined
+            whatsappToken: company.whatsappToken ?? undefined
           })
         }
 
         const persistedMessageResult = await this.persistMessage({
           leadId: lead.id,
           leadName: lead.name,
-          userId: userInformations.userId,
+          companyId: company.id,
           message
         })
 
@@ -585,7 +600,7 @@ export class WebhookService {
           from,
           reply,
           externalAccountId,
-          userInformations.whatsappToken ?? undefined
+          company.whatsappToken ?? undefined
         )
         const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
 
@@ -613,7 +628,7 @@ export class WebhookService {
         const persistedMessageResult = await this.persistMessage({
           leadId: lead.id,
           leadName: lead.name,
-          userId: userInformations.userId,
+          companyId: company.id,
           message
         })
 
@@ -642,10 +657,10 @@ export class WebhookService {
       if (!isTextMessage) {
         return this.processInboundMediaMessage({
           lead,
-          userId: userInformations.userId,
+          companyId: company.id,
           message,
           inboundMessageId,
-          whatsappToken: userInformations.whatsappToken ?? undefined
+          whatsappToken: company.whatsappToken ?? undefined
         })
       }
 
@@ -673,7 +688,7 @@ export class WebhookService {
       const persistedMessageResult = await this.persistMessage({
         leadId: lead.id,
         leadName: lead.name,
-        userId: userInformations.userId,
+        companyId: company.id,
         message
       })
 
@@ -755,7 +770,7 @@ export class WebhookService {
             to,
             content,
             context.phoneNumberId,
-            userInformations.whatsappToken ?? undefined
+            company.whatsappToken ?? undefined
           )
           const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
 
@@ -791,10 +806,9 @@ export class WebhookService {
       ) {
         await this.rabbitPublisherService.publish('lead.created', {
           leadId: lead.id,
-          userId: userInformations.userId,
+          companyId: company.id,
           origin: 'webhook',
           organizationId: null,
-          userInformationsId: lead.userInformationsId,
           leadName: lead.name,
           description: lead.name,
           source: lead.source ?? null,
@@ -901,10 +915,10 @@ export class WebhookService {
   private async persistMessage(params: {
     leadId: string
     leadName?: string
-    userId: string
+    companyId: string
     message: WhatsAppInboundMessage
   }): Promise<{ message: Message; wasCreated: boolean }> {
-    const { leadId, leadName, userId, message } = params
+    const { leadId, leadName, companyId, message } = params
 
     const resolvedMessageType = this.resolveMessageType(message?.type)
     let content: string | null = this.resolveInboundMessageContent(message)
@@ -993,7 +1007,7 @@ export class WebhookService {
         messageId: savedMessage.id,
         leadId,
         leadName: leadName ?? null,
-        userId,
+        companyId,
         organizationId: null,
         createdAt: savedMessage.createdAt
       })
@@ -1057,17 +1071,17 @@ export class WebhookService {
 
   private async processInboundMediaMessage(params: {
     lead: Lead
-    userId: string
+    companyId: string
     message: WhatsAppInboundMessage
     inboundMessageId: string
     whatsappToken?: string
   }): Promise<{ status: string; leadId: string }> {
-    const { lead, userId, message, inboundMessageId, whatsappToken } = params
+    const { lead, companyId, message, inboundMessageId, whatsappToken } = params
 
     const persistedMessageResult = await this.persistMessage({
       leadId: lead.id,
       leadName: lead.name,
-      userId,
+      companyId,
       message
     })
 
@@ -1297,14 +1311,14 @@ export class WebhookService {
   }
 
   private async findLeadByPhone(
-    userInformationsId: string,
+    companyId: string,
     phone: string
   ): Promise<Lead | null> {
     const variants = buildBrazilianPhoneVariants(phone)
 
     return this.leadRepo.findOne({
       where: variants.map((variant) => ({
-        userInformationsId,
+        companyId,
         phone: variant,
         state: LeadState.ACTIVE
       }))
@@ -1583,15 +1597,21 @@ export class WebhookService {
           continue
         }
 
-        const userInformations = await this.userInformationsRepo.findOne({
+        const company = await this.companyRepo.findOne({
           where: { messengerPageId: pageId }
         })
 
-        if (!userInformations) {
+        if (!company) {
           this.logger.warn(
-            'Ignoring Messenger event: no Flow account is connected to the receiving Page'
+            'Ignoring Messenger event: no Company is connected to the receiving Page'
           )
           continue
+        }
+
+        if (!company.messengerToken?.trim()) {
+          throw new BadRequestException(
+            'Messenger token is not configured for this company'
+          )
         }
 
         const existingIdentity =
@@ -1604,12 +1624,12 @@ export class WebhookService {
         let profileName: string | null = null
         let profilePictureUrl: string | null = null
 
-        if (!existingIdentity && userInformations.messengerToken?.trim()) {
+        if (!existingIdentity && company.messengerToken?.trim()) {
           try {
             const { data: profile } =
               await this.messengerMessagingService.getMessengerUserInfo(
                 psid,
-                userInformations.messengerToken
+                company.messengerToken
               )
 
             profileName = [profile.first_name, profile.last_name]
@@ -1638,7 +1658,7 @@ export class WebhookService {
             profilePictureUrl,
             lastInteractionAt: interactionAt,
             leadDraft: {
-              userInformationsId: userInformations.id,
+              companyId: company.id,
               name: shouldUseProfileName ? profileName!.trim() : undefined,
               source: LeadChannel.MESSENGER,
               flowState: shouldUseProfileName
@@ -1652,9 +1672,9 @@ export class WebhookService {
           })
         let lead = identityResolution.lead
 
-        if (lead.userInformationsId !== userInformations.id) {
+        if (lead.companyId !== company.id) {
           this.logger.error(
-            `Ignoring Messenger identity ${identityResolution.identity.id}: it belongs to another Flow account`
+            `Ignoring Messenger identity ${identityResolution.identity.id}: it belongs to another Company`
           )
           continue
         }
@@ -1673,7 +1693,7 @@ export class WebhookService {
           channel: MessageChannel.MESSENGER,
           leadId: lead.id,
           leadName: lead.name,
-          userId: userInformations.userId,
+          companyId: company.id,
           externalAccountId: pageId,
           externalUserId: psid,
           externalMessageId: inboundMessageId,
@@ -1715,10 +1735,9 @@ export class WebhookService {
         if (identityResolution.leadCreated) {
           await this.rabbitPublisherService.publish('lead.created', {
             leadId: lead.id,
-            userId: userInformations.userId,
+            companyId: company.id,
             origin: 'webhook',
             organizationId: null,
-            userInformationsId: lead.userInformationsId,
             leadName: lead.name,
             description: lead.name,
             source: lead.source ?? null,
@@ -1733,7 +1752,7 @@ export class WebhookService {
               psid,
               reply,
               pageId,
-              userInformations.messengerToken ?? undefined
+              company.messengerToken ?? undefined
             )
           const externalMessageId = response.data.message_id ?? null
 
@@ -1801,7 +1820,7 @@ export class WebhookService {
                 to,
                 content,
                 pageId,
-                userInformations.messengerToken ?? undefined
+                company.messengerToken ?? undefined
               )
             const externalMessageId = response.data.message_id ?? null
 
@@ -1829,10 +1848,9 @@ export class WebhookService {
         ) {
           await this.rabbitPublisherService.publish('lead.created', {
             leadId: lead.id,
-            userId: userInformations.userId,
+            companyId: company.id,
             origin: 'webhook',
             organizationId: null,
-            userInformationsId: lead.userInformationsId,
             leadName: lead.name,
             description: lead.name,
             source: lead.source ?? null,
@@ -1849,26 +1867,31 @@ export class WebhookService {
     return { status: 'received' }
   }
 
-  private async persistSocialInboundMessage(params: {
-    channel: MessageChannel.MESSENGER | MessageChannel.INSTAGRAM
-    leadId: string
-    leadName?: string | null
-    userId: string
-    externalAccountId: string
-    externalUserId: string
-    externalMessageId: string
-    content: string | null
-    externalTimestamp: Date
-    type?: MessageType
-    mediaUrl?: string | null
-    mimeType?: string | null
-    mediaSize?: number | null
-  }): Promise<{ message: Message; wasCreated: boolean }> {
+  private async persistSocialInboundMessage(
+    params: {
+      channel: MessageChannel.MESSENGER | MessageChannel.INSTAGRAM
+      leadId: string
+      leadName?: string | null
+      externalAccountId: string
+      externalUserId: string
+      externalMessageId: string
+      content: string | null
+      externalTimestamp: Date
+      type?: MessageType
+      mediaUrl?: string | null
+      mimeType?: string | null
+      mediaSize?: number | null
+    } & (
+      | { companyId: string; userId?: never }
+      | { userId: string; companyId?: never }
+    )
+  ): Promise<{ message: Message; wasCreated: boolean }> {
     const {
       channel,
       leadId,
       leadName,
       userId,
+      companyId,
       externalAccountId,
       externalUserId,
       externalMessageId,
@@ -1905,7 +1928,7 @@ export class WebhookService {
         messageId: savedMessage.id,
         leadId,
         leadName: leadName ?? null,
-        userId,
+        ...(companyId ? { companyId } : { userId }),
         organizationId: null,
         createdAt: savedMessage.createdAt
       })
@@ -1999,8 +2022,24 @@ export class WebhookService {
         const instagramAccountId = entry.id?.trim()
         const instagramUserId = event.sender?.id?.trim()
 
+        if (event.message?.is_echo) {
+          continue
+        }
+
+        const company = instagramAccountId
+          ? await this.companyRepo.findOne({ where: { instagramAccountId } })
+          : null
+
+        if (!company) {
+          this.logger.warn(
+            `Ignoring Instagram Direct event: no Company is connected to instagramAccountId=${instagramAccountId ?? 'missing'}`
+          )
+          continue
+        }
+
         if (event.reaction) {
           await this.handleInstagramDirectReaction({
+            companyId: company.id,
             externalAccountId: instagramAccountId,
             externalUserId: instagramUserId,
             timestamp: event.timestamp,
@@ -2017,10 +2056,6 @@ export class WebhookService {
         const attachmentType = this.resolveSocialAttachmentMessageType(
           attachment?.type
         )
-
-        if (event.message?.is_echo) {
-          continue
-        }
 
         if (
           !instagramAccountId ||
@@ -2048,13 +2083,9 @@ export class WebhookService {
           continue
         }
 
-        const userInformations = await this.userInformationsRepo.findOne({
-          where: { instagramAccountId }
-        })
-
-        if (!userInformations) {
+        if (!company.instagramToken?.trim()) {
           this.logger.warn(
-            `Ignoring Instagram Direct event: no Flow account is connected to instagramAccountId=${instagramAccountId}`
+            `Ignoring Instagram Direct message: token is not configured for companyId=${company.id}`
           )
           continue
         }
@@ -2099,7 +2130,7 @@ export class WebhookService {
             profilePictureUrl,
             lastInteractionAt: interactionAt,
             leadDraft: {
-              userInformationsId: userInformations.id,
+              companyId: company.id,
               name: shouldUseProfileName ? profileName!.trim() : undefined,
               source: 'direct',
               flowState: shouldUseProfileName
@@ -2113,9 +2144,9 @@ export class WebhookService {
           })
         let lead = identityResolution.lead
 
-        if (lead.userInformationsId !== userInformations.id) {
+        if (lead.companyId !== company.id) {
           this.logger.error(
-            `Ignoring Instagram identity ${identityResolution.identity.id}: it belongs to another Flow account`
+            `Ignoring Instagram identity ${identityResolution.identity.id}: it belongs to another Company`
           )
           continue
         }
@@ -2134,7 +2165,7 @@ export class WebhookService {
           channel: MessageChannel.INSTAGRAM,
           leadId: lead.id,
           leadName: lead.name,
-          userId: userInformations.userId,
+          companyId: company.id,
           externalAccountId: instagramAccountId,
           externalUserId: instagramUserId,
           externalMessageId: inboundMessageId,
@@ -2172,10 +2203,9 @@ export class WebhookService {
         if (identityResolution.leadCreated) {
           await this.rabbitPublisherService.publish('lead.created', {
             leadId: lead.id,
-            userId: userInformations.userId,
+            companyId: company.id,
             origin: 'webhook',
             organizationId: null,
-            userInformationsId: lead.userInformationsId,
             leadName: lead.name,
             description: lead.name,
             source: lead.source ?? null,
@@ -2282,10 +2312,9 @@ export class WebhookService {
         ) {
           await this.rabbitPublisherService.publish('lead.created', {
             leadId: lead.id,
-            userId: userInformations.userId,
+            companyId: company.id,
             origin: 'webhook',
             organizationId: null,
-            userInformationsId: lead.userInformationsId,
             leadName: lead.name,
             description: lead.name,
             source: lead.source ?? null,
@@ -2303,6 +2332,7 @@ export class WebhookService {
   }
 
   private async handleInstagramDirectReaction(params: {
+    companyId: string
     externalAccountId?: string
     externalUserId?: string
     timestamp?: number
@@ -2343,7 +2373,15 @@ export class WebhookService {
       externalUserId
     })
 
-    if (!senderIdentity || senderIdentity.leadId !== targetMessage.leadId) {
+    const targetLead = await this.leadRepo.findOne({
+      where: { id: targetMessage.leadId }
+    })
+
+    if (
+      !senderIdentity ||
+      senderIdentity.leadId !== targetMessage.leadId ||
+      targetLead?.companyId !== params.companyId
+    ) {
       this.logger.warn(
         `Ignoring Instagram Direct reaction: sender does not belong to the target conversation. messageId=${targetMessage.id}`
       )

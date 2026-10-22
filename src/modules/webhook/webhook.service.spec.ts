@@ -1,5 +1,6 @@
 import axios from 'axios'
 
+import { Company } from '../company/company.entity'
 import { LeadChannel } from '../leads/entities/lead-channel-identity.entity'
 import {
   Lead,
@@ -18,7 +19,7 @@ import {
 
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
-import { WebhookService } from './webhook.service'
+import { WebhookService, WhatsAppWebhookPayload } from './webhook.service'
 
 describe('WebhookService', () => {
   const createService = (overrides?: {
@@ -37,6 +38,7 @@ describe('WebhookService', () => {
     instagramMessagingService?: object
     realtimeService?: object
     followUpReplyLinkerService?: object
+    companyRepo?: object
   }) =>
     new WebhookService(
       (overrides?.leadRepo ?? {}) as never,
@@ -55,8 +57,404 @@ describe('WebhookService', () => {
       (overrides?.realtimeService ?? {}) as never,
       (overrides?.followUpReplyLinkerService ?? {
         linkReply: jest.fn()
-      }) as never
+      }) as never,
+      (overrides?.companyRepo ?? {}) as never
     )
+
+  describe('WhatsApp Company ownership', () => {
+    const createPayload = (
+      metadata: {
+        display_phone_number?: string
+        phone_number_id?: string
+      } = {
+        display_phone_number: '5548999999999',
+        phone_number_id: 'company-phone-id'
+      }
+    ): WhatsAppWebhookPayload => ({
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                metadata,
+                messages: [
+                  {
+                    id: 'wamid.inbound',
+                    from: '5548984296447',
+                    type: 'text',
+                    text: { body: 'Hello' }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    })
+
+    const createWhatsAppService = () => {
+      const company = Object.assign(new Company(), {
+        id: 'company-1',
+        companyPhoneNumber: '5548999999999',
+        companyPhoneNumberId: 'company-phone-id',
+        whatsappToken: 'company-token'
+      })
+      const lead = Object.assign(new Lead(), {
+        id: 'lead-1',
+        companyId: company.id,
+        name: 'Lead',
+        runtimeMode: LeadRuntimeMode.HUMAN
+      })
+      const companyRepo = {
+        findOne: jest.fn().mockResolvedValue(company),
+        save: jest.fn((companyToSave: Company) =>
+          Promise.resolve(companyToSave)
+        )
+      }
+      const userInformationsRepo = { findOne: jest.fn(), save: jest.fn() }
+      const leadRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        findOneOrFail: jest.fn().mockResolvedValue(lead),
+        save: jest.fn((leadToSave: Lead) => Promise.resolve(leadToSave))
+      }
+      const messageRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn((message: Partial<Message>) =>
+          Object.assign(new Message(), message)
+        ),
+        save: jest.fn((message: Message) =>
+          Promise.resolve(
+            Object.assign(message, {
+              id: 'message-1',
+              createdAt: new Date('2026-10-16T10:00:00.000Z')
+            })
+          )
+        )
+      }
+      const leadChannelIdentityService = {
+        findIdentity: jest.fn().mockResolvedValue(null),
+        findOrCreateLeadForIdentity: jest.fn(
+          ({ leadDraft }: { leadDraft: Partial<Lead> }) =>
+            Promise.resolve({
+              identity: { id: 'identity-1' },
+              lead: Object.assign(lead, leadDraft),
+              leadCreated: true
+            })
+        )
+      }
+      const rabbitPublisherService = {
+        publish: jest
+          .fn<Promise<void>, [string, Record<string, unknown>]>()
+          .mockResolvedValue(undefined)
+      }
+      const automationTriggerDispatcher = { dispatch: jest.fn() }
+      const storageService = {
+        uploadFile: jest
+          .fn()
+          .mockResolvedValue({ url: 'https://storage.test/image' })
+      }
+      const service = createService({
+        companyRepo,
+        userInformationsRepo,
+        leadRepo,
+        messageRepo,
+        leadChannelIdentityService,
+        rabbitPublisherService,
+        automationTriggerDispatcher,
+        storageService,
+        leadFlowEngine: new LeadFlowEngine(),
+        leadFlowActionExecutor: new LeadFlowActionExecutor(),
+        leadsService: {
+          toResponseMessageDto: jest.fn((message: Message) =>
+            Promise.resolve(message)
+          )
+        },
+        realtimeService: { emitToLead: jest.fn() },
+        conversationContextBuilder: {
+          build: jest.fn().mockResolvedValue({ lead, recentMessages: [] })
+        }
+      })
+
+      return {
+        service,
+        company,
+        companyRepo,
+        userInformationsRepo,
+        lead,
+        leadRepo,
+        messageRepo,
+        leadChannelIdentityService,
+        rabbitPublisherService,
+        automationTriggerDispatcher,
+        storageService
+      }
+    }
+
+    afterEach(() => jest.restoreAllMocks())
+
+    it('creates a Company lead and replies using its token without selecting a user', async () => {
+      const dependencies = createWhatsAppService()
+      const post = jest.spyOn(axios, 'post').mockResolvedValue({
+        data: { messages: [{ id: 'wamid.outbound' }] }
+      })
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({ status: 'created_and_replied', leadId: 'lead-1' })
+
+      expect(dependencies.companyRepo.findOne).toHaveBeenCalledWith({
+        where: { companyPhoneNumberId: 'company-phone-id' }
+      })
+      expect(dependencies.lead.companyId).toBe('company-1')
+      expect(dependencies.lead.userInformationsId).toBeUndefined()
+      expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
+      expect(dependencies.userInformationsRepo.save).not.toHaveBeenCalled()
+      expect(post).toHaveBeenCalledWith(
+        'https://graph.facebook.com/v22.0/company-phone-id/messages',
+        expect.objectContaining({ to: '5548984296447' }),
+        {
+          headers: {
+            Authorization: 'Bearer company-token',
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      expect(dependencies.rabbitPublisherService.publish).toHaveBeenCalledWith(
+        'lead.created',
+        expect.objectContaining({ companyId: 'company-1' })
+      )
+      expect(dependencies.rabbitPublisherService.publish).toHaveBeenCalledWith(
+        'message.received',
+        expect.objectContaining({ companyId: 'company-1' })
+      )
+      for (const [, event] of dependencies.rabbitPublisherService.publish.mock
+        .calls) {
+        expect(event).not.toHaveProperty('userInformationsId')
+        expect(event).not.toHaveProperty('userId')
+      }
+    })
+
+    it('accepts account ID metadata without a display phone number', async () => {
+      const dependencies = createWhatsAppService()
+      jest.spyOn(axios, 'post').mockResolvedValue({ data: { messages: [] } })
+
+      await expect(
+        dependencies.service.handleIncomingMessage(
+          createPayload({
+            phone_number_id: 'company-phone-id'
+          })
+        )
+      ).resolves.toEqual({ status: 'created_and_replied', leadId: 'lead-1' })
+    })
+
+    it('falls back to the Company phone and fills an unconfigured account ID', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.company.companyPhoneNumberId = null
+      dependencies.companyRepo.findOne.mockResolvedValueOnce(null)
+      jest.spyOn(axios, 'post').mockResolvedValue({ data: { messages: [] } })
+
+      await dependencies.service.handleIncomingMessage(createPayload())
+
+      expect(dependencies.companyRepo.findOne).toHaveBeenNthCalledWith(2, {
+        where: { companyPhoneNumber: '5548999999999' }
+      })
+      expect(dependencies.companyRepo.save).toHaveBeenCalledWith(
+        dependencies.company
+      )
+      expect(dependencies.company.companyPhoneNumberId).toBe('company-phone-id')
+    })
+
+    it('uses the configured Company account ID when only a phone is supplied', async () => {
+      const dependencies = createWhatsAppService()
+      jest.spyOn(axios, 'post').mockResolvedValue({ data: { messages: [] } })
+
+      await expect(
+        dependencies.service.handleIncomingMessage(
+          createPayload({
+            display_phone_number: '5548999999999'
+          })
+        )
+      ).resolves.toEqual({ status: 'created_and_replied', leadId: 'lead-1' })
+      expect(dependencies.companyRepo.findOne).toHaveBeenCalledWith({
+        where: { companyPhoneNumber: '5548999999999' }
+      })
+    })
+
+    it('does not fall back to UserInformations when no Company is configured', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.companyRepo.findOne.mockResolvedValue(null)
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({ status: 'ignored_missing_company' })
+      expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).not.toHaveBeenCalled()
+    })
+
+    it('rejects a conflicting account ID instead of overwriting the Company account', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.companyRepo.findOne.mockResolvedValueOnce(null)
+      dependencies.company.companyPhoneNumberId = 'different-account'
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({ status: 'ignored_company_account_mismatch' })
+      expect(dependencies.companyRepo.save).not.toHaveBeenCalled()
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).not.toHaveBeenCalled()
+    })
+
+    it('rejects a lead identity belonging to another Company', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity.mockResolvedValue(
+        {
+          identity: { id: 'identity-1' },
+          lead: Object.assign(new Lead(), { companyId: 'company-other' }),
+          leadCreated: false
+        }
+      )
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({ status: 'ignored_identity_owner_mismatch' })
+      expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
+      expect(
+        dependencies.automationTriggerDispatcher.dispatch
+      ).not.toHaveBeenCalled()
+    })
+
+    it('reuses an existing Company lead without requiring a user information binding', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.leadRepo.findOne.mockResolvedValue(dependencies.lead)
+      dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity.mockResolvedValue(
+        {
+          identity: { id: 'identity-1' },
+          lead: dependencies.lead,
+          leadCreated: false
+        }
+      )
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({
+        status: 'updated_human_mode_skipped',
+        leadId: 'lead-1'
+      })
+      expect(dependencies.leadRepo.findOne).toHaveBeenCalledWith({
+        where: [
+          {
+            companyId: 'company-1',
+            phone: '5548984296447',
+            state: LeadState.ACTIVE
+          },
+          {
+            companyId: 'company-1',
+            phone: '554884296447',
+            state: LeadState.ACTIVE
+          }
+        ]
+      })
+    })
+
+    it('uses the Company token for flow replies on an existing conversation', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.lead.runtimeMode = LeadRuntimeMode.AUTOMATION
+      dependencies.lead.flowState = LeadFlowState.ASKING_NAME
+      dependencies.lead.name = undefined
+      dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity.mockResolvedValue(
+        {
+          identity: { id: 'identity-1' },
+          lead: dependencies.lead,
+          leadCreated: false
+        }
+      )
+      const post = jest.spyOn(axios, 'post').mockResolvedValue({
+        data: { messages: [{ id: 'wamid.reply' }] }
+      })
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({ status: 'updated_and_replied', leadId: 'lead-1' })
+
+      expect(post).toHaveBeenCalledWith(
+        'https://graph.facebook.com/v22.0/company-phone-id/messages',
+        expect.objectContaining({ to: '5548984296447' }),
+        {
+          headers: {
+            Authorization: 'Bearer company-token',
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
+    })
+
+    it('ignores duplicates before resolving the Company or executing automations', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.messageRepo.findOne.mockResolvedValue({
+        id: 'message-existing'
+      })
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({
+        status: 'ignored_duplicate_message',
+        inboundMessageId: 'wamid.inbound'
+      })
+      expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
+      expect(
+        dependencies.automationTriggerDispatcher.dispatch
+      ).not.toHaveBeenCalled()
+    })
+
+    it('downloads inbound media using the Company token', async () => {
+      const dependencies = createWhatsAppService()
+      const get = jest
+        .spyOn(axios, 'get')
+        .mockResolvedValueOnce({
+          data: { url: 'https://media.test/image', mime_type: 'image/jpeg' }
+        })
+        .mockResolvedValueOnce({ data: Buffer.from('image') })
+      const payload = createPayload()
+      const value = payload.entry![0].changes![0].value!
+      value.messages = [
+        {
+          id: 'wamid.image',
+          from: '5548984296447',
+          type: 'image',
+          image: { id: 'media-1', mime_type: 'image/jpeg' }
+        }
+      ]
+
+      await expect(
+        dependencies.service.handleIncomingMessage(payload)
+      ).resolves.toEqual({
+        status: 'media_message_processed',
+        leadId: 'lead-1'
+      })
+      expect(get).toHaveBeenNthCalledWith(
+        1,
+        'https://graph.facebook.com/v22.0/media-1',
+        {
+          headers: {
+            Authorization: 'Bearer company-token',
+            'Content-Type': 'application/json'
+          }
+        }
+      )
+      expect(get).toHaveBeenNthCalledWith(2, 'https://media.test/image', {
+        headers: {
+          Authorization: 'Bearer company-token',
+          'Content-Type': 'application/json'
+        },
+        responseType: 'arraybuffer'
+      })
+      expect(dependencies.storageService.uploadFile).toHaveBeenCalledTimes(1)
+    })
+  })
 
   it('ignores payloads without a WhatsApp entry', async () => {
     const service = createService()
@@ -133,7 +531,7 @@ describe('WebhookService', () => {
     const lead = {
       id: 'lead-1',
       name: 'Lucas',
-      userInformationsId: 'user-information-1',
+      companyId: 'company-1',
       lastInboundMessageId: 'wamid.previous'
     } as Lead
     const messageRepo = {
@@ -168,11 +566,10 @@ describe('WebhookService', () => {
         save: jest.fn()
       },
       messageRepo,
-      userInformationsRepo: {
+      companyRepo: {
         findOne: jest.fn().mockResolvedValue({
-          id: 'user-information-1',
-          userId: 'flow-user-1',
-          phoneNumberId: '1051101894753146',
+          id: 'company-1',
+          companyPhoneNumberId: '1051101894753146',
           whatsappToken: 'whatsapp-token'
         })
       },
@@ -251,7 +648,7 @@ describe('WebhookService', () => {
     let persistedLead = {
       id: 'lead-1',
       name: 'Lucas',
-      userInformationsId: 'user-information-1',
+      companyId: 'company-1',
       runtimeMode: LeadRuntimeMode.HUMAN,
       leadQualification: null,
       lastInboundMessageId: 'wamid.previous'
@@ -286,11 +683,10 @@ describe('WebhookService', () => {
     const service = createService({
       leadRepo,
       messageRepo,
-      userInformationsRepo: {
+      companyRepo: {
         findOne: jest.fn().mockResolvedValue({
-          id: 'user-information-1',
-          userId: 'flow-user-1',
-          phoneNumberId: 'phone-number-id-1',
+          id: 'company-1',
+          companyPhoneNumberId: 'phone-number-id-1',
           whatsappToken: 'whatsapp-token'
         })
       },
@@ -391,10 +787,10 @@ describe('WebhookService', () => {
     const realtimeService = { emitToLead: jest.fn() }
     const service = createService({
       messageRepo,
-      userInformationsRepo: {
+      companyRepo: {
         findOne: jest.fn().mockResolvedValue({
           id: 'flow-user-1',
-          phoneNumberId: 'phone-number-id-1'
+          companyPhoneNumberId: 'phone-number-id-1'
         })
       },
       leadChannelIdentityService: {
@@ -475,10 +871,10 @@ describe('WebhookService', () => {
     const realtimeService = { emitToLead: jest.fn() }
     const service = createService({
       messageRepo,
-      userInformationsRepo: {
+      companyRepo: {
         findOne: jest.fn().mockResolvedValue({
           id: 'flow-user-1',
-          phoneNumberId: 'phone-number-id-1'
+          companyPhoneNumberId: 'phone-number-id-1'
         })
       },
       leadChannelIdentityService: { findIdentity: jest.fn() },
@@ -541,6 +937,17 @@ describe('WebhookService', () => {
     const realtimeService = { emitToLead: jest.fn() }
     const service = createService({
       messageRepo,
+      leadRepo: {
+        findOne: jest
+          .fn()
+          .mockResolvedValue({ id: 'lead-1', companyId: 'company-1' })
+      },
+      companyRepo: {
+        findOne: jest.fn().mockResolvedValue({
+          id: 'company-1',
+          instagramAccountId: '17841436895629883'
+        })
+      },
       leadChannelIdentityService: {
         findIdentity: jest.fn().mockResolvedValue({
           id: 'identity-1',
@@ -606,7 +1013,7 @@ describe('WebhookService', () => {
       profileName: string | null
       profilePictureUrl: string | null
       leadDraft: {
-        userInformationsId?: string
+        companyId?: string
         name?: string
         source?: string
         flowState?: LeadFlowState
@@ -653,10 +1060,9 @@ describe('WebhookService', () => {
       findOneOrFail: jest.fn(() => Promise.resolve(lead as Lead)),
       save: jest.fn((leadToSave: Lead) => Promise.resolve(leadToSave))
     }
-    const userInformationsRepo = {
+    const companyRepo = {
       findOne: jest.fn().mockResolvedValue({
-        id: 'flow-user-1',
-        userId: 'user-1',
+        id: 'company-1',
         messengerPageId: 'page-1',
         messengerToken: ' page-token '
       })
@@ -704,7 +1110,9 @@ describe('WebhookService', () => {
         .mockResolvedValueOnce({ data: { message_id: 'messenger-auto-3' } })
     }
     const rabbitPublisherService = {
-      publish: jest.fn().mockResolvedValue(null)
+      publish: jest
+        .fn<Promise<void>, [string, Record<string, unknown>]>()
+        .mockResolvedValue(undefined)
     }
     const automationTriggerDispatcher = {
       dispatch: jest.fn().mockResolvedValue(null)
@@ -728,7 +1136,7 @@ describe('WebhookService', () => {
     const service = createService({
       leadRepo,
       messageRepo,
-      userInformationsRepo,
+      companyRepo,
       conversationContextBuilder,
       leadFlowEngine: new LeadFlowEngine(),
       leadFlowActionExecutor: new LeadFlowActionExecutor(),
@@ -834,12 +1242,24 @@ describe('WebhookService', () => {
       profileName: 'Lucas Gonçalves',
       profilePictureUrl: 'https://example.com/profile.jpg',
       leadDraft: {
-        userInformationsId: 'flow-user-1',
+        companyId: 'company-1',
         name: 'Lucas Gonçalves',
         source: LeadChannel.MESSENGER,
         flowState: LeadFlowState.ASKING_LOCATION
       }
     })
+    expect(firstIdentityCall?.leadDraft).not.toHaveProperty(
+      'userInformationsId'
+    )
+    expect(companyRepo.findOne).toHaveBeenCalledWith({
+      where: { messengerPageId: 'page-1' }
+    })
+    for (const [event, data] of rabbitPublisherService.publish.mock.calls) {
+      expect(['lead.created', 'message.received']).toContain(event)
+      expect(data.companyId).toBe('company-1')
+      expect(data).not.toHaveProperty('userId')
+      expect(data).not.toHaveProperty('userInformationsId')
+    }
     expect(lead).toMatchObject({
       location: 'Florianópolis',
       flowState: LeadFlowState.IN_CONVERSATION,
@@ -906,6 +1326,135 @@ describe('WebhookService', () => {
     )
   })
 
+  describe('Messenger Company isolation', () => {
+    const payload = {
+      entry: [
+        {
+          id: 'page-1',
+          messaging: [
+            {
+              sender: { id: 'psid-1' },
+              recipient: { id: 'page-1' },
+              message: { mid: 'mid-1', text: 'Hello' }
+            }
+          ]
+        }
+      ]
+    }
+    const setup = () => {
+      const company = Object.assign(new Company(), {
+        id: 'company-1',
+        messengerPageId: 'page-1',
+        messengerToken: 'company-token'
+      })
+      const companyRepo = { findOne: jest.fn().mockResolvedValue(company) }
+      const userInformationsRepo = { findOne: jest.fn() }
+      const messageRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        save: jest.fn()
+      }
+      const leadChannelIdentityService = {
+        findIdentity: jest.fn().mockResolvedValue({ id: 'identity-1' }),
+        findOrCreateLeadForIdentity: jest.fn().mockResolvedValue({
+          identity: { id: 'identity-1' },
+          lead: Object.assign(new Lead(), {
+            id: 'lead-foreign',
+            companyId: 'company-other'
+          }),
+          leadCreated: false
+        })
+      }
+      const messengerMessagingService = { sendMessengerMessage: jest.fn() }
+      const rabbitPublisherService = { publish: jest.fn() }
+      const service = createService({
+        companyRepo,
+        userInformationsRepo,
+        messageRepo,
+        leadChannelIdentityService,
+        messengerMessagingService,
+        rabbitPublisherService
+      })
+      return {
+        service,
+        company,
+        companyRepo,
+        userInformationsRepo,
+        messageRepo,
+        leadChannelIdentityService,
+        messengerMessagingService,
+        rabbitPublisherService
+      }
+    }
+
+    it('ignores an unconfigured page without falling back to UserInformations', async () => {
+      const dependencies = setup()
+      dependencies.companyRepo.findOne.mockResolvedValue(null)
+      await expect(
+        dependencies.service.handleMessengerWebhook(payload)
+      ).resolves.toEqual({ status: 'received' })
+      expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).not.toHaveBeenCalled()
+    })
+
+    it('rejects a lead identity from another Company before persisting or replying', async () => {
+      const dependencies = setup()
+      await dependencies.service.handleMessengerWebhook(payload)
+      expect(dependencies.companyRepo.findOne).toHaveBeenCalledWith({
+        where: { messengerPageId: 'page-1' }
+      })
+      expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
+      expect(
+        dependencies.messengerMessagingService.sendMessengerMessage
+      ).not.toHaveBeenCalled()
+      expect(dependencies.rabbitPublisherService.publish).not.toHaveBeenCalled()
+      expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
+    })
+
+    it('rejects missing Company credentials before creating a lead or message', async () => {
+      const dependencies = setup()
+      dependencies.company.messengerToken = null
+      await expect(
+        dependencies.service.handleMessengerWebhook(payload)
+      ).rejects.toThrow('Messenger token is not configured for this company')
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).not.toHaveBeenCalled()
+      expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('ignores duplicates without repeating Company resolution or responses', async () => {
+      const dependencies = setup()
+      dependencies.messageRepo.findOne.mockResolvedValue({ id: 'existing' })
+      await dependencies.service.handleMessengerWebhook(payload)
+      expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
+      expect(
+        dependencies.messengerMessagingService.sendMessengerMessage
+      ).not.toHaveBeenCalled()
+    })
+
+    it('ignores page echoes instead of treating outbound messages as new leads', async () => {
+      const dependencies = setup()
+      await dependencies.service.handleMessengerWebhook({
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'page-1' },
+                recipient: { id: 'psid-1' },
+                message: { mid: 'echo-1', text: 'Reply', is_echo: true }
+              }
+            ]
+          }
+        ]
+      })
+      expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
+      expect(dependencies.messageRepo.findOne).not.toHaveBeenCalled()
+    })
+  })
+
   it('runs Instagram Direct onboarding and keeps the conversation flow', async () => {
     type InstagramIdentityParams = {
       channel: LeadChannel
@@ -914,7 +1463,7 @@ describe('WebhookService', () => {
       profileName: string | null
       profilePictureUrl: string | null
       leadDraft: {
-        userInformationsId?: string
+        companyId?: string
         name?: string
         source?: string
         flowState?: LeadFlowState
@@ -961,14 +1510,14 @@ describe('WebhookService', () => {
       findOneOrFail: jest.fn(() => Promise.resolve(lead as Lead)),
       save: jest.fn((leadToSave: Lead) => Promise.resolve(leadToSave))
     }
-    const userInformationsRepo = {
+    const companyRepo = {
       findOne: jest.fn().mockResolvedValue({
-        id: 'flow-user-1',
-        userId: 'user-1',
+        id: 'company-1',
         instagramAccountId: '17841436895629883',
         instagramToken: 'instagram-token'
       })
     }
+    const userInformationsRepo = { findOne: jest.fn() }
     const leadChannelIdentityService = {
       findIdentity: jest.fn(() =>
         Promise.resolve(identityCreated ? { id: 'identity-1', lead } : null)
@@ -1017,7 +1566,9 @@ describe('WebhookService', () => {
       )
     }
     const rabbitPublisherService = {
-      publish: jest.fn().mockResolvedValue(null)
+      publish: jest
+        .fn<Promise<void>, [string, Record<string, unknown>]>()
+        .mockResolvedValue(undefined)
     }
     const automationTriggerDispatcher = {
       dispatch: jest.fn().mockResolvedValue(null)
@@ -1036,6 +1587,7 @@ describe('WebhookService', () => {
     const service = createService({
       leadRepo,
       messageRepo,
+      companyRepo,
       userInformationsRepo,
       conversationContextBuilder,
       leadFlowEngine: new LeadFlowEngine(),
@@ -1175,12 +1727,25 @@ describe('WebhookService', () => {
       profileName: 'Lucas Gonçalves',
       profilePictureUrl: 'https://example.com/instagram-profile.jpg',
       leadDraft: {
-        userInformationsId: 'flow-user-1',
+        companyId: 'company-1',
         name: 'Lucas Gonçalves',
         source: 'direct',
         flowState: LeadFlowState.ASKING_LOCATION
       }
     })
+    expect(firstIdentityCall?.leadDraft).not.toHaveProperty(
+      'userInformationsId'
+    )
+    expect(companyRepo.findOne).toHaveBeenCalledWith({
+      where: { instagramAccountId: '17841436895629883' }
+    })
+    expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
+    for (const [event, data] of rabbitPublisherService.publish.mock.calls) {
+      expect(['lead.created', 'message.received']).toContain(event)
+      expect(data.companyId).toBe('company-1')
+      expect(data).not.toHaveProperty('userId')
+      expect(data).not.toHaveProperty('userInformationsId')
+    }
     expect(lead).toMatchObject({
       location: 'Florianópolis',
       flowState: LeadFlowState.IN_CONVERSATION,
@@ -1242,5 +1807,136 @@ describe('WebhookService', () => {
         })
       ])
     )
+  })
+
+  describe('Instagram Direct Company ownership', () => {
+    const payload = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'instagram-account-1',
+          messaging: [
+            {
+              sender: { id: 'instagram-user-1' },
+              message: { mid: 'instagram-message-1', text: 'Hello' }
+            }
+          ]
+        }
+      ]
+    }
+    const createDependencies = () => {
+      const company = Object.assign(new Company(), {
+        id: 'company-1',
+        instagramAccountId: 'instagram-account-1',
+        instagramToken: 'company-token'
+      })
+      const companyRepo = { findOne: jest.fn().mockResolvedValue(company) }
+      const userInformationsRepo = { findOne: jest.fn() }
+      const messageRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        save: jest.fn()
+      }
+      const leadChannelIdentityService = {
+        findIdentity: jest.fn().mockResolvedValue(null),
+        findOrCreateLeadForIdentity: jest.fn().mockResolvedValue({
+          identity: { id: 'identity-1' },
+          lead: Object.assign(new Lead(), {
+            id: 'lead-1',
+            companyId: 'company-1'
+          }),
+          leadCreated: true
+        })
+      }
+      const messenger = {
+        getInstagramUserProfile: jest.fn().mockResolvedValue(null)
+      }
+      const rabbitPublisherService = { publish: jest.fn() }
+      const service = createService({
+        companyRepo,
+        userInformationsRepo,
+        messageRepo,
+        leadChannelIdentityService,
+        instagramMessagingService: messenger,
+        rabbitPublisherService
+      })
+      return {
+        service,
+        company,
+        companyRepo,
+        userInformationsRepo,
+        messageRepo,
+        leadChannelIdentityService,
+        messenger,
+        rabbitPublisherService
+      }
+    }
+
+    it('ignores an unconfigured Instagram Company without falling back to UserInformations', async () => {
+      const dependencies = createDependencies()
+      dependencies.companyRepo.findOne.mockResolvedValue(null)
+      await expect(
+        dependencies.service.handleDirectWebhook(payload)
+      ).resolves.toEqual({ status: 'received' })
+      expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).not.toHaveBeenCalled()
+    })
+
+    it('ignores a Company without an Instagram token before creating a lead', async () => {
+      const dependencies = createDependencies()
+      dependencies.company.instagramToken = null
+      await dependencies.service.handleDirectWebhook(payload)
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).not.toHaveBeenCalled()
+      expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
+    })
+
+    it('rejects an identity already linked to another Company', async () => {
+      const dependencies = createDependencies()
+      dependencies.leadChannelIdentityService.findIdentity.mockResolvedValue({
+        id: 'identity-existing'
+      })
+      dependencies.messenger.getInstagramUserProfile.mockResolvedValue(
+        undefined
+      )
+      dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity.mockResolvedValue(
+        {
+          identity: { id: 'identity-existing' },
+          lead: Object.assign(new Lead(), {
+            id: 'foreign-lead',
+            companyId: 'company-other'
+          }),
+          leadCreated: false
+        }
+      )
+      await dependencies.service.handleDirectWebhook(payload)
+      expect(
+        dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
+      ).toHaveBeenCalled()
+      expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
+      expect(dependencies.rabbitPublisherService.publish).not.toHaveBeenCalled()
+    })
+
+    it('ignores echo events before resolving a Company', async () => {
+      const dependencies = createDependencies()
+      await dependencies.service.handleDirectWebhook({
+        object: 'instagram',
+        entry: [
+          {
+            id: 'instagram-account-1',
+            messaging: [
+              {
+                sender: { id: 'instagram-account-1' },
+                message: { mid: 'echo-1', text: 'Echo', is_echo: true }
+              }
+            ]
+          }
+        ]
+      })
+      expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
+      expect(dependencies.messageRepo.findOne).not.toHaveBeenCalled()
+    })
   })
 })

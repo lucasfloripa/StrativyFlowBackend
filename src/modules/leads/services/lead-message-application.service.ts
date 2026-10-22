@@ -184,7 +184,8 @@ export class LeadMessageApplicationService {
       )
     const contacts = await this.contactsService.findMany(
       command.userId,
-      command.contactIds
+      command.contactIds,
+      lead.companyId ?? undefined
     )
     const whatsappContacts: WhatsAppContact[] = contacts.map((contact) => {
       const [firstName, ...remainingNames] = contact.name.trim().split(/\s+/)
@@ -447,7 +448,8 @@ export class LeadMessageApplicationService {
     }
 
     const template = await this.messageTemplateService.findOne(
-      command.templateId
+      command.templateId,
+      command.userId
     )
 
     if (!template) {

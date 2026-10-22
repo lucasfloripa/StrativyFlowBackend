@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { BadRequestException, Injectable } from '@nestjs/common'
 import axios from 'axios'
 
 export type MessengerSendMessageResponse = {
@@ -15,6 +15,12 @@ export type MessengerUserInfoResponse = {
   last_name?: string
   profile_pic?: string
   id: string
+}
+
+const requireMessengerToken = (value?: string): string => {
+  const token = value?.trim()
+  if (!token) throw new BadRequestException('Messenger token is not configured')
+  return token
 }
 
 @Injectable()
@@ -52,7 +58,7 @@ export async function sendMessengerMessage(
   pageId?: string,
   messengerToken?: string
 ): Promise<{ data: MessengerSendMessageResponse }> {
-  const token = messengerToken?.trim()
+  const token = requireMessengerToken(messengerToken)
 
   return axios.post(
     `https://graph.facebook.com/v22.0/${pageId}/messages`,
@@ -77,7 +83,7 @@ export async function getMessengerUserInfo(
   psid: string,
   messengerToken?: string
 ): Promise<{ data: MessengerUserInfoResponse }> {
-  const token = messengerToken?.trim()
+  const token = requireMessengerToken(messengerToken)
 
   return axios.get<MessengerUserInfoResponse>(
     `https://graph.facebook.com/v22.0/${psid}`,
@@ -100,7 +106,7 @@ export async function sendMessengerAttachment(
   pageId?: string,
   messengerToken?: string
 ): Promise<{ data: MessengerSendAttachmentResponse }> {
-  const token = messengerToken?.trim()
+  const token = requireMessengerToken(messengerToken)
 
   return axios.post(
     `https://graph.facebook.com/v22.0/${pageId}/messages`,

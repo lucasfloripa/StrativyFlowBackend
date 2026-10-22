@@ -109,7 +109,7 @@ export class NegotiationFinancialService {
       .innerJoin(
         UserInformations,
         'userInformations',
-        'CAST("userInformations"."id" AS text) = "lead"."userInformationsId"'
+        '"userInformations"."companyId" = "lead"."companyId"'
       )
       .where('negotiation.id = :negotiationId', { negotiationId })
       .andWhere('userInformations.userId = :userId', { userId })

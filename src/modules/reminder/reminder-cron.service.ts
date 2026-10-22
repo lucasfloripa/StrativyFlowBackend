@@ -20,6 +20,7 @@ type ReminderRecipientGroup = {
   emailRecipients: Set<string>
   whatsappRecipients: Set<string>
   referenceFollowUpId: string
+  includedFollowUpIds: Set<string>
   items: Array<{
     leadName: string
     followUpValue: string
@@ -91,10 +92,10 @@ export class ReminderCronService {
       }
     }
 
-    const userInformationsIds = Array.from(
+    const companyIds = Array.from(
       new Set(
         followUps
-          .map((followUp) => followUp.negotiation?.lead?.userInformationsId)
+          .map((followUp) => followUp.negotiation?.lead?.companyId)
           .filter(
             (value): value is string =>
               typeof value === 'string' && Boolean(value.trim())
@@ -102,7 +103,7 @@ export class ReminderCronService {
       )
     )
 
-    if (!userInformationsIds.length) {
+    if (!companyIds.length) {
       this.logger.warn(
         'Skipping reminder dispatch because no user informations were found'
       )
@@ -117,78 +118,84 @@ export class ReminderCronService {
 
     const userInformationsList = await this.userInformationsRepository.find({
       where: {
-        id: In(userInformationsIds)
+        companyId: In(companyIds)
       }
     })
 
-    const userInformationsById = new Map(
-      userInformationsList.map((userInformations) => [
-        userInformations.id,
-        userInformations
-      ])
-    )
+    const userInformationsByCompanyId = new Map<string, UserInformations[]>()
+    for (const userInformations of userInformationsList) {
+      const companyId = userInformations.companyId?.trim()
+      if (!companyId) continue
+      const members = userInformationsByCompanyId.get(companyId) ?? []
+      members.push(userInformations)
+      userInformationsByCompanyId.set(companyId, members)
+    }
 
     const groupedByUser = new Map<string, ReminderRecipientGroup>()
 
     for (const followUp of followUps) {
       const lead = followUp.negotiation?.lead
-      const userInformationsId = lead?.userInformationsId?.trim()
+      const companyId = lead?.companyId?.trim()
 
-      if (!lead || !userInformationsId) {
+      if (!lead || !companyId) {
         continue
       }
 
-      const userInformations = userInformationsById.get(userInformationsId)
-      const userId = userInformations?.userId?.trim()
+      for (const userInformations of userInformationsByCompanyId.get(
+        companyId
+      ) ?? []) {
+        const userId = userInformations.userId?.trim()
+        if (!userId) continue
 
-      if (!userInformations || !userId) {
-        continue
-      }
+        const existingGroup = groupedByUser.get(userId) ?? {
+          appEnabled: false,
+          emailRecipients: new Set<string>(),
+          whatsappRecipients: new Set<string>(),
+          referenceFollowUpId: followUp.id,
+          includedFollowUpIds: new Set<string>(),
+          items: []
+        }
 
-      const existingGroup = groupedByUser.get(userId) ?? {
-        appEnabled: false,
-        emailRecipients: new Set<string>(),
-        whatsappRecipients: new Set<string>(),
-        referenceFollowUpId: followUp.id,
-        items: []
-      }
+        const enabledChannels =
+          userInformations.notificationPreferences?.[
+            NotificationType.DAILY_FOLLOWUP_SUMMARY
+          ] ?? []
 
-      const enabledChannels =
-        userInformations.notificationPreferences?.[
-          NotificationType.DAILY_FOLLOWUP_SUMMARY
-        ] ?? []
+        if (enabledChannels.includes(NotificationChannel.APP)) {
+          existingGroup.appEnabled = true
+        }
 
-      if (enabledChannels.includes(NotificationChannel.APP)) {
-        existingGroup.appEnabled = true
-      }
+        if (enabledChannels.includes(NotificationChannel.EMAIL)) {
+          for (const email of userInformations.notificationEmails) {
+            const normalizedEmail = email.trim().toLowerCase()
 
-      if (enabledChannels.includes(NotificationChannel.EMAIL)) {
-        for (const email of userInformations.notificationEmails) {
-          const normalizedEmail = email.trim().toLowerCase()
-
-          if (normalizedEmail) {
-            existingGroup.emailRecipients.add(normalizedEmail)
+            if (normalizedEmail) {
+              existingGroup.emailRecipients.add(normalizedEmail)
+            }
           }
         }
-      }
 
-      if (enabledChannels.includes(NotificationChannel.WHATSAPP)) {
-        for (const number of userInformations.notificationWhatsAppNumbers) {
-          const normalizedNumber = number.trim()
+        if (enabledChannels.includes(NotificationChannel.WHATSAPP)) {
+          for (const number of userInformations.notificationWhatsAppNumbers) {
+            const normalizedNumber = number.trim()
 
-          if (normalizedNumber) {
-            existingGroup.whatsappRecipients.add(normalizedNumber)
+            if (normalizedNumber) {
+              existingGroup.whatsappRecipients.add(normalizedNumber)
+            }
           }
         }
+
+        if (!existingGroup.includedFollowUpIds.has(followUp.id)) {
+          existingGroup.includedFollowUpIds.add(followUp.id)
+          existingGroup.items.push({
+            leadName: lead.name?.trim() || 'Lead sem nome',
+            followUpValue: followUp.value,
+            dueAt: followUp.dueAt
+          })
+        }
+
+        groupedByUser.set(userId, existingGroup)
       }
-
-      existingGroup.items.push({
-        leadName: lead.name?.trim() || 'Lead sem nome',
-        followUpValue: followUp.value,
-        dueAt: followUp.dueAt
-      })
-
-      groupedByUser.set(userId, existingGroup)
     }
 
     let usersNotified = 0

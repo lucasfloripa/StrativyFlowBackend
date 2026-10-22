@@ -173,6 +173,11 @@ describe('UserService', () => {
         messengerToken: 'page-token'
       })
     ])
+    expect(userInformationsRepo.find).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      relations: { company: true },
+      order: { createdAt: 'ASC' }
+    })
   })
 
   it('returns existing users without Messenger configuration', async () => {

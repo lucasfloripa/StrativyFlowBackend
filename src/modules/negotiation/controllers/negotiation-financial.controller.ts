@@ -10,6 +10,7 @@ import {
   UseGuards
 } from '@nestjs/common'
 
+import { CompanyAccessGuard } from '../../auth/company-access.guard'
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { CreateNegotiationFinancialDto } from '../dto/create-negotiation-financial.dto'
 import { UpdateNegotiationFinancialDto } from '../dto/update-negotiation-financial.dto'
@@ -24,7 +25,7 @@ type AuthenticatedRequest = Request & {
 }
 
 @Controller('negotiations/:negotiationId/financial')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, CompanyAccessGuard)
 export class NegotiationFinancialController {
   constructor(private readonly financialService: NegotiationFinancialService) {}
 

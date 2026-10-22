@@ -91,24 +91,17 @@ export class NotificationWorker implements OnModuleInit {
     const data = this.asRecord(message.data)
     const followUpId = this.getString(data, 'followUpId')
     const followUpTitle = this.getString(data, 'followUpTitle')
-    const userId = this.getString(data, 'userId')
+    const companyId = this.getString(data, 'companyId')
     const leadName = this.getString(data, 'leadName')
-    const userInformationsId = this.getString(data, 'userInformationsId')
     const actionChannel = this.getOptionalFollowUpStepChannel(
       data,
       'actionChannel'
     )
     const actionType = this.getOptionalFollowUpStepType(data, 'actionType')
 
-    if (
-      !followUpId ||
-      !followUpTitle ||
-      !userId ||
-      !leadName ||
-      !userInformationsId
-    ) {
+    if (!followUpId || !followUpTitle || !companyId || !leadName) {
       throw new Error(
-        'followup.reminder.1h requires followUpId, followUpTitle, userId, leadName and userInformationsId'
+        'followup.reminder.1h requires followUpId, followUpTitle, companyId and leadName'
       )
     }
 
@@ -134,13 +127,10 @@ export class NotificationWorker implements OnModuleInit {
       return
     }
 
-    const userInformations = await this.userInformationsRepo.findOne({
-      where: { id: userInformationsId }
+    const userInformationsList = await this.userInformationsRepo.find({
+      where: { companyId },
+      order: { createdAt: 'ASC' }
     })
-    const enabledChannels =
-      userInformations?.notificationPreferences?.[
-        PreferenceNotificationType.FOLLOWUP_ONE_HOUR
-      ] ?? []
     const candidate = {
       followUpTitle,
       actionChannel,
@@ -150,70 +140,68 @@ export class NotificationWorker implements OnModuleInit {
     const actionLabel = this.getFollowUpActionLabel(candidate)
     const reminderDescription = this.buildFollowUpReminderDescription(candidate)
 
-    if (enabledChannels.includes(NotificationChannel.APP)) {
-      await this.notificationService.createNotification({
-        organizationId: null,
-        userId,
-        type: NotificationType.FOLLOW_UP_REMINDER_1H,
-        title: 'Follow-up em 1 hora',
-        description: reminderDescription,
-        referenceType: NotificationReferenceType.FOLLOW_UP,
-        referenceId: followUpId
-      })
-    } else {
-      this.logger.log(
-        `Skipping APP follow-up 1h reminder because APP channel is disabled for userId=${userId}`
-      )
-    }
+    for (const userInformations of userInformationsList) {
+      const userId = userInformations.userId?.trim()
+      if (!userId) continue
 
-    await this.dispatchFollowUpReminderWhatsApp({
-      userId,
-      followUpId,
-      reminderDescription,
-      userInformations,
-      enabledChannels
-    })
+      const enabledChannels =
+        userInformations.notificationPreferences?.[
+          PreferenceNotificationType.FOLLOWUP_ONE_HOUR
+        ] ?? []
 
-    if (enabledChannels.includes(NotificationChannel.EMAIL)) {
-      const recipients = Array.from(
-        new Set(
-          (userInformations?.notificationEmails ?? [])
-            .map((email) => email.trim().toLowerCase())
-            .filter((email) => email.length > 0)
-        )
-      )
-
-      if (!recipients.length) {
-        this.logger.warn(
-          `Skipping EMAIL follow-up 1h reminder because no notificationEmails are configured for userId=${userId}`
-        )
-      } else {
-        await this.mailService.send({
-          from: 'Strativy Flow <no-reply@strativyflow.com>',
-          to: recipients,
-          subject: 'Follow-up em 1 hora',
-          html: buildFollowUpOneHourEmail({
-            followUpTitle,
-            leadName,
-            channelLabel: actionLabel
-          })
+      if (enabledChannels.includes(NotificationChannel.APP)) {
+        await this.notificationService.createNotification({
+          organizationId: null,
+          userId,
+          type: NotificationType.FOLLOW_UP_REMINDER_1H,
+          title: 'Follow-up em 1 hora',
+          description: reminderDescription,
+          referenceType: NotificationReferenceType.FOLLOW_UP,
+          referenceId: followUpId
         })
-
-        this.logger.log(
-          `EMAIL follow-up 1h reminder sent for userId=${userId}, followUpId=${followUpId}, recipients=${recipients.length}`
-        )
       }
-    } else {
-      this.logger.log(
-        `Skipping EMAIL follow-up 1h reminder because EMAIL channel is disabled for userId=${userId}`
-      )
+
+      await this.dispatchFollowUpReminderWhatsApp({
+        userId,
+        followUpId,
+        reminderDescription,
+        userInformations,
+        enabledChannels
+      })
+
+      if (enabledChannels.includes(NotificationChannel.EMAIL)) {
+        const recipients = Array.from(
+          new Set(
+            (userInformations.notificationEmails ?? [])
+              .map((email) => email.trim().toLowerCase())
+              .filter((email) => email.length > 0)
+          )
+        )
+
+        if (recipients.length) {
+          await this.mailService.send({
+            from: 'Strativy Flow <no-reply@strativyflow.com>',
+            to: recipients,
+            subject: 'Follow-up em 1 hora',
+            html: buildFollowUpOneHourEmail({
+              followUpTitle,
+              leadName,
+              channelLabel: actionLabel
+            })
+          })
+        } else {
+          this.logger.warn(
+            `Skipping EMAIL follow-up 1h reminder because no notificationEmails are configured for userId=${userId}`
+          )
+        }
+      }
     }
 
     followUp.reminder1hSentAt = new Date()
     await this.followUpRepo.save(followUp)
 
     this.logger.log(
-      `Job ${message.event} completed (followUpId=${followUpId}, userId=${userId})`
+      `Job ${message.event} completed (followUpId=${followUpId}, companyId=${companyId}, recipients=${userInformationsList.length})`
     )
   }
 
@@ -225,19 +213,21 @@ export class NotificationWorker implements OnModuleInit {
     )
 
     const data = this.asRecord(message.data)
-    const userId = this.getString(data, 'userId')
+    const companyId = this.getString(data, 'companyId')
     const messageId = this.getString(data, 'messageId')
     const leadId = this.getString(data, 'leadId')
     const leadName = this.getString(data, 'leadName')
 
-    if (!userId || !messageId || !leadId) {
+    if (!companyId || !messageId || !leadId) {
       this.logger.warn(
         'Skipping message.received notification due to invalid payload'
       )
       return
     }
 
-    const lead = await this.leadRepo.findOne({ where: { id: leadId } })
+    const lead = await this.leadRepo.findOne({
+      where: { id: leadId, companyId }
+    })
 
     if (!lead || lead.flowState !== LeadFlowState.IN_CONVERSATION) {
       this.logger.log(
@@ -251,51 +241,56 @@ export class NotificationWorker implements OnModuleInit {
       leadName ??
       'Nova mensagem recebida.'
 
-    const userInformations = await this.userInformationsRepo.findOne({
-      where: { userId },
+    const recipients = await this.userInformationsRepo.find({
+      where: { companyId },
       order: { createdAt: 'ASC' }
     })
 
-    if (!userInformations) {
+    if (!recipients.length) {
       this.logger.warn(
-        `Skipping MESSAGE_RECEIVED notifications because UserInformations was not found for userId=${userId}`
+        `Skipping MESSAGE_RECEIVED notifications because Company has no users. companyId=${companyId}`
       )
       return
     }
 
-    const enabledChannels =
-      userInformations.notificationPreferences?.[
-        PreferenceNotificationType.MESSAGE_RECEIVED
-      ] ?? []
+    for (const userInformations of recipients) {
+      const userId = userInformations.userId?.trim()
+      if (!userId) continue
 
-    this.logger.log(
-      `MESSAGE_RECEIVED channels for userId=${userId}: ${enabledChannels.join(',') || 'none'}`
-    )
+      const enabledChannels =
+        userInformations.notificationPreferences?.[
+          PreferenceNotificationType.MESSAGE_RECEIVED
+        ] ?? []
 
-    if (enabledChannels.includes(NotificationChannel.APP)) {
-      await this.notificationService.createNotification({
-        organizationId: this.getString(data, 'organizationId') ?? null,
-        userId,
-        type: NotificationType.MESSAGE_RECEIVED,
-        title: 'Nova mensagem recebida',
-        description,
-        referenceType: NotificationReferenceType.MESSAGE,
-        referenceId: leadId
-      })
-    } else {
       this.logger.log(
-        `Skipping MESSAGE_RECEIVED APP notification because APP channel is disabled for userId=${userId}`
+        `MESSAGE_RECEIVED channels for userId=${userId}: ${enabledChannels.join(',') || 'none'}`
       )
-    }
 
-    await this.dispatchWhatsAppMessageReceivedNotification({
-      userId,
-      messageId,
-      leadId,
-      leadName,
-      userInformations,
-      enabledChannels
-    })
+      if (enabledChannels.includes(NotificationChannel.APP)) {
+        await this.notificationService.createNotification({
+          organizationId: this.getString(data, 'organizationId') ?? null,
+          userId,
+          type: NotificationType.MESSAGE_RECEIVED,
+          title: 'Nova mensagem recebida',
+          description,
+          referenceType: NotificationReferenceType.MESSAGE,
+          referenceId: leadId
+        })
+      } else {
+        this.logger.log(
+          `Skipping MESSAGE_RECEIVED APP notification because APP channel is disabled for userId=${userId}`
+        )
+      }
+
+      await this.dispatchWhatsAppMessageReceivedNotification({
+        userId,
+        messageId,
+        leadId,
+        leadName,
+        userInformations,
+        enabledChannels
+      })
+    }
   }
 
   private async handleLeadCreatedEvent(message: RabbitMessage): Promise<void> {
@@ -303,9 +298,45 @@ export class NotificationWorker implements OnModuleInit {
       throw new Error(`Unsupported notification event: ${message.event}`)
     }
 
+    const data = this.asRecord(message.data)
+    const companyId = this.getString(data, 'companyId')
+    const leadId = this.getLeadId(message.data)
+
+    if (!companyId || !leadId) {
+      this.logger.warn(
+        'Skipping lead.created notification due to invalid payload'
+      )
+      return
+    }
+
+    const lead = await this.leadRepo.findOne({
+      where: { id: leadId, companyId }
+    })
+    if (!lead) {
+      this.logger.warn(
+        `Skipping lead.created notification because lead does not belong to Company. leadId=${leadId} companyId=${companyId}`
+      )
+      return
+    }
+
+    const recipients = await this.userInformationsRepo.find({
+      where: { companyId },
+      order: { createdAt: 'ASC' }
+    })
+
+    for (const userInformations of recipients) {
+      if (!userInformations.userId?.trim()) continue
+      await this.notifyLeadCreatedUser(message, userInformations)
+    }
+  }
+
+  private async notifyLeadCreatedUser(
+    message: RabbitMessage,
+    userInformations: UserInformations
+  ): Promise<void> {
     const leadId = this.getLeadId(message.data)
     const data = this.asRecord(message.data)
-    const userId = this.getString(data, 'userId')
+    const userId = userInformations.userId.trim()
 
     this.logger.log(
       `Received job: ${message.event} (eventId=${message.eventId}, leadId=${leadId})`
@@ -324,11 +355,6 @@ export class NotificationWorker implements OnModuleInit {
         )
         return
       }
-
-      const userInformations = await this.userInformationsRepo.findOne({
-        where: { userId },
-        order: { createdAt: 'ASC' }
-      })
 
       const enabledChannels =
         userInformations?.notificationPreferences?.[

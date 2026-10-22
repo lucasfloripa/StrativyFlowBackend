@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { Company } from '../../company/company.entity'
 import { UserInformations } from '../../user/entities/user-informations.entity'
 import { LeadChannel } from '../entities/lead-channel-identity.entity'
 import { Lead } from '../entities/lead.entity'
@@ -13,7 +14,7 @@ type LeadMessageOutboundContext = {
   lead: Lead
   destinationPhone: string
   phoneNumberId: string
-  whatsappToken?: string
+  whatsappToken: string
 }
 
 type MessengerLeadMessageOutboundContext = {
@@ -35,7 +36,9 @@ export class LeadMessageContextService {
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
     private readonly leadsService: LeadsService,
-    private readonly leadChannelIdentityService: LeadChannelIdentityService
+    private readonly leadChannelIdentityService: LeadChannelIdentityService,
+    @InjectRepository(Company)
+    private readonly companyRepo: Repository<Company>
   ) {}
 
   async resolveOutboundContextOrFail(
@@ -56,19 +59,39 @@ export class LeadMessageContextService {
       throw new BadRequestException('Lead phone is missing')
     }
 
-    const userInformations = lead.userInformationsId
-      ? await this.userInformationsRepo.findOne({
-          where: { id: lead.userInformationsId }
-        })
-      : null
+    if (!lead.companyId) {
+      throw new BadRequestException('Company is not configured for this lead')
+    }
 
-    const phoneNumberId =
-      whatsappIdentity?.externalAccountId.trim() ||
-      userInformations?.phoneNumberId?.trim()
+    const company = await this.companyRepo.findOne({
+      where: { id: lead.companyId }
+    })
 
-    if (!phoneNumberId?.trim()) {
+    if (!company) {
+      throw new BadRequestException('Company not found for this lead')
+    }
+
+    const phoneNumberId = company.companyPhoneNumberId?.trim()
+    const whatsappToken = company.whatsappToken?.trim()
+
+    if (!phoneNumberId) {
       throw new BadRequestException(
-        'WhatsApp phoneNumberId is not configured for this lead'
+        'WhatsApp phoneNumberId is not configured for this company'
+      )
+    }
+
+    if (!whatsappToken) {
+      throw new BadRequestException(
+        'WhatsApp token is not configured for this company'
+      )
+    }
+
+    if (
+      whatsappIdentity &&
+      whatsappIdentity.externalAccountId.trim() !== phoneNumberId
+    ) {
+      throw new BadRequestException(
+        'WhatsApp identity does not match the company account'
       )
     }
 
@@ -76,7 +99,7 @@ export class LeadMessageContextService {
       lead,
       destinationPhone,
       phoneNumberId,
-      whatsappToken: userInformations?.whatsappToken ?? undefined
+      whatsappToken
     }
   }
 
@@ -100,17 +123,18 @@ export class LeadMessageContextService {
       )
     }
 
-    const userInformations = lead.userInformationsId
-      ? await this.userInformationsRepo.findOne({
-          where: { id: lead.userInformationsId }
-        })
-      : null
-    const configuredPageId = userInformations?.messengerPageId?.trim()
-    const messengerToken = userInformations?.messengerToken?.trim()
+    if (!lead.companyId) {
+      throw new BadRequestException('Company is not configured for this lead')
+    }
+    const company = await this.companyRepo.findOne({
+      where: { id: lead.companyId }
+    })
+    const configuredPageId = company?.messengerPageId?.trim()
+    const messengerToken = company?.messengerToken?.trim()
 
     if (configuredPageId !== pageId || !messengerToken) {
       throw new BadRequestException(
-        'Messenger Page or token is not configured for this lead'
+        'Messenger Page or token is not configured for this company'
       )
     }
 
@@ -142,15 +166,23 @@ export class LeadMessageContextService {
       )
     }
 
-    const userInformations = lead.userInformationsId
-      ? await this.userInformationsRepo.findOne({
-          where: { id: lead.userInformationsId }
-        })
-      : null
+    if (!lead.companyId) {
+      throw new BadRequestException('Company is not configured for this lead')
+    }
 
-    if (userInformations?.instagramAccountId?.trim() !== instagramAccountId) {
+    const company = await this.companyRepo.findOne({
+      where: { id: lead.companyId }
+    })
+
+    if (company?.instagramAccountId?.trim() !== instagramAccountId) {
       throw new BadRequestException(
-        'Instagram Account is not configured for this lead'
+        'Instagram Account is not configured for this company'
+      )
+    }
+
+    if (!company.instagramToken?.trim()) {
+      throw new BadRequestException(
+        'Instagram token is not configured for this company'
       )
     }
 

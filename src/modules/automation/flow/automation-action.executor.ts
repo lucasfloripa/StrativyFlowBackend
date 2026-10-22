@@ -2,10 +2,10 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { Company } from '../../company/company.entity'
 import { LeadChannel } from '../../leads/entities/lead-channel-identity.entity'
 import { Lead, LeadRuntimeMode } from '../../leads/entities/lead.entity'
 import { LeadChannelIdentityService } from '../../leads/services/lead-channel-identity.service'
-import { UserInformations } from '../../user/entities/user-informations.entity'
 import { AutomationMessagingService } from '../services/automation-messaging.service'
 
 import {
@@ -19,8 +19,8 @@ export class AutomationActionExecutor {
   constructor(
     @InjectRepository(Lead)
     private readonly leadRepo: Repository<Lead>,
-    @InjectRepository(UserInformations)
-    private readonly userInformationsRepo: Repository<UserInformations>,
+    @InjectRepository(Company)
+    private readonly companyRepo: Repository<Company>,
     private readonly automationMessagingService: AutomationMessagingService,
     private readonly leadChannelIdentityService: LeadChannelIdentityService
   ) {}
@@ -67,9 +67,9 @@ export class AutomationActionExecutor {
             break
           }
 
-          const userInformations = lead.userInformationsId
-            ? await this.userInformationsRepo.findOne({
-                where: { id: lead.userInformationsId }
+          const company = lead.companyId
+            ? await this.companyRepo.findOne({
+                where: { id: lead.companyId }
               })
             : null
 
@@ -79,12 +79,15 @@ export class AutomationActionExecutor {
               LeadChannel.WHATSAPP
             )
 
-          const phoneNumberId =
+          const phoneNumberId = company?.companyPhoneNumberId?.trim()
+          const contextPhoneNumberId =
             typeof context?.metadata?.phoneNumberId === 'string'
-              ? context.metadata.phoneNumberId
-              : whatsappIdentity?.externalAccountId
+              ? context.metadata.phoneNumberId.trim()
+              : undefined
+          const identityPhoneNumberId =
+            whatsappIdentity?.externalAccountId.trim()
 
-          const whatsappToken = userInformations?.whatsappToken ?? undefined
+          const whatsappToken = company?.whatsappToken?.trim()
           const destinationPhone =
             (typeof context?.metadata?.from === 'string'
               ? context.metadata.from.trim()
@@ -95,6 +98,19 @@ export class AutomationActionExecutor {
           if (!destinationPhone) {
             this.logger.warn(
               `Skipping SEND_MESSAGE action because lead ${lead.id} has no WhatsApp phone`
+            )
+            break
+          }
+
+          if (
+            !company ||
+            !phoneNumberId ||
+            !whatsappToken ||
+            (contextPhoneNumberId && contextPhoneNumberId !== phoneNumberId) ||
+            (identityPhoneNumberId && identityPhoneNumberId !== phoneNumberId)
+          ) {
+            this.logger.warn(
+              `Skipping SEND_MESSAGE action because Company WhatsApp configuration is missing or inconsistent. leadId=${lead.id} companyId=${lead.companyId ?? 'missing'}`
             )
             break
           }

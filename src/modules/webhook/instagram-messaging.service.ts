@@ -10,7 +10,7 @@ import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
 import { Repository } from 'typeorm'
 
-import { UserInformations } from '../user/entities/user-informations.entity'
+import { Company } from '../company/company.entity'
 
 export type InstagramUserProfile = {
   id: string
@@ -51,8 +51,8 @@ export class InstagramMessagingService {
   private readonly logger = new Logger(InstagramMessagingService.name)
 
   constructor(
-    @InjectRepository(UserInformations)
-    private readonly userInformationsRepo: Repository<UserInformations>
+    @InjectRepository(Company)
+    private readonly companyRepo: Repository<Company>
   ) {}
 
   async getInstagramUserProfile(
@@ -70,21 +70,19 @@ export class InstagramMessagingService {
       throw new BadRequestException('Instagram User ID is required')
     }
 
-    const userInformations = await this.userInformationsRepo.findOne({
+    const company = await this.companyRepo.findOne({
       where: { instagramAccountId: normalizedAccountId }
     })
 
-    if (!userInformations) {
-      throw new NotFoundException(
-        'UserInformations not found for Instagram Account ID'
-      )
+    if (!company) {
+      throw new NotFoundException('Company not found for Instagram Account ID')
     }
 
-    if (!userInformations.instagramAccountId?.trim()) {
+    if (company.instagramAccountId?.trim() !== normalizedAccountId) {
       throw new BadRequestException('Instagram Account ID is not configured')
     }
 
-    const instagramToken = userInformations.instagramToken?.trim()
+    const instagramToken = company.instagramToken?.trim()
 
     if (!instagramToken) {
       throw new BadRequestException('Instagram token is not configured')
@@ -144,21 +142,19 @@ export class InstagramMessagingService {
       throw new BadRequestException('Instagram message text is required')
     }
 
-    const userInformations = await this.userInformationsRepo.findOne({
+    const company = await this.companyRepo.findOne({
       where: { instagramAccountId: normalizedAccountId }
     })
 
-    if (!userInformations) {
-      throw new NotFoundException(
-        'UserInformations not found for Instagram Account ID'
-      )
+    if (!company) {
+      throw new NotFoundException('Company not found for Instagram Account ID')
     }
 
-    if (!userInformations.instagramAccountId?.trim()) {
+    if (company.instagramAccountId?.trim() !== normalizedAccountId) {
       throw new BadRequestException('Instagram Account ID is not configured')
     }
 
-    const instagramToken = userInformations.instagramToken?.trim()
+    const instagramToken = company.instagramToken?.trim()
 
     if (!instagramToken) {
       throw new BadRequestException('Instagram token is not configured')
@@ -224,17 +220,19 @@ export class InstagramMessagingService {
       throw new BadRequestException('Instagram attachment URL is required')
     }
 
-    const userInformations = await this.userInformationsRepo.findOne({
+    const company = await this.companyRepo.findOne({
       where: { instagramAccountId: normalizedAccountId }
     })
 
-    if (!userInformations) {
-      throw new NotFoundException(
-        'UserInformations not found for Instagram Account ID'
-      )
+    if (!company) {
+      throw new NotFoundException('Company not found for Instagram Account ID')
     }
 
-    const instagramToken = userInformations.instagramToken?.trim()
+    if (company.instagramAccountId?.trim() !== normalizedAccountId) {
+      throw new BadRequestException('Instagram Account ID is not configured')
+    }
+
+    const instagramToken = company.instagramToken?.trim()
 
     if (!instagramToken) {
       throw new BadRequestException('Instagram token is not configured')

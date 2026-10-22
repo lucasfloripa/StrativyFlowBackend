@@ -2,7 +2,7 @@ import { RabbitMessage } from '../../modules/rabbit/interfaces/rabbit-message.in
 import { RabbitSubscription } from '../../modules/rabbit/interfaces/rabbit-subscription.interface'
 
 import {
-  PAYMENT_MARK_OVERDUE_JOB,
+  PAYMENT_MARK_OVERDUE_EVENT,
   PAYMENT_QUEUE
 } from './payment-job.constants'
 import { PaymentWorker } from './payment-worker.service'
@@ -24,11 +24,11 @@ describe('PaymentWorker', () => {
 
     expect(subscribe).toHaveBeenCalledTimes(1)
     expect(subscription?.queue).toBe(PAYMENT_QUEUE)
-    expect(subscription?.routingKey).toBe(PAYMENT_MARK_OVERDUE_JOB)
+    expect(subscription?.routingKey).toBe(PAYMENT_MARK_OVERDUE_EVENT)
 
     const message: RabbitMessage = {
       eventId: 'event-id',
-      event: PAYMENT_MARK_OVERDUE_JOB,
+      event: PAYMENT_MARK_OVERDUE_EVENT,
       occurredAt: '2026-09-28T00:00:00.000Z',
       data: { paymentId: 'payment-id' }
     }

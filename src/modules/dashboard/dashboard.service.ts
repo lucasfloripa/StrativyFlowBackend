@@ -61,9 +61,9 @@ export class DashboardService {
   ) {}
 
   async getSummary(userId: string): Promise<DashboardSummary> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
+    const companyIds = await this.findCompanyIds(userId)
 
-    if (!userInformationsIds.length) {
+    if (!companyIds.length) {
       return {
         activeLeads: 0,
         newToday: 0,
@@ -89,14 +89,14 @@ export class DashboardService {
       await Promise.all([
         this.leadRepo.count({
           where: {
-            userInformationsId: In(userInformationsIds),
+            companyId: In(companyIds),
             state: LeadState.ACTIVE
           }
         }),
         this.leadRepo
           .createQueryBuilder('lead')
-          .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-            userInformationsIds
+          .where('lead."companyId" IN (:...companyIds)', {
+            companyIds
           })
           .andWhere('lead.state = :activeState', {
             activeState: LeadState.ACTIVE
@@ -120,8 +120,8 @@ export class DashboardService {
           .getCount(),
         this.leadRepo
           .createQueryBuilder('lead')
-          .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-            userInformationsIds
+          .where('lead."companyId" IN (:...companyIds)', {
+            companyIds
           })
           .andWhere('lead.state = :activeState', {
             activeState: LeadState.ACTIVE
@@ -157,8 +157,8 @@ export class DashboardService {
           .createQueryBuilder('followup')
           .innerJoin('followup.negotiation', 'negotiation')
           .innerJoin('negotiation.lead', 'lead')
-          .where('lead."userInformationsId" IN (:...userInformationsIds)', {
-            userInformationsIds
+          .where('lead."companyId" IN (:...companyIds)', {
+            companyIds
           })
           .andWhere('lead.state = :activeState', {
             activeState: LeadState.ACTIVE
@@ -201,9 +201,9 @@ export class DashboardService {
     userId: string,
     filter: DashboardConversationFilter
   ): Promise<DashboardConversationsResponseDto> {
-    const userInformationsIds = await this.findUserInformationsIds(userId)
+    const companyIds = await this.findCompanyIds(userId)
 
-    if (!userInformationsIds.length) {
+    if (!companyIds.length) {
       return {
         filter,
         counts: {
@@ -258,10 +258,10 @@ export class DashboardService {
           FROM messages message
           WHERE message."leadId" = lead.id::text
         ) message_stats ON TRUE
-        WHERE lead."userInformationsId"::text = ANY($1::text[])
+        WHERE lead."companyId"::text = ANY($1::text[])
       `,
       [
-        userInformationsIds,
+        companyIds,
         MessageDirection.INBOUND,
         MessageDirection.OUTBOUND,
         LeadRuntimeMode.AUTOMATION,
@@ -396,12 +396,18 @@ export class DashboardService {
     }
   }
 
-  private async findUserInformationsIds(userId: string): Promise<string[]> {
+  private async findCompanyIds(userId: string): Promise<string[]> {
     const mappings = await this.userInformationsRepo.find({
       where: { userId },
-      select: ['id']
+      select: ['companyId']
     })
 
-    return mappings.map((mapping) => mapping.id)
+    return [
+      ...new Set(
+        mappings
+          .map((mapping) => mapping.companyId)
+          .filter((companyId): companyId is string => Boolean(companyId))
+      )
+    ]
   }
 }

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
+import { Company } from '../../company/company.entity'
 import {
   LeadChannel,
   LeadChannelIdentity
@@ -25,7 +26,6 @@ import {
   NegotiationStatus,
   NegotiationTemperature
 } from '../../negotiation/entities/negotiation.entity'
-import { UserInformations } from '../../user/entities/user-informations.entity'
 import { InstagramMessagingService } from '../../webhook/instagram-messaging.service'
 import { MessengerMessagingService } from '../../webhook/messenger-messaging.service'
 import { WhatsAppMessagingService } from '../../webhook/whatsapp-messaging.service'
@@ -75,8 +75,8 @@ export class FollowUpStepExecutor {
     private readonly leadChannelIdentityRepository: Repository<LeadChannelIdentity>,
     @InjectRepository(Template)
     private readonly templateRepository: Repository<Template>,
-    @InjectRepository(UserInformations)
-    private readonly userInformationsRepository: Repository<UserInformations>,
+    @InjectRepository(Company)
+    private readonly companyRepository: Repository<Company>,
     private readonly conversationPolicy: FollowUpConversationPolicy,
     private readonly whatsAppMessagingService: WhatsAppMessagingService,
     private readonly whatsAppTemplateSender: WhatsAppTemplateSender,
@@ -233,14 +233,14 @@ export class FollowUpStepExecutor {
         lead.id,
         LeadChannel.MESSENGER
       )
-      const userInformations = await this.findUserInformations(lead)
-      const messengerToken = userInformations.messengerToken?.trim()
+      const company = await this.findCompany(lead)
+      const messengerToken = company.messengerToken?.trim()
 
       if (
         !messengerToken ||
-        userInformations.messengerPageId?.trim() !== identity.externalAccountId
+        company.messengerPageId?.trim() !== identity.externalAccountId
       ) {
-        throw new Error('Messenger Page or token is not configured for lead')
+        throw new Error('Messenger Page or token is not configured for Company')
       }
 
       await this.messengerMessagingService.sendMessengerMessage(
@@ -288,18 +288,23 @@ export class FollowUpStepExecutor {
       LeadChannel.WHATSAPP,
       false
     )
-    const userInformations = await this.findUserInformations(lead)
+    const company = await this.findCompany(lead)
     const destinationPhone =
       payload.phone?.trim() ||
       identity?.externalUserId.trim() ||
       lead.phone?.trim()
-    const phoneNumberId =
-      identity?.externalAccountId.trim() ||
-      userInformations.phoneNumberId?.trim()
-    const accessToken = userInformations.whatsappToken?.trim()
+    const phoneNumberId = company.companyPhoneNumberId?.trim()
+    const accessToken = company.whatsappToken?.trim()
 
     if (!destinationPhone || !phoneNumberId || !accessToken) {
-      throw new Error('WhatsApp context is not configured for lead')
+      throw new Error('WhatsApp context is not configured for Company')
+    }
+
+    if (
+      identity?.externalAccountId.trim() &&
+      identity.externalAccountId.trim() !== phoneNumberId
+    ) {
+      throw new Error('WhatsApp identity does not match Company account')
     }
 
     if (isWithinWindow && payload.message?.trim()) {
@@ -973,20 +978,20 @@ export class FollowUpStepExecutor {
     return identity
   }
 
-  private async findUserInformations(lead: Lead): Promise<UserInformations> {
-    if (!lead.userInformationsId) {
-      throw new Error('UserInformations is not configured for lead')
+  private async findCompany(lead: Lead): Promise<Company> {
+    if (!lead.companyId) {
+      throw new Error('Company is not configured for lead')
     }
 
-    const userInformations = await this.userInformationsRepository.findOne({
-      where: { id: lead.userInformationsId }
+    const company = await this.companyRepository.findOne({
+      where: { id: lead.companyId }
     })
 
-    if (!userInformations) {
-      throw new Error('UserInformations not found for lead')
+    if (!company) {
+      throw new Error('Company not found for lead')
     }
 
-    return userInformations
+    return company
   }
 
   private toMessagePayload(

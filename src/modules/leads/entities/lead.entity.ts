@@ -3,11 +3,14 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  JoinColumn,
+  ManyToOne,
   UpdateDateColumn,
   Index,
   OneToMany
 } from 'typeorm'
 
+import { Company } from '../../company/company.entity'
 import { Negotiation } from '../../negotiation/entities/negotiation.entity'
 
 import { LeadChannelIdentity } from './lead-channel-identity.entity'
@@ -49,6 +52,16 @@ export class Lead {
 
   @Column({ nullable: true })
   userInformationsId?: string
+
+  @Column({ type: 'uuid', nullable: true })
+  companyId?: string | null
+
+  @ManyToOne(() => Company, (company) => company.leads, {
+    nullable: true,
+    onDelete: 'SET NULL'
+  })
+  @JoinColumn({ name: 'companyId' })
+  company?: Company | null
 
   @Column({ nullable: true })
   name?: string

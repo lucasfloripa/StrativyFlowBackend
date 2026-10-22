@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { DatabaseModule } from './database/database.module'
+import { Company } from './modules/company/company.entity'
 import { EvolutionModule } from './modules/evolution/evolution.module'
 import { FollowUp } from './modules/followup/entities/followup.entity'
 import { FollowUpExecutionModule } from './modules/followup/followup-execution.module'
@@ -25,6 +26,7 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
   imports: [
     DatabaseModule,
     TypeOrmModule.forFeature([
+      Company,
       Notification,
       UserInformations,
       Message,

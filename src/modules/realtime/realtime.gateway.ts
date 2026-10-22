@@ -7,10 +7,15 @@ import {
   OnGatewayDisconnect,
   OnGatewayInit,
   SubscribeMessage,
+  WsException,
   WebSocketGateway,
   WebSocketServer
 } from '@nestjs/websockets'
+import { isUUID } from 'class-validator'
+import jwt from 'jsonwebtoken'
 import { Namespace, Server, Socket } from 'socket.io'
+
+import { CompanyAccessService } from '../auth/company-access.service'
 
 import { JoinLeadRoomDto } from './dto/join-lead-room.dto'
 import { RealtimeService } from './realtime.service'
@@ -29,15 +34,28 @@ export class RealtimeGateway
   server!: Namespace
 
   private readonly logger = new Logger(RealtimeGateway.name)
+  private readonly expirationTimers = new WeakMap<
+    Socket,
+    ReturnType<typeof setTimeout>
+  >()
 
   constructor(
     private readonly realtimeService: RealtimeService,
-    private readonly configService: ConfigService
+    private readonly configService: ConfigService,
+    private readonly access: CompanyAccessService
   ) {
     this.realtimeService.registerGateway(this)
   }
 
   afterInit(server: Namespace | Server): void {
+    server.use((client, next) => {
+      try {
+        this.authenticate(client)
+        next()
+      } catch {
+        next(new Error('Unauthorized'))
+      }
+    })
     const rootServer = this.getRootServer(server)
 
     if (!rootServer) {
@@ -65,13 +83,30 @@ export class RealtimeGateway
     }
   }
 
-  handleConnection(client: Socket): void {
+  async handleConnection(client: Socket): Promise<void> {
+    try {
+      const identity = this.authenticate(client)
+      await client.join(this.getUserRoom(identity.userId))
+      if (identity.expiresAt !== undefined) {
+        const timer = setTimeout(
+          () => client.disconnect(true),
+          identity.expiresAt * 1000 - Date.now()
+        )
+        this.expirationTimers.set(client, timer)
+      }
+    } catch {
+      client.disconnect(true)
+      return
+    }
     this.logger.log(
       `WebSocket client connected. clientId=${client.id} timestamp=${new Date().toISOString()}`
     )
   }
 
   handleDisconnect(client: Socket): void {
+    const timer = this.expirationTimers.get(client)
+    if (timer) clearTimeout(timer)
+    this.expirationTimers.delete(client)
     this.logger.log(
       `WebSocket client disconnected. clientId=${client.id} timestamp=${new Date().toISOString()}`
     )
@@ -84,11 +119,15 @@ export class RealtimeGateway
   ): Promise<{ room: string }> {
     const leadId = payload?.leadId?.trim()
 
-    if (!leadId) {
-      this.logger.warn(
-        `joinLeadRoom ignored due to missing leadId. clientId=${client.id} timestamp=${new Date().toISOString()}`
-      )
-      return { room: '' }
+    if (!leadId || !isUUID(leadId)) {
+      throw new WsException('Invalid leadId')
+    }
+
+    try {
+      const identity = this.authenticate(client)
+      await this.access.assertResource(identity.userId, 'lead', leadId)
+    } catch {
+      throw new WsException('Access denied')
     }
 
     const room = this.getLeadRoom(leadId)
@@ -142,6 +181,23 @@ export class RealtimeGateway
       .split(',')
       .map((origin) => origin.trim())
       .filter(Boolean)
+  }
+
+  private authenticate(client: Socket): { userId: string; expiresAt?: number } {
+    const auth = client.handshake.auth as { token?: unknown }
+    const token = auth?.token
+    const secret = this.configService.get<string>('JWT_SECRET')
+    if (typeof token !== 'string' || !token.trim() || !secret)
+      throw new Error('Unauthorized')
+    const payload = jwt.verify(token, secret)
+    if (
+      typeof payload === 'string' ||
+      typeof payload.userId !== 'string' ||
+      !payload.userId.trim()
+    ) {
+      throw new Error('Unauthorized')
+    }
+    return { userId: payload.userId, expiresAt: payload.exp }
   }
 
   private isAllowedOrigin(origin?: string): boolean {

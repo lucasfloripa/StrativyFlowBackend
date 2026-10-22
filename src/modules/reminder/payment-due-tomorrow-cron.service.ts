@@ -27,6 +27,7 @@ type PaymentRecipientGroup = {
   emailRecipients: Set<string>
   whatsappRecipients: Set<string>
   referencePaymentId: string
+  includedPaymentIds: Set<string>
   items: PaymentDueTomorrowEmailItem[]
 }
 
@@ -107,13 +108,12 @@ export class PaymentDueTomorrowCronService {
       }
     }
 
-    const userInformationsIds = Array.from(
+    const companyIds = Array.from(
       new Set(
         payments
           .map(
             (payment) =>
-              payment.negotiationFinancial?.negotiation?.lead
-                ?.userInformationsId
+              payment.negotiationFinancial?.negotiation?.lead?.companyId
           )
           .filter(
             (value): value is string =>
@@ -121,70 +121,78 @@ export class PaymentDueTomorrowCronService {
           )
       )
     )
-    const userInformationsList = userInformationsIds.length
+    const userInformationsList = companyIds.length
       ? await this.userInformationsRepository.find({
-          where: { id: In(userInformationsIds) }
+          where: { companyId: In(companyIds) }
         })
       : []
-    const userInformationsById = new Map(
-      userInformationsList.map((userInformations) => [
-        userInformations.id,
-        userInformations
-      ])
-    )
+    const userInformationsByCompanyId = new Map<string, UserInformations[]>()
+    for (const userInformations of userInformationsList) {
+      const companyId = userInformations.companyId?.trim()
+      if (!companyId) continue
+      const members = userInformationsByCompanyId.get(companyId) ?? []
+      members.push(userInformations)
+      userInformationsByCompanyId.set(companyId, members)
+    }
     const groupedByUser = new Map<string, PaymentRecipientGroup>()
 
     for (const payment of payments) {
       const lead = payment.negotiationFinancial?.negotiation?.lead
-      const userInformationsId = lead?.userInformationsId?.trim()
+      const companyId = lead?.companyId?.trim()
 
-      if (!lead || !userInformationsId) continue
+      if (!lead || !companyId) continue
 
-      const userInformations = userInformationsById.get(userInformationsId)
-      const userId = userInformations?.userId?.trim()
+      for (const userInformations of userInformationsByCompanyId.get(
+        companyId
+      ) ?? []) {
+        const userId = userInformations.userId?.trim()
+        if (!userId) continue
 
-      if (!userInformations || !userId) continue
+        const existingGroup = groupedByUser.get(userId) ?? {
+          appEnabled: false,
+          emailRecipients: new Set<string>(),
+          whatsappRecipients: new Set<string>(),
+          referencePaymentId: payment.id,
+          includedPaymentIds: new Set<string>(),
+          items: []
+        }
+        const enabledChannels =
+          userInformations.notificationPreferences?.[
+            NotificationType.INSTALLMENT_DUE_TOMORROW
+          ] ?? []
 
-      const existingGroup = groupedByUser.get(userId) ?? {
-        appEnabled: false,
-        emailRecipients: new Set<string>(),
-        whatsappRecipients: new Set<string>(),
-        referencePaymentId: payment.id,
-        items: []
+        existingGroup.appEnabled ||= enabledChannels.includes(
+          NotificationChannel.APP
+        )
+
+        if (enabledChannels.includes(NotificationChannel.EMAIL)) {
+          userInformations.notificationEmails.forEach((email) => {
+            const normalizedEmail = email.trim().toLowerCase()
+            if (normalizedEmail)
+              existingGroup.emailRecipients.add(normalizedEmail)
+          })
+        }
+
+        if (enabledChannels.includes(NotificationChannel.WHATSAPP)) {
+          userInformations.notificationWhatsAppNumbers.forEach((number) => {
+            const normalizedNumber = number.trim()
+            if (normalizedNumber) {
+              existingGroup.whatsappRecipients.add(normalizedNumber)
+            }
+          })
+        }
+
+        if (!existingGroup.includedPaymentIds.has(payment.id)) {
+          existingGroup.includedPaymentIds.add(payment.id)
+          existingGroup.items.push({
+            leadName: lead.name?.trim() || 'Lead sem nome',
+            amount: Number(payment.amount),
+            paymentMethod: paymentMethodLabels[payment.paymentMethod],
+            dueDate: payment.dueDate
+          })
+        }
+        groupedByUser.set(userId, existingGroup)
       }
-      const enabledChannels =
-        userInformations.notificationPreferences?.[
-          NotificationType.INSTALLMENT_DUE_TOMORROW
-        ] ?? []
-
-      existingGroup.appEnabled ||= enabledChannels.includes(
-        NotificationChannel.APP
-      )
-
-      if (enabledChannels.includes(NotificationChannel.EMAIL)) {
-        userInformations.notificationEmails.forEach((email) => {
-          const normalizedEmail = email.trim().toLowerCase()
-          if (normalizedEmail)
-            existingGroup.emailRecipients.add(normalizedEmail)
-        })
-      }
-
-      if (enabledChannels.includes(NotificationChannel.WHATSAPP)) {
-        userInformations.notificationWhatsAppNumbers.forEach((number) => {
-          const normalizedNumber = number.trim()
-          if (normalizedNumber) {
-            existingGroup.whatsappRecipients.add(normalizedNumber)
-          }
-        })
-      }
-
-      existingGroup.items.push({
-        leadName: lead.name?.trim() || 'Lead sem nome',
-        amount: Number(payment.amount),
-        paymentMethod: paymentMethodLabels[payment.paymentMethod],
-        dueDate: payment.dueDate
-      })
-      groupedByUser.set(userId, existingGroup)
     }
 
     let usersNotified = 0

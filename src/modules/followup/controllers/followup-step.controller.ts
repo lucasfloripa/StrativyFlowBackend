@@ -6,9 +6,17 @@ import {
   Param,
   Patch,
   Post,
-  Query
+  Query,
+  Req,
+  UseGuards
 } from '@nestjs/common'
 
+import {
+  CompanyAccessGuard,
+  CompanyResourceAccess
+} from '../../auth/company-access.guard'
+import { CompanyAccessService } from '../../auth/company-access.service'
+import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { CreateFollowUpStepTreeDto } from '../dto/create-followup-step-tree.dto'
 import { CreateFollowUpStepDto } from '../dto/create-followup-step.dto'
 import { FollowUpStepResponseDto } from '../dto/followup-response.dto'
@@ -16,8 +24,13 @@ import { UpdateFollowUpStepDto } from '../dto/update-followup-step.dto'
 import { FollowUpStepService } from '../services/followup-step.service'
 
 @Controller('followup-steps')
+@UseGuards(JwtAuthGuard, CompanyAccessGuard)
+@CompanyResourceAccess('step')
 export class FollowUpStepController {
-  constructor(private readonly followUpStepService: FollowUpStepService) {}
+  constructor(
+    private readonly followUpStepService: FollowUpStepService,
+    private readonly access: CompanyAccessService
+  ) {}
 
   @Post()
   async create(@Body() dto: CreateFollowUpStepDto) {
@@ -33,8 +46,14 @@ export class FollowUpStepController {
   }
 
   @Get()
-  async findAll(@Query('followUpId') followUpId?: string) {
-    return await this.followUpStepService.findAll(followUpId)
+  async findAll(
+    @Req() request: { user: { id: string } },
+    @Query('followUpId') followUpId?: string
+  ) {
+    return await this.followUpStepService.findAll(
+      followUpId,
+      await this.access.companyIdsForUser(request.user.id)
+    )
   }
 
   @Get(':id')

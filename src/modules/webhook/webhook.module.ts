@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
 import { AutomationModule } from '../automation/automation.module'
+import { Company } from '../company/company.entity'
 import { FollowUpStep } from '../followup/entities/followup-step.entity'
 import { FollowUp } from '../followup/entities/followup.entity'
 import { FollowUpModule } from '../followup/followup.module'
@@ -25,6 +26,7 @@ import { WebhookService } from './webhook.service'
 @Module({
   imports: [
     TypeOrmModule.forFeature([
+      Company,
       FollowUp,
       FollowUpStep,
       Lead,

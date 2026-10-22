@@ -2,6 +2,7 @@ import { HttpModule } from '@nestjs/axios'
 import { Module } from '@nestjs/common'
 import { TypeOrmModule } from '@nestjs/typeorm'
 
+import { Company } from '../company/company.entity'
 import { LeadChannelIdentity } from '../leads/entities/lead-channel-identity.entity'
 import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
@@ -38,7 +39,8 @@ import { WhatsAppTemplateSender } from './services/whatsapp-template-sender.serv
       Message,
       Negotiation,
       Template,
-      UserInformations
+      UserInformations,
+      Company
     ])
   ],
   providers: [
