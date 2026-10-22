@@ -1,11 +1,9 @@
 import { randomUUID } from 'crypto'
 import { extname } from 'path'
-import { Readable } from 'stream'
 
 import {
   DeleteObjectCommand,
   GetObjectCommand,
-  GetObjectCommandOutput,
   PutObjectCommand,
   S3Client
 } from '@aws-sdk/client-s3'
@@ -15,8 +13,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
-  Logger,
-  NotFoundException
+  Logger
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
@@ -29,23 +26,6 @@ export type StorageUploadFile = {
   mimetype: string
   size: number
   buffer: Buffer
-}
-
-type DownloadFileResult = {
-  stream: Readable
-  contentType: string
-  contentLength?: number
-}
-
-type AwsRequestError = {
-  name?: string
-  $metadata?: {
-    httpStatusCode?: number
-  }
-}
-
-type StreamWithTransformToByteArray = {
-  transformToByteArray: () => Promise<Uint8Array>
 }
 
 type StorageUploadOptions = {
@@ -113,42 +93,6 @@ export class StorageService {
 
       throw new InternalServerErrorException(
         'Falha ao enviar arquivo para o storage.'
-      )
-    }
-  }
-
-  async downloadFile(key: string): Promise<DownloadFileResult> {
-    if (!key) {
-      throw new BadRequestException('Key do arquivo e obrigatoria.')
-    }
-
-    try {
-      const output = await this.s3Client.send(
-        new GetObjectCommand({
-          Bucket: this.bucketName,
-          Key: key
-        })
-      )
-
-      const stream = await this.toNodeReadable(output.Body)
-
-      return {
-        stream,
-        contentType: output.ContentType ?? 'application/octet-stream',
-        contentLength: output.ContentLength
-      }
-    } catch (error: unknown) {
-      if (this.isNotFoundError(error)) {
-        throw new NotFoundException('Arquivo nao encontrado.')
-      }
-
-      this.logger.error('Falha ao baixar arquivo do R2.', {
-        key,
-        error
-      })
-
-      throw new InternalServerErrorException(
-        'Falha ao baixar arquivo do storage.'
       )
     }
   }
@@ -277,51 +221,5 @@ export class StorageService {
     )
 
     return `attachment; filename="${fallbackFileName}"; filename*=UTF-8''${encodedFileName}`
-  }
-
-  private async toNodeReadable(
-    body: GetObjectCommandOutput['Body']
-  ): Promise<Readable> {
-    if (!body) {
-      throw new NotFoundException('Arquivo nao encontrado.')
-    }
-
-    if (body instanceof Readable) {
-      return body
-    }
-
-    if (this.hasTransformToByteArray(body)) {
-      const bytes = await body.transformToByteArray()
-      return Readable.from(Buffer.from(bytes))
-    }
-
-    throw new InternalServerErrorException(
-      'Formato de stream do arquivo nao suportado.'
-    )
-  }
-
-  private hasTransformToByteArray(
-    value: unknown
-  ): value is StreamWithTransformToByteArray {
-    return (
-      typeof value === 'object' &&
-      value !== null &&
-      'transformToByteArray' in value &&
-      typeof value.transformToByteArray === 'function'
-    )
-  }
-
-  private isNotFoundError(error: unknown): boolean {
-    if (typeof error !== 'object' || error === null) {
-      return false
-    }
-
-    const awsError = error as AwsRequestError
-
-    return (
-      awsError.name === 'NoSuchKey' ||
-      awsError.name === 'NotFound' ||
-      awsError.$metadata?.httpStatusCode === 404
-    )
   }
 }

@@ -3,7 +3,6 @@ import { Module, Provider } from '@nestjs/common'
 import { ConfigModule, ConfigService } from '@nestjs/config'
 
 import { R2_S3_CLIENT } from './storage.constants'
-import { StorageController } from './storage.controller'
 import { StorageService } from './storage.service'
 
 const r2ClientProvider: Provider = {
@@ -31,7 +30,6 @@ const r2ClientProvider: Provider = {
 
 @Module({
   imports: [ConfigModule],
-  controllers: [StorageController],
   providers: [r2ClientProvider, StorageService],
   exports: [StorageService]
 })
