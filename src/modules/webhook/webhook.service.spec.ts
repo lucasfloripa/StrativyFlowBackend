@@ -29,7 +29,6 @@ describe('WebhookService', () => {
     conversationContextBuilder?: object
     leadFlowEngine?: object
     leadFlowActionExecutor?: object
-    automationTriggerDispatcher?: object
     rabbitPublisherService?: object
     storageService?: object
     leadsService?: object
@@ -47,7 +46,6 @@ describe('WebhookService', () => {
       (overrides?.conversationContextBuilder ?? {}) as never,
       (overrides?.leadFlowEngine ?? {}) as never,
       (overrides?.leadFlowActionExecutor ?? {}) as never,
-      (overrides?.automationTriggerDispatcher ?? {}) as never,
       (overrides?.rabbitPublisherService ?? {}) as never,
       (overrides?.storageService ?? {}) as never,
       (overrides?.leadsService ?? {}) as never,
@@ -147,7 +145,6 @@ describe('WebhookService', () => {
           .fn<Promise<void>, [string, Record<string, unknown>]>()
           .mockResolvedValue(undefined)
       }
-      const automationTriggerDispatcher = { dispatch: jest.fn() }
       const storageService = {
         uploadFile: jest
           .fn()
@@ -160,7 +157,6 @@ describe('WebhookService', () => {
         messageRepo,
         leadChannelIdentityService,
         rabbitPublisherService,
-        automationTriggerDispatcher,
         storageService,
         leadFlowEngine: new LeadFlowEngine(),
         leadFlowActionExecutor: new LeadFlowActionExecutor(),
@@ -185,7 +181,6 @@ describe('WebhookService', () => {
         messageRepo,
         leadChannelIdentityService,
         rabbitPublisherService,
-        automationTriggerDispatcher,
         storageService
       }
     }
@@ -321,9 +316,6 @@ describe('WebhookService', () => {
         dependencies.service.handleIncomingMessage(createPayload())
       ).resolves.toEqual({ status: 'ignored_identity_owner_mismatch' })
       expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
-      expect(
-        dependencies.automationTriggerDispatcher.dispatch
-      ).not.toHaveBeenCalled()
     })
 
     it('reuses an existing Company lead without requiring a user information binding', async () => {
@@ -392,7 +384,7 @@ describe('WebhookService', () => {
       expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
     })
 
-    it('ignores duplicates before resolving the Company or executing automations', async () => {
+    it('ignores duplicates before resolving the Company', async () => {
       const dependencies = createWhatsAppService()
       dependencies.messageRepo.findOne.mockResolvedValue({
         id: 'message-existing'
@@ -405,9 +397,6 @@ describe('WebhookService', () => {
         inboundMessageId: 'wamid.inbound'
       })
       expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
-      expect(
-        dependencies.automationTriggerDispatcher.dispatch
-      ).not.toHaveBeenCalled()
     })
 
     it('downloads inbound media using the Company token', async () => {
@@ -695,7 +684,6 @@ describe('WebhookService', () => {
           Promise.resolve({ lead, recentMessages: [] })
         )
       },
-      automationTriggerDispatcher: { dispatch: jest.fn() },
       rabbitPublisherService: { publish: jest.fn() },
       leadsService: {
         toResponseMessageDto: jest.fn((message: Message) =>
@@ -778,7 +766,6 @@ describe('WebhookService', () => {
       create: jest.fn(),
       save: jest.fn((message: Message) => Promise.resolve(message))
     }
-    const automationTriggerDispatcher = { dispatch: jest.fn() }
     const leadsService = {
       toResponseMessageDto: jest.fn((message: Message) =>
         Promise.resolve(message)
@@ -799,7 +786,6 @@ describe('WebhookService', () => {
           leadId: 'lead-1'
         })
       },
-      automationTriggerDispatcher,
       leadsService,
       realtimeService
     })
@@ -854,7 +840,6 @@ describe('WebhookService', () => {
     })
     expect(targetMessage.metadata).toBeNull()
     expect(messageRepo.create).not.toHaveBeenCalled()
-    expect(automationTriggerDispatcher.dispatch).not.toHaveBeenCalled()
     expect(realtimeService.emitToLead).toHaveBeenCalledTimes(2)
     expect(realtimeService.emitToLead).toHaveBeenLastCalledWith(
       'lead-1',
@@ -928,7 +913,6 @@ describe('WebhookService', () => {
       create: jest.fn(),
       save: jest.fn((message: Message) => Promise.resolve(message))
     }
-    const automationTriggerDispatcher = { dispatch: jest.fn() }
     const leadsService = {
       toResponseMessageDto: jest.fn((message: Message) =>
         Promise.resolve(message)
@@ -954,7 +938,6 @@ describe('WebhookService', () => {
           leadId: 'lead-1'
         })
       },
-      automationTriggerDispatcher,
       leadsService,
       realtimeService
     })
@@ -996,7 +979,6 @@ describe('WebhookService', () => {
     ).resolves.toEqual({ status: 'received' })
     expect(targetMessage.metadata).toBeNull()
     expect(messageRepo.create).not.toHaveBeenCalled()
-    expect(automationTriggerDispatcher.dispatch).not.toHaveBeenCalled()
     expect(realtimeService.emitToLead).toHaveBeenCalledTimes(2)
     expect(realtimeService.emitToLead).toHaveBeenLastCalledWith(
       'lead-1',
@@ -1114,9 +1096,6 @@ describe('WebhookService', () => {
         .fn<Promise<void>, [string, Record<string, unknown>]>()
         .mockResolvedValue(undefined)
     }
-    const automationTriggerDispatcher = {
-      dispatch: jest.fn().mockResolvedValue(null)
-    }
     const leadsService = {
       toResponseMessageDto: jest.fn((message: Message) =>
         Promise.resolve(message)
@@ -1140,7 +1119,6 @@ describe('WebhookService', () => {
       conversationContextBuilder,
       leadFlowEngine: new LeadFlowEngine(),
       leadFlowActionExecutor: new LeadFlowActionExecutor(),
-      automationTriggerDispatcher,
       rabbitPublisherService,
       storageService,
       leadsService,
@@ -1570,9 +1548,6 @@ describe('WebhookService', () => {
         .fn<Promise<void>, [string, Record<string, unknown>]>()
         .mockResolvedValue(undefined)
     }
-    const automationTriggerDispatcher = {
-      dispatch: jest.fn().mockResolvedValue(null)
-    }
     const leadsService = {
       toResponseMessageDto: jest.fn((message: Message) =>
         Promise.resolve(message)
@@ -1592,7 +1567,6 @@ describe('WebhookService', () => {
       conversationContextBuilder,
       leadFlowEngine: new LeadFlowEngine(),
       leadFlowActionExecutor: new LeadFlowActionExecutor(),
-      automationTriggerDispatcher,
       rabbitPublisherService,
       storageService,
       leadsService,

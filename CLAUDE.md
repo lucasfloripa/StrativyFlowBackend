@@ -62,7 +62,7 @@ src/
 Business areas in `modules/`: `leads` (leads, messages, channel identities, outbound sending),
 `negotiation` (deals, financial, costs, payments, attachments), `financeiro` (financial reports),
 `followup` (follow-ups, steps, message templates, execution), `webhook` (inbound Meta webhooks,
-lead flow engine, AI replies), `automation` (rules, triggers, actions), `notification`, `reminder`
+lead flow engine, AI replies), `notification`, `reminder`
 (API-side crons), `company`, `contacts`, `dashboard`, `user`, `auth`, `storage` (R2), `realtime`
 (Socket.IO), `rabbit`, `mail` (Resend), `evolution`.
 

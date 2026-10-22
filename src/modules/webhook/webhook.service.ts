@@ -5,11 +5,6 @@ import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
 import { Repository } from 'typeorm'
 
-import { AutomationTriggerDispatcher } from '../automation/flow/automation-trigger.dispatcher'
-import {
-  AutomationTriggerContext,
-  AutomationTriggerType
-} from '../automation/flow/automation-trigger.types'
 import { Company } from '../company/company.entity'
 import { LeadChannel } from '../leads/entities/lead-channel-identity.entity'
 import {
@@ -266,7 +261,6 @@ export class WebhookService {
     private readonly conversationContextBuilder: ConversationContextBuilder,
     private readonly leadFlowEngine: LeadFlowEngine,
     private readonly leadFlowActionExecutor: LeadFlowActionExecutor,
-    private readonly automationTriggerDispatcher: AutomationTriggerDispatcher,
     private readonly rabbitPublisherService: RabbitPublisherService,
     private readonly storageService: StorageService,
     private readonly leadsService: LeadsService,
@@ -569,23 +563,6 @@ export class WebhookService {
           await this.emitMessageCreated(persistedMessageResult.message)
         }
 
-        const automationTriggerContext: AutomationTriggerContext = {
-          triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
-          leadId: lead.id,
-          inboundMessageId: inboundMessageId ?? undefined,
-          correlationId: randomUUID(),
-          metadata: {
-            source: 'webhook',
-            from,
-            messageText: text,
-            phoneNumberId: externalAccountId
-          }
-        }
-
-        await this.automationTriggerDispatcher.dispatch(
-          automationTriggerContext
-        )
-
         lead = await this.leadRepo.findOneOrFail({
           where: {
             id: lead.id
@@ -663,21 +640,6 @@ export class WebhookService {
           whatsappToken: company.whatsappToken ?? undefined
         })
       }
-
-      const automationTriggerContext: AutomationTriggerContext = {
-        triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
-        leadId: lead.id,
-        inboundMessageId: inboundMessageId ?? undefined,
-        correlationId: randomUUID(),
-        metadata: {
-          source: 'webhook',
-          from,
-          messageText: text,
-          phoneNumberId: externalAccountId
-        }
-      }
-
-      await this.automationTriggerDispatcher.dispatch(automationTriggerContext)
 
       lead = await this.leadRepo.findOneOrFail({
         where: {
@@ -1715,23 +1677,6 @@ export class WebhookService {
           where: { id: lead.id }
         })
 
-        const automationTriggerContext: AutomationTriggerContext = {
-          triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
-          leadId: lead.id,
-          inboundMessageId,
-          correlationId: randomUUID(),
-          metadata: {
-            source: LeadChannel.MESSENGER,
-            from: psid,
-            messageText: messageText ?? null,
-            pageId
-          }
-        }
-
-        await this.automationTriggerDispatcher.dispatch(
-          automationTriggerContext
-        )
-
         if (identityResolution.leadCreated) {
           await this.rabbitPublisherService.publish('lead.created', {
             leadId: lead.id,
@@ -2185,19 +2130,6 @@ export class WebhookService {
 
         lead = await this.leadRepo.findOneOrFail({
           where: { id: lead.id }
-        })
-
-        await this.automationTriggerDispatcher.dispatch({
-          triggerType: AutomationTriggerType.ON_MESSAGE_RECEIVED,
-          leadId: lead.id,
-          inboundMessageId,
-          correlationId: randomUUID(),
-          metadata: {
-            source: 'direct',
-            from: instagramUserId,
-            messageText: messageText ?? null,
-            instagramAccountId
-          }
         })
 
         if (identityResolution.leadCreated) {

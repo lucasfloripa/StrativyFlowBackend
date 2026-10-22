@@ -52,7 +52,7 @@ npm run test:cov
 ## Estrutura
 
 - `src/modules/<área>/` — um módulo Nest por área de negócio (`leads`, `negotiation`, `followup`,
-  `financeiro`, `webhook`, `automation`, `notification`, `reminder`, `company`, `contacts`,
+  `financeiro`, `webhook`, `notification`, `reminder`, `company`, `contacts`,
   `dashboard`, `storage`, `realtime`, `rabbit`, `mail`, `evolution`, `user`, `auth`).
 - `src/worker/` — schedulers e workers de notificações e pagamentos.
 - `src/database/migrations/` — migrations TypeORM (`<timestamp>-<NomePascalCase>.ts`, cada uma com seu `.spec.ts`).
