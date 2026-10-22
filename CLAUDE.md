@@ -27,6 +27,8 @@ npm run test:cov
 ```
 
 Before finishing a change: `npm run lint`, `npm test`, `npm run build`.
+CI (`.github/workflows/ci.yml`) runs `npm run lint:check` (no `--fix`), `npm test` and
+`npm run build` on every push to `main` / `big-refactor-backend` and on pull requests.
 There is no migration CLI script; migrations run on boot when `DB_MIGRATIONS_RUN=true`.
 
 Local Postgres and RabbitMQ: `../elciess.ms.users/docker-postgres.yml` and `docker-rabbitmq.yml`.
@@ -149,6 +151,17 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
 
 ## Tests
 
+**Full standard: [`docs/testing.md`](docs/testing.md)** (levels, test structure, shared helpers,
+mandatory rules). Summary:
+
+- Levels: unit `*.spec.ts` (`npm test`), integration `*.int-spec.ts` (`npm run test:int`),
+  E2E `test/e2e/*.e2e-spec.ts` (`npm run test:e2e`).
+- Shared helpers live in `src/testing` (excluded from the build): `createMockRepository<T>()`,
+  entity factories (`buildLead`, `buildCompany`, ...), `FIXTURE_IDS`, `FIXED_DATE`. Add a factory
+  there instead of building fixtures inline.
+- `describe(Class) > describe(method) > it('<behavior>')`, Arrange / Act / Assert.
+- A fixed bug gets a regression test; a security fix gets an access matrix
+  (no token → 401, other company → 404, own company → success).
 - Jest 30 + ts-jest, `rootDir: src`, files `*.spec.ts` next to the code.
 - Style used across the repo: instantiate the class directly with hand-written mocks, no Nest
   `TestingModule`. Repositories are cast as `as unknown as Repository<T>` and other collaborators
@@ -168,6 +181,19 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
 - Large files — `webhook.service.ts` (~72 KB), `followup-executor.service.ts`,
   `followup-step-executor.service.ts`, `notification-worker.service.ts`, `leads.service.ts`:
   make targeted edits; don't reformat or restructure them unless asked.
+
+## Commits and the refactor workflow
+
+- Commit messages follow Conventional Commits (skill `conventional-commit-message`): pick the
+  type by release impact (`feat`, `fix`, `perf` visible; `refactor`, `test`, `docs`, `ci`,
+  `build`, `chore` hidden), lower-case changelog-ready subject, identifiers in backticks.
+- The backend refactor runs on the `big-refactor-backend` branch, one commit per roadmap item;
+  the PR to `main` is opened only at the end. Never push to `main` or force-push.
+- Target architecture: modular, layered per feature module (controller → service →
+  repository → entity), external integrations behind injection tokens, cross-cutting concerns
+  in guards / interceptors / pipes / filters. Follow the `nestjs-best-practices` skill.
+- Each roadmap item: write the failing test first, then the change; push; CI must be green;
+  then mark the item done in the audit doc.
 
 ## Don'ts
 

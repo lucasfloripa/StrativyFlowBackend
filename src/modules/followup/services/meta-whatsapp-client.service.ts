@@ -1,11 +1,10 @@
-import { HttpService } from '@nestjs/axios'
 import {
   BadGatewayException,
   Injectable,
   InternalServerErrorException
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { firstValueFrom } from 'rxjs'
+import axios from 'axios'
 
 import {
   buildMetaWhatsAppBaseUrl,
@@ -26,10 +25,7 @@ type AxiosLikeError<TResponse> = {
 
 @Injectable()
 export class MetaWhatsAppClient {
-  constructor(
-    private readonly httpService: HttpService,
-    private readonly configService: ConfigService
-  ) {}
+  constructor(private readonly configService: ConfigService) {}
 
   async sendTemplate(
     payload: MetaWhatsAppSendTemplateRequestDto,
@@ -38,17 +34,15 @@ export class MetaWhatsAppClient {
     const metaApiConfig = this.getMetaApiConfig(credentials)
     const endpoint = `${metaApiConfig.baseUrl}/${metaApiConfig.phoneNumberId}/messages`
     try {
-      const { data } = await firstValueFrom(
-        this.httpService.post<MetaWhatsAppSendTemplateSuccessDto>(
-          endpoint,
-          payload,
-          {
-            headers: {
-              Authorization: `Bearer ${metaApiConfig.accessToken}`,
-              'Content-Type': 'application/json'
-            }
+      const { data } = await axios.post<MetaWhatsAppSendTemplateSuccessDto>(
+        endpoint,
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${metaApiConfig.accessToken}`,
+            'Content-Type': 'application/json'
           }
-        )
+        }
       )
 
       return data
