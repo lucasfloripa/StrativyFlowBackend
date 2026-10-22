@@ -41,6 +41,10 @@ import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { canTransitionMessageStatus } from './message-status.policy'
 import { MessengerMessagingService } from './messenger-messaging.service'
+import { isAllowedMetaMediaUrl } from './security/meta-media-url'
+
+const SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
+const SOCIAL_MEDIA_MAX_BYTES = 100 * 1024 * 1024
 
 type WhatsAppSendMessageResponse = {
   messaging_product: string
@@ -1922,9 +1926,18 @@ export class WebhookService {
     mimeType: string
     mediaSize: number
   } | null> {
+    if (!isAllowedMetaMediaUrl(params.url)) {
+      this.logger.warn(
+        `Refused to download inbound social attachment from a non-Meta host. leadId=${params.leadId} externalMessageId=${params.externalMessageId} type=${params.type}`
+      )
+      return null
+    }
+
     try {
       const response = await axios.get<ArrayBuffer>(params.url, {
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
+        timeout: SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS,
+        maxContentLength: SOCIAL_MEDIA_MAX_BYTES
       })
       const buffer = Buffer.from(response.data)
       const responseContentType: unknown = response.headers['content-type']

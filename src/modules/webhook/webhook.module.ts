@@ -19,6 +19,10 @@ import { LeadFlowEngine } from './flow/lead-flow.engine'
 import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { MessengerMessagingService } from './messenger-messaging.service'
+import {
+  metaAppSecretsProvider,
+  MetaWebhookSignatureGuard
+} from './security/meta-webhook-signature.guard'
 import { WebhookController } from './webhook.controller'
 import { WebhookService } from './webhook.service'
 
@@ -39,6 +43,8 @@ import { WebhookService } from './webhook.service'
     StorageModule
   ],
   providers: [
+    metaAppSecretsProvider,
+    MetaWebhookSignatureGuard,
     WebhookService,
     FollowUpReplyLinkerService,
     MessengerMessagingService,

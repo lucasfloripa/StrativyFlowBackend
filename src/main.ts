@@ -16,7 +16,8 @@ const corsOrigins = corsOriginEnv
   .filter(Boolean)
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule)
+  // rawBody keeps the request bytes for Meta webhook signature checks.
+  const app = await NestFactory.create(AppModule, { rawBody: true })
 
   app.useGlobalPipes(
     new ValidationPipe({

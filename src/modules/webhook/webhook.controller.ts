@@ -5,9 +5,11 @@ import {
   HttpCode,
   Post,
   Query,
-  Res
+  Res,
+  UseGuards
 } from '@nestjs/common'
 
+import { MetaWebhookSignatureGuard } from './security/meta-webhook-signature.guard'
 import {
   type InstagramDirectWebhookPayload,
   type MessengerWebhookPayload,
@@ -22,18 +24,21 @@ export class WebhookController {
   constructor(private readonly webhookService: WebhookService) {}
 
   @Post('whatsapp')
+  @UseGuards(MetaWebhookSignatureGuard)
   @HttpCode(200)
   async handleWhatsAppWebhook(@Body() body: WhatsAppWebhookPayload) {
     return await this.webhookService.handleIncomingMessage(body)
   }
 
   @Post('messenger')
+  @UseGuards(MetaWebhookSignatureGuard)
   @HttpCode(200)
   handleMessengerWebhook(@Body() body: MessengerWebhookPayload) {
     return this.webhookService.handleMessengerWebhook(body)
   }
 
   @Post('direct')
+  @UseGuards(MetaWebhookSignatureGuard)
   @HttpCode(200)
   async handleDirectWebhook(@Body() body: InstagramDirectWebhookPayload) {
     return await this.webhookService.handleDirectWebhook(body)

@@ -1200,7 +1200,9 @@ describe('WebhookService', () => {
                 attachments: [
                   {
                     type: 'audio',
-                    payload: { url: 'https://cdn.example.com/audio.mp4' }
+                    payload: {
+                      url: 'https://lookaside.fbsbx.com/ig_messaging_cdn/audio.mp4'
+                    }
                   }
                 ]
               }
@@ -1305,6 +1307,8 @@ describe('WebhookService', () => {
   })
 
   describe('Messenger Company isolation', () => {
+    afterEach(() => jest.restoreAllMocks())
+
     const payload = {
       entry: [
         {
@@ -1410,6 +1414,91 @@ describe('WebhookService', () => {
       expect(
         dependencies.messengerMessagingService.sendMessengerMessage
       ).not.toHaveBeenCalled()
+    })
+
+    it('does not download attachments from hosts outside the Meta CDN', async () => {
+      const get = jest
+        .spyOn(axios, 'get')
+        .mockResolvedValue({ data: Buffer.from('unexpected'), headers: {} })
+      const lead = Object.assign(new Lead(), {
+        id: 'lead-1',
+        companyId: 'company-1'
+      })
+      const messageRepo = {
+        findOne: jest.fn().mockResolvedValue(null),
+        create: jest.fn((message: Partial<Message>) => message),
+        save: jest.fn((message: Message) =>
+          Promise.resolve({
+            ...message,
+            id: 'message-1',
+            createdAt: new Date('2026-01-15T12:00:00.000Z')
+          })
+        )
+      }
+      const storageService = { uploadFile: jest.fn() }
+      const service = createService({
+        companyRepo: {
+          findOne: jest.fn().mockResolvedValue(
+            Object.assign(new Company(), {
+              id: 'company-1',
+              messengerPageId: 'page-1',
+              messengerToken: 'company-token'
+            })
+          )
+        },
+        messageRepo,
+        leadRepo: {
+          findOneOrFail: jest.fn().mockResolvedValue(lead),
+          save: jest.fn((savedLead: Lead) => Promise.resolve(savedLead))
+        },
+        leadChannelIdentityService: {
+          findIdentity: jest.fn().mockResolvedValue({ id: 'identity-1' }),
+          findOrCreateLeadForIdentity: jest.fn().mockResolvedValue({
+            identity: { id: 'identity-1' },
+            lead,
+            leadCreated: false
+          })
+        },
+        rabbitPublisherService: { publish: jest.fn() },
+        realtimeService: { emitToLead: jest.fn() },
+        leadsService: {
+          toResponseMessageDto: jest.fn((message: Message) =>
+            Promise.resolve(message)
+          )
+        },
+        storageService
+      })
+
+      await service.handleMessengerWebhook({
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                recipient: { id: 'page-1' },
+                message: {
+                  mid: 'mid-attachment',
+                  attachments: [
+                    {
+                      type: 'image',
+                      payload: {
+                        url: 'http://169.254.169.254/latest/meta-data'
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      })
+
+      expect(get).not.toHaveBeenCalled()
+      expect(storageService.uploadFile).not.toHaveBeenCalled()
+      expect(messageRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ type: MessageType.IMAGE, mediaUrl: null })
+      )
     })
 
     it('ignores page echoes instead of treating outbound messages as new leads', async () => {
@@ -1652,17 +1741,17 @@ describe('WebhookService', () => {
       {
         mid: 'instagram-audio-1',
         type: 'audio',
-        url: 'https://cdn.example.com/audio.mp4'
+        url: 'https://lookaside.fbsbx.com/ig_messaging_cdn/audio.mp4'
       },
       {
         mid: 'instagram-image-1',
         type: 'image',
-        url: 'https://cdn.example.com/image.jpg'
+        url: 'https://lookaside.fbsbx.com/ig_messaging_cdn/image.jpg'
       },
       {
         mid: 'instagram-file-1',
         type: 'file',
-        url: 'https://cdn.example.com/file.pdf'
+        url: 'https://lookaside.fbsbx.com/ig_messaging_cdn/file.pdf'
       }
     ]) {
       await service.handleDirectWebhook({

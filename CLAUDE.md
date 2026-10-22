@@ -87,7 +87,11 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   A new resource type must be added to `resources` in `company-access.service.ts` and to
   `references` in `company-access.guard.ts`.
 - Webhook routes (`/webhook/whatsapp|messenger|direct`) are public by design; GET handlers do the
-  Meta `hub.verify_token` handshake.
+  Meta `hub.verify_token` handshake. POST handlers are protected by `MetaWebhookSignatureGuard`
+  (`modules/webhook/security`), which checks `X-Hub-Signature-256` against the raw body
+  (`rawBody: true` in `main.ts`) with `META_APP_SECRET` (one secret or a comma separated list;
+  required at boot). Inbound attachment URLs are downloaded only from Meta CDNs
+  (`isAllowedMetaMediaUrl`).
 
 ### DTOs and validation
 

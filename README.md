@@ -31,6 +31,7 @@ As variáveis são lidas de `.env.${NODE_ENV}` (`.env.dev`, `.env.prod`), que n�
 | E-mail | `RESEND_API_KEY` |
 | Storage (R2) | `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_REGION` |
 | WhatsApp (Meta) | `WHATSAPP_API_VERSION`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_TOKEN` |
+| Webhooks Meta | `META_APP_SECRET` (obrigatória; App Secret do app da Meta, ou vários separados por vírgula, usada para validar o `X-Hub-Signature-256`) |
 | Evolution API | `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE` (obrigatórias na API e no worker) |
 | IA | `OPENAI_API_KEY` |
 
