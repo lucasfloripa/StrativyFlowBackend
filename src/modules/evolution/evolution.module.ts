@@ -6,7 +6,6 @@ import {
   EvolutionApiConfig,
   EvolutionClient
 } from './evolution.client'
-import { EvolutionController } from './evolution.controller'
 import { EvolutionService } from './evolution.service'
 
 const evolutionApiConfigProvider: Provider<EvolutionApiConfig> = {
@@ -21,7 +20,6 @@ const evolutionApiConfigProvider: Provider<EvolutionApiConfig> = {
 
 @Module({
   imports: [ConfigModule],
-  controllers: [EvolutionController],
   providers: [evolutionApiConfigProvider, EvolutionClient, EvolutionService],
   exports: [EvolutionService]
 })
