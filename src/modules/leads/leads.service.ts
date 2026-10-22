@@ -68,24 +68,6 @@ export class LeadsService {
     private readonly storageService: StorageService
   ) {}
 
-  async publishRabbitTestMessage(
-    userId: string,
-    body?: { routingKey?: string; payload?: unknown }
-  ): Promise<{ success: boolean; routingKey: string }> {
-    const routingKey = body?.routingKey ?? 'strativy.flow.test'
-
-    await this.rabbitPublisherService.publish(routingKey, {
-      userId,
-      triggeredAt: new Date().toISOString(),
-      payload: body?.payload ?? {}
-    })
-
-    return {
-      success: true,
-      routingKey
-    }
-  }
-
   private async findCompanyIds(userId: string): Promise<string[]> {
     const mappings = await this.userInformationsRepo.find({
       where: { userId },

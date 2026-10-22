@@ -206,4 +206,3 @@ mandatory rules). Summary:
 ## Known issues (verified, not yet fixed)
 
 - `test/app.e2e-spec.ts` targets a route that doesn't exist.
-- `LeadsController` exposes `POST /leads/rabbit/publish-test`, a debug endpoint.

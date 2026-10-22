@@ -31,16 +31,6 @@ type AuthenticatedRequest = Request & {
 export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
-  @Post('rabbit/publish-test')
-  publishRabbitTest(
-    @Body() body: { routingKey?: string; payload?: unknown },
-    @Req() req: AuthenticatedRequest
-  ): Promise<{ success: boolean; routingKey: string }> {
-    const userId = req.user.id
-
-    return this.leadsService.publishRabbitTestMessage(userId, body)
-  }
-
   @Get()
   list(@Req() req: AuthenticatedRequest) {
     const userId = req.user.id
