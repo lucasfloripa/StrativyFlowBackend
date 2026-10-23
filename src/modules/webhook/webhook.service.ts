@@ -44,7 +44,6 @@ import { MessengerMessagingService } from './messenger-messaging.service'
 import { isAllowedMetaMediaUrl } from './security/meta-media-url'
 
 const SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
-const SOCIAL_MEDIA_MAX_BYTES = 100 * 1024 * 1024
 
 type WhatsAppSendMessageResponse = {
   messaging_product: string
@@ -1936,8 +1935,7 @@ export class WebhookService {
     try {
       const response = await axios.get<ArrayBuffer>(params.url, {
         responseType: 'arraybuffer',
-        timeout: SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS,
-        maxContentLength: SOCIAL_MEDIA_MAX_BYTES
+        timeout: SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS
       })
       const buffer = Buffer.from(response.data)
       const responseContentType: unknown = response.headers['content-type']
