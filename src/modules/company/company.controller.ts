@@ -15,8 +15,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 
 import { CompanyService } from './company.service'
 import { AddCompanyMembersDto } from './dto/add-company-members.dto'
+import { CompanyResponseDto } from './dto/company-response.dto'
 import { CreateCompanyDto } from './dto/create-company.dto'
 import { UpdateCompanyDto } from './dto/update-company.dto'
+import { toCompanyResponse } from './mappers/company-response.mapper'
 
 type AuthenticatedRequest = Request & {
   user: {
@@ -30,21 +32,32 @@ export class CompanyController {
   constructor(private readonly companyService: CompanyService) {}
 
   @Post()
-  create(
+  async create(
     @Body() createCompanyDto: CreateCompanyDto,
     @Req() request: AuthenticatedRequest
-  ) {
-    return this.companyService.create(request.user.id, createCompanyDto)
+  ): Promise<CompanyResponseDto> {
+    return toCompanyResponse(
+      await this.companyService.create(request.user.id, createCompanyDto)
+    )
   }
 
   @Get()
-  findAll(@Req() request: AuthenticatedRequest) {
-    return this.companyService.findAll(request.user.id)
+  async findAll(
+    @Req() request: AuthenticatedRequest
+  ): Promise<CompanyResponseDto[]> {
+    const companies = await this.companyService.findAll(request.user.id)
+
+    return companies.map(toCompanyResponse)
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
-    return this.companyService.findOne(request.user.id, id)
+  async findOne(
+    @Param('id') id: string,
+    @Req() request: AuthenticatedRequest
+  ): Promise<CompanyResponseDto> {
+    return toCompanyResponse(
+      await this.companyService.findOne(request.user.id, id)
+    )
   }
 
   @Get(':id/members')
@@ -75,16 +88,23 @@ export class CompanyController {
   }
 
   @Patch(':id')
-  update(
+  async update(
     @Param('id') id: string,
     @Body() updateCompanyDto: UpdateCompanyDto,
     @Req() request: AuthenticatedRequest
-  ) {
-    return this.companyService.update(request.user.id, id, updateCompanyDto)
+  ): Promise<CompanyResponseDto> {
+    return toCompanyResponse(
+      await this.companyService.update(request.user.id, id, updateCompanyDto)
+    )
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
-    return this.companyService.remove(request.user.id, id)
+  async remove(
+    @Param('id') id: string,
+    @Req() request: AuthenticatedRequest
+  ): Promise<CompanyResponseDto> {
+    return toCompanyResponse(
+      await this.companyService.remove(request.user.id, id)
+    )
   }
 }

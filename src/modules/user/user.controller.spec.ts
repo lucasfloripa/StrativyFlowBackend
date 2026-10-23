@@ -1,75 +1,73 @@
-import { UserInformations } from './entities/user-informations.entity'
+import { buildCompany, buildUserInformations } from '../../testing'
+
 import { UserController } from './user.controller'
 import { UserService } from './user.service'
 
 describe('UserController', () => {
-  const configuredUser = {
-    id: 'user-informations-1',
-    userId: 'user-1',
-    phoneNumber: '+5511999999999',
+  const configuredUser = buildUserInformations({
+    whatsappToken: 'user-whatsapp-secret',
+    messengerPageId: 'page-id',
+    messengerToken: 'user-messenger-secret',
     instagramAccountId: '17841436895629883',
-    instagramToken: 'instagram-user-access-token'
-  } as UserInformations
-
-  it('does not expose instagramToken when listing UserInformations', async () => {
-    const userService = {
-      findByUserId: jest.fn().mockResolvedValue([configuredUser])
-    }
-    const controller = new UserController(userService as unknown as UserService)
-
-    const response = await controller.listUserInformations({
-      user: { id: 'user-1' }
-    } as never)
-
-    expect(response).toEqual([
-      expect.objectContaining({
-        instagramAccountId: '17841436895629883'
-      })
-    ])
-    expect(response[0]).not.toHaveProperty('instagramToken')
+    instagramToken: 'instagram-user-access-token',
+    company: buildCompany({ name: 'Acme', whatsappToken: 'company-secret' })
   })
+  const request = { user: { id: 'user-1' } } as never
 
-  it('returns the Company name without exposing the Company relation', async () => {
-    const userService = {
-      findByUserId: jest.fn().mockResolvedValue([
-        Object.assign(new UserInformations(), configuredUser, {
-          company: {
-            id: 'company-1',
-            name: 'Acme',
-            whatsappToken: 'company-secret'
-          }
-        })
-      ])
-    }
-    const controller = new UserController(userService as unknown as UserService)
+  describe('listUserInformations', () => {
+    it('does not expose channel tokens or channel ids', async () => {
+      const userService = {
+        findByUserId: jest.fn().mockResolvedValue([configuredUser])
+      }
+      const controller = new UserController(
+        userService as unknown as UserService
+      )
 
-    const response = await controller.listUserInformations({
-      user: { id: 'user-1' }
-    } as never)
+      const [response] = await controller.listUserInformations(request)
 
-    expect(response[0]).toHaveProperty('companyName', 'Acme')
-    expect(response[0]).not.toHaveProperty('company')
-  })
-
-  it('does not expose instagramToken after creating UserInformations', async () => {
-    const userService = {
-      createUserInformations: jest.fn().mockResolvedValue(configuredUser)
-    }
-    const controller = new UserController(userService as unknown as UserService)
-
-    const response = await controller.createUserInformations({
-      userId: 'user-1',
-      email: 'user@example.com',
-      phoneNumber: '+5511999999999',
-      instagramAccountId: '17841436895629883',
-      instagramToken: 'instagram-user-access-token'
+      expect(response).not.toHaveProperty('whatsappToken')
+      expect(response).not.toHaveProperty('messengerToken')
+      expect(response).not.toHaveProperty('instagramToken')
+      expect(response).not.toHaveProperty('messengerPageId')
+      expect(response).not.toHaveProperty('instagramAccountId')
     })
 
-    expect(response).toEqual(
-      expect.objectContaining({
-        instagramAccountId: '17841436895629883'
+    it('returns the Company name without exposing the Company relation', async () => {
+      const userService = {
+        findByUserId: jest.fn().mockResolvedValue([configuredUser])
+      }
+      const controller = new UserController(
+        userService as unknown as UserService
+      )
+
+      const [response] = await controller.listUserInformations(request)
+
+      expect(response).toHaveProperty('companyName', 'Acme')
+      expect(response).not.toHaveProperty('company')
+    })
+  })
+
+  describe('createUserInformations', () => {
+    it('does not expose channel tokens after creating UserInformations', async () => {
+      const userService = {
+        createUserInformations: jest.fn().mockResolvedValue(configuredUser)
+      }
+      const controller = new UserController(
+        userService as unknown as UserService
+      )
+
+      const response = await controller.createUserInformations({
+        userId: 'user-1',
+        email: 'user@example.com',
+        phoneNumber: '+5511999999999',
+        instagramAccountId: '17841436895629883',
+        instagramToken: 'instagram-user-access-token'
       })
-    )
-    expect(response).not.toHaveProperty('instagramToken')
+
+      expect(JSON.stringify(response)).not.toContain('secret')
+      expect(JSON.stringify(response)).not.toContain(
+        'instagram-user-access-token'
+      )
+    })
   })
 })

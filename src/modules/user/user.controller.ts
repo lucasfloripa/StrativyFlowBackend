@@ -16,22 +16,12 @@ import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
 import { UpdateUserInformationsNotificationsDto } from './dtos/update-user-informations-notifications.dto'
 import { UpdateUserInformationsPreferencesDto } from './dtos/update-user-informations-preferences.dto'
 import { UpdateUserInformationsShortcutsDto } from './dtos/update-user-informations-shortcuts.dto'
-import { UserInformations } from './entities/user-informations.entity'
+import { toUserInformationsResponse } from './mappers/user-informations-response.mapper'
 import { UserService } from './user.service'
 
 type AuthenticatedRequest = Request & {
   user: {
     id: string
-  }
-}
-
-const toPublicUserInformations = (userInformations: UserInformations) => {
-  const { company, ...publicUserInformations } = userInformations
-  delete publicUserInformations.instagramToken
-
-  return {
-    ...publicUserInformations,
-    companyName: company?.name ?? null
   }
 }
 
@@ -43,13 +33,13 @@ export class UserController {
   @Get('user-informations')
   async listUserInformations(@Req() req: AuthenticatedRequest) {
     const userInformations = await this.userService.findByUserId(req.user.id)
-    return userInformations.map(toPublicUserInformations)
+    return userInformations.map(toUserInformationsResponse)
   }
 
   @Post('user-informations')
   async createUserInformations(@Body() dto: CreateUserInformationsDto) {
     const userInformations = await this.userService.createUserInformations(dto)
-    return toPublicUserInformations(userInformations)
+    return toUserInformationsResponse(userInformations)
   }
 
   @Patch('user-informations/:id/notifications')
@@ -63,7 +53,7 @@ export class UserController {
         req.user.id,
         dto
       )
-    return toPublicUserInformations(userInformations)
+    return toUserInformationsResponse(userInformations)
   }
 
   @Patch('user-informations/:id/preferences')
@@ -77,7 +67,7 @@ export class UserController {
         req.user.id,
         dto
       )
-    return toPublicUserInformations(userInformations)
+    return toUserInformationsResponse(userInformations)
   }
 
   @Patch('user-informations/:id/shortcuts')
@@ -91,6 +81,6 @@ export class UserController {
         req.user.id,
         dto
       )
-    return toPublicUserInformations(userInformations)
+    return toUserInformationsResponse(userInformations)
   }
 }
