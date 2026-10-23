@@ -9,6 +9,9 @@ import {
   Res,
   UseGuards
 } from '@nestjs/common'
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
+
+import { WEBHOOK_HANDSHAKE_THROTTLE } from '../rate-limit/rate-limit.constants'
 
 import { MetaWebhookSignatureGuard } from './security/meta-webhook-signature.guard'
 import {
@@ -48,6 +51,8 @@ export class WebhookController {
   }
 
   @Get('whatsapp')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(WEBHOOK_HANDSHAKE_THROTTLE)
   verifyWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
@@ -67,6 +72,8 @@ export class WebhookController {
   }
 
   @Get('messenger')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(WEBHOOK_HANDSHAKE_THROTTLE)
   verifyMessengerWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,
@@ -86,6 +93,8 @@ export class WebhookController {
   }
 
   @Get('direct')
+  @UseGuards(ThrottlerGuard)
+  @Throttle(WEBHOOK_HANDSHAKE_THROTTLE)
   verifyDirectWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.verify_token') token: string,

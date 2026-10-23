@@ -1,7 +1,9 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
+import { NestExpressApplication } from '@nestjs/platform-express'
 
 import { AppModule } from './app.module'
+import { parseTrustProxyHops } from './modules/rate-limit/trust-proxy'
 
 const corsOriginEnv = process.env.CORS_ORIGIN
 const appPort = Number(process.env.PORT)
@@ -17,9 +19,18 @@ const corsOrigins = corsOriginEnv
 
 async function bootstrap() {
   // rawBody keeps the request bytes for Meta webhook signature checks.
-  const app = await NestFactory.create(AppModule, { rawBody: true })
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true
+  })
   // SIGTERM/SIGINT run the Nest shutdown hooks (close Rabbit, Postgres, HTTP).
   app.enableShutdownHooks()
+
+  // Behind Nginx/a load balancer, the client IP (used by rate limiting) comes
+  // from X-Forwarded-For. Set TRUST_PROXY to the number of proxies in front.
+  const trustProxyHops = parseTrustProxyHops(process.env.TRUST_PROXY)
+  if (trustProxyHops) {
+    app.set('trust proxy', trustProxyHops)
+  }
 
   app.useGlobalPipes(
     new ValidationPipe({

@@ -1,4 +1,5 @@
 import { GUARDS_METADATA } from '@nestjs/common/constants'
+import { ThrottlerGuard } from '@nestjs/throttler'
 
 import { buildCompany, buildUserInformations } from '../../testing'
 import { AdminApiKeyGuard } from '../auth/admin-api-key.guard'
@@ -51,13 +52,13 @@ describe('UserController', () => {
   })
 
   describe('createUserInformations', () => {
-    it('requires the admin API key', () => {
+    it('rate limits before checking the admin API key', () => {
       const guards: unknown = Reflect.getMetadata(
         GUARDS_METADATA,
         UserController.prototype.createUserInformations
       )
 
-      expect(guards).toEqual([AdminApiKeyGuard])
+      expect(guards).toEqual([ThrottlerGuard, AdminApiKeyGuard])
     })
 
     it('does not expose channel tokens after creating UserInformations', async () => {

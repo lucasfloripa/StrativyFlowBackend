@@ -96,6 +96,12 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   required at boot). Inbound attachment URLs are downloaded only from Meta CDNs
   (`isAllowedMetaMediaUrl`).
 
+- Rate limiting (`modules/rate-limit`, `@nestjs/throttler`, in-memory storage) is **opt-in per
+  route**: `@UseGuards(ThrottlerGuard)` + `@Throttle(<constant from rate-limit.constants.ts>)`.
+  Applied to the webhook GET handshakes (10/min per IP) and the admin route (5/min, before
+  `AdminApiKeyGuard`). Webhook POSTs are not throttled (Meta delivers in bursts). The client IP
+  comes from `X-Forwarded-For` only when `TRUST_PROXY` is set to the number of proxies in front.
+
 ### DTOs and validation
 
 - Request bodies are `class-validator` DTO classes with `!` / `?` property markers.

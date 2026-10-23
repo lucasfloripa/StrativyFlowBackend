@@ -8,10 +8,12 @@ import {
   Req,
   UseGuards
 } from '@nestjs/common'
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
 import { Request } from 'express'
 
 import { AdminApiKeyGuard } from '../auth/admin-api-key.guard'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
+import { ADMIN_ROUTE_THROTTLE } from '../rate-limit/rate-limit.constants'
 
 import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
 import { UpdateUserInformationsNotificationsDto } from './dtos/update-user-informations-notifications.dto'
@@ -42,7 +44,9 @@ export class UserController {
    * another user, so `userId` comes from the body. Requires the admin API key.
    */
   @Post('user-informations')
-  @UseGuards(AdminApiKeyGuard)
+  // Throttler first, so wrong admin keys also count toward the limit.
+  @UseGuards(ThrottlerGuard, AdminApiKeyGuard)
+  @Throttle(ADMIN_ROUTE_THROTTLE)
   async createUserInformations(@Body() dto: CreateUserInformationsDto) {
     const userInformations = await this.userService.createUserInformations(dto)
     return toUserInformationsResponse(userInformations)

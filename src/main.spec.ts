@@ -5,6 +5,7 @@ import './main'
 jest.mock('@nestjs/core', () => {
   const app = {
     enableShutdownHooks: jest.fn(),
+    set: jest.fn(),
     useGlobalPipes: jest.fn(),
     enableCors: jest.fn(),
     listen: jest.fn().mockResolvedValue(undefined)
@@ -16,6 +17,7 @@ jest.mock('@nestjs/core', () => {
 jest.mock('./app.module', () => {
   process.env.CORS_ORIGIN = 'https://app.example.com'
   process.env.PORT = '4000'
+  process.env.TRUST_PROXY = '1'
 
   return { AppModule: class AppModule {} }
 })
@@ -25,6 +27,7 @@ describe('API bootstrap', () => {
     const [created] = jest.mocked(NestFactory.create).mock.results
     const app = (await created.value) as unknown as {
       enableShutdownHooks: jest.Mock
+      set: jest.Mock
       listen: jest.Mock
     }
     await new Promise((resolve) => setImmediate(resolve))
@@ -33,5 +36,13 @@ describe('API bootstrap', () => {
     expect(app.enableShutdownHooks.mock.invocationCallOrder[0]).toBeLessThan(
       app.listen.mock.invocationCallOrder[0]
     )
+  })
+
+  it('trusts the number of proxies set in TRUST_PROXY for the client IP', async () => {
+    const [created] = jest.mocked(NestFactory.create).mock.results
+    const app = (await created.value) as unknown as { set: jest.Mock }
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(app.set).toHaveBeenCalledWith('trust proxy', 1)
   })
 })
