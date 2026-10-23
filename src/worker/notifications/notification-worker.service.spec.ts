@@ -187,7 +187,7 @@ describe('NotificationWorker', () => {
     await subscription?.handler(message)
 
     expect(loggerSpy).toHaveBeenCalledWith(
-      `Received job: message.received message=${JSON.stringify(message)}`
+      `Received job: message.received (eventId=${message.eventId})`
     )
     expect(notificationService.createNotification).toHaveBeenCalledTimes(1)
     expect(evolutionService.sendText).toHaveBeenCalledWith(
