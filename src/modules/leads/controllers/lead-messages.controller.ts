@@ -21,6 +21,7 @@ import { SendContactLeadMessageCommand } from '../services/commands/send-contact
 import { SendMediaLeadMessageCommand } from '../services/commands/send-media-lead-message.command'
 import { SendTemplateLeadMessageCommand } from '../services/commands/send-template-lead-message.command'
 import { SendTextLeadMessageCommand } from '../services/commands/send-text-lead-message.command'
+import { ChatMediaPolicyService } from '../services/chat-media-policy.service'
 import { LeadMessageApplicationService } from '../services/lead-message-application.service'
 
 import type { Request } from 'express'
@@ -82,7 +83,14 @@ export class LeadMessagesController {
   }
 
   @Post(':leadId/messages/media')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: ChatMediaPolicyService.MAX_UPLOAD_SIZE_IN_BYTES,
+        files: 1
+      }
+    })
+  )
   sendMediaMessage(
     @Param('leadId') leadId: string,
     @UploadedFile() file: StorageUploadFile | undefined,

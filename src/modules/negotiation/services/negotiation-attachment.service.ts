@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { basename, extname } from 'path'
+import { extname } from 'path'
 
 import {
   BadRequestException,
@@ -20,7 +20,7 @@ import { NegotiationAttachmentResponseDto } from '../dto/negotiation-attachment-
 import { NegotiationAttachment } from '../entities/negotiation-attachment.entity'
 import { Negotiation } from '../entities/negotiation.entity'
 
-const MAX_FILE_SIZE_IN_BYTES = 20 * 1024 * 1024
+export const NEGOTIATION_ATTACHMENT_MAX_SIZE_IN_BYTES = 20 * 1024 * 1024
 const PRESIGNED_URL_EXPIRATION_SECONDS = 3600
 
 const allowedExtensions = new Set<string>([
@@ -73,7 +73,6 @@ export class NegotiationAttachmentService {
     const key = this.buildStorageKey(
       negotiation.leadId,
       negotiationId,
-      file.originalname,
       extension
     )
 
@@ -142,10 +141,13 @@ export class NegotiationAttachmentService {
   ): Promise<NegotiationAttachmentDownloadUrlDto> {
     const attachment = await this.findAttachmentOrFail(attachmentId)
 
-    return await this.storageService.generateDownloadPresignedUrl(
+    const url = await this.storageService.generatePresignedUrl(
       attachment.key,
-      PRESIGNED_URL_EXPIRATION_SECONDS
+      PRESIGNED_URL_EXPIRATION_SECONDS,
+      attachment.originalName
     )
+
+    return { url, expiresIn: PRESIGNED_URL_EXPIRATION_SECONDS }
   }
 
   async deleteAttachment(attachmentId: string): Promise<{ success: true }> {
@@ -182,7 +184,7 @@ export class NegotiationAttachmentService {
       throw new BadRequestException('Arquivo vazio.')
     }
 
-    if (file.size > MAX_FILE_SIZE_IN_BYTES) {
+    if (file.size > NEGOTIATION_ATTACHMENT_MAX_SIZE_IN_BYTES) {
       throw new BadRequestException(
         'File size exceeds the maximum allowed size of 20 MB.'
       )
@@ -205,16 +207,17 @@ export class NegotiationAttachmentService {
     return extension
   }
 
+  /**
+   * Every upload gets its own object key. Using the original file name made
+   * two uploads with the same name overwrite the same object. The original
+   * name stays on the attachment record and is used when downloading.
+   */
   private buildStorageKey(
     leadId: string,
     negotiationId: string,
-    originalName: string,
     extension: string
   ): string {
-    const fileName =
-      basename(originalName).trim() || `${randomUUID()}.${extension}`
-
-    return `leads/${leadId}/negotiations/${negotiationId}/attachments/${fileName}`
+    return `leads/${leadId}/negotiations/${negotiationId}/attachments/${randomUUID()}.${extension}`
   }
 
   private async findAttachmentOrFail(

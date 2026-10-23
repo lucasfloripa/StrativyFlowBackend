@@ -81,6 +81,17 @@ export class ChatMediaPolicyService {
     }
   }
 
+  /**
+   * Largest size accepted for any media type. Used as the Multer upload limit
+   * so oversized files are cut off while streaming, before the per-type rule
+   * in `validateOutboundMediaPayload` runs.
+   */
+  static readonly MAX_UPLOAD_SIZE_IN_BYTES = Math.max(
+    ...Object.values(ChatMediaPolicyService.MEDIA_RULES).map(
+      (rule) => rule.maxSizeInBytes
+    )
+  )
+
   getSupportedOutboundMessageTypes(): MessageType[] {
     return [
       MessageType.TEXT,

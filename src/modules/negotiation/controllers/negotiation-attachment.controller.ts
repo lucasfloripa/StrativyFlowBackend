@@ -16,7 +16,10 @@ import { JwtAuthGuard } from '../../auth/jwt-auth.guard'
 import { StorageUploadFile } from '../../storage/storage.service'
 import { NegotiationAttachmentDownloadUrlDto } from '../dto/negotiation-attachment-download-url.dto'
 import { NegotiationAttachmentResponseDto } from '../dto/negotiation-attachment-response.dto'
-import { NegotiationAttachmentService } from '../services/negotiation-attachment.service'
+import {
+  NEGOTIATION_ATTACHMENT_MAX_SIZE_IN_BYTES,
+  NegotiationAttachmentService
+} from '../services/negotiation-attachment.service'
 
 import type { Request } from 'express'
 
@@ -34,7 +37,11 @@ export class NegotiationAttachmentController {
   ) {}
 
   @Post(':negotiationId/attachments')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: NEGOTIATION_ATTACHMENT_MAX_SIZE_IN_BYTES, files: 1 }
+    })
+  )
   upload(
     @Param('negotiationId') negotiationId: string,
     @UploadedFile() file: StorageUploadFile | undefined,
