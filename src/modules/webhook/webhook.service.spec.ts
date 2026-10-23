@@ -455,7 +455,7 @@ describe('WebhookService', () => {
 
       return () =>
         spies
-          .flatMap((spy) => spy.mock.calls.flat())
+          .flatMap((spy): unknown[] => spy.mock.calls.flat())
           .map((value) => String(value))
           .join('\n')
     }
