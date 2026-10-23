@@ -95,7 +95,6 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   (`rawBody: true` in `main.ts`) with `META_APP_SECRET` (one secret or a comma separated list;
   required at boot). Inbound attachment URLs are downloaded only from Meta CDNs
   (`isAllowedMetaMediaUrl`).
-
 - Rate limiting (`modules/rate-limit`, `@nestjs/throttler`, in-memory storage) is **opt-in per
   route**: `@UseGuards(ThrottlerGuard)` + `@Throttle(<constant from rate-limit.constants.ts>)`.
   Applied to the webhook GET handshakes (10/min per IP) and the admin route (5/min, before

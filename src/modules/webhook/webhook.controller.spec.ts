@@ -29,6 +29,7 @@ describe('WebhookController', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
+      imports: [RateLimitModule],
       controllers: [WebhookController],
       providers: [
         { provide: WebhookService, useValue: {} },
