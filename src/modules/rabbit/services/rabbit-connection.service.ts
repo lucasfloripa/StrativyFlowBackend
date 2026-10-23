@@ -1,7 +1,7 @@
 import {
   Injectable,
   Logger,
-  OnModuleDestroy,
+  OnApplicationShutdown,
   OnModuleInit
 } from '@nestjs/common'
 import {
@@ -14,7 +14,9 @@ import { ConfirmChannel } from 'amqplib'
 import { RABBIT_EXCHANGE } from '../constants/rabbit.constants'
 
 @Injectable()
-export class RabbitConnectionService implements OnModuleInit, OnModuleDestroy {
+export class RabbitConnectionService
+  implements OnModuleInit, OnApplicationShutdown
+{
   private readonly logger = new Logger(RabbitConnectionService.name)
 
   private connection: AmqpConnectionManager | null = null
@@ -63,7 +65,9 @@ export class RabbitConnectionService implements OnModuleInit, OnModuleDestroy {
     await this.channel.waitForConnect()
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // Runs after every onModuleDestroy, so consumers can finish their in-flight
+  // messages (and ACK them) before the channel goes away.
+  async onApplicationShutdown(): Promise<void> {
     if (this.channel) {
       await this.channel.close()
       this.channel = null

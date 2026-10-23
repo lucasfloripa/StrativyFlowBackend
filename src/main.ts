@@ -18,6 +18,8 @@ const corsOrigins = corsOriginEnv
 async function bootstrap() {
   // rawBody keeps the request bytes for Meta webhook signature checks.
   const app = await NestFactory.create(AppModule, { rawBody: true })
+  // SIGTERM/SIGINT run the Nest shutdown hooks (close Rabbit, Postgres, HTTP).
+  app.enableShutdownHooks()
 
   app.useGlobalPipes(
     new ValidationPipe({

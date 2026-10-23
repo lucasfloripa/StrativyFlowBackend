@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { ConfirmChannel, ConsumeMessage } from 'amqplib'
 
 import {
@@ -20,6 +21,7 @@ interface ConsumerHarness {
   confirmChannel: {
     ack: jest.Mock
     nack: jest.Mock
+    cancel: jest.Mock
     assertExchange: jest.Mock
     assertQueue: jest.Mock
     bindQueue: jest.Mock
@@ -27,6 +29,7 @@ interface ConsumerHarness {
     prefetch: jest.Mock
   }
   publish: jest.MockedFunction<Publish>
+  service: RabbitConsumerService
   consume: (message: ConsumeMessage) => Promise<void>
 }
 
@@ -59,6 +62,7 @@ const createHarness = async (
   const confirmChannel = {
     ack: jest.fn(),
     nack: jest.fn(),
+    cancel: jest.fn().mockResolvedValue(undefined),
     assertExchange: jest.fn().mockResolvedValue(undefined),
     assertQueue: jest.fn().mockResolvedValue(undefined),
     bindQueue: jest.fn().mockResolvedValue(undefined),
@@ -70,7 +74,7 @@ const createHarness = async (
           processing = new Promise((resolve) => setImmediate(resolve))
         }
 
-        return Promise.resolve()
+        return Promise.resolve({ consumerTag: 'consumer-tag' })
       }
     )
   }
@@ -97,6 +101,7 @@ const createHarness = async (
   return {
     confirmChannel,
     publish,
+    service,
     consume: async (message) => {
       consumeHandler?.(message)
       await processing
@@ -311,5 +316,81 @@ describe('RabbitConsumerService', () => {
     )
     expect(confirmChannel.ack).toHaveBeenCalledWith(rawMessage)
     expect(confirmChannel.nack).not.toHaveBeenCalled()
+  })
+
+  describe('onModuleDestroy', () => {
+    const deferred = () => {
+      let resolve: () => void = () => undefined
+      const promise = new Promise<void>((done) => {
+        resolve = done
+      })
+
+      return { promise, resolve }
+    }
+
+    afterEach(() => {
+      delete process.env.RABBIT_SHUTDOWN_TIMEOUT_MS
+      jest.restoreAllMocks()
+    })
+
+    it('cancels the consumer so no new messages are delivered', async () => {
+      const { confirmChannel, service } = await createHarness()
+
+      await service.onModuleDestroy()
+
+      expect(confirmChannel.cancel).toHaveBeenCalledWith('consumer-tag')
+    })
+
+    it('waits for an in-flight message to finish and ACK before resolving', async () => {
+      const handlerDone = deferred()
+      const { confirmChannel, service, consume } = await createHarness(
+        jest.fn(() => handlerDone.promise)
+      )
+      void consume(createRawMessage())
+      let shutdownFinished = false
+
+      const shutdown = service.onModuleDestroy().then(() => {
+        shutdownFinished = true
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+
+      expect(shutdownFinished).toBe(false)
+      expect(confirmChannel.ack).not.toHaveBeenCalled()
+
+      handlerDone.resolve()
+      await shutdown
+
+      expect(confirmChannel.ack).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops waiting after RABBIT_SHUTDOWN_TIMEOUT_MS and leaves the message unacked', async () => {
+      process.env.RABBIT_SHUTDOWN_TIMEOUT_MS = '20'
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined)
+      const { confirmChannel, service, consume } = await createHarness(
+        jest.fn(() => new Promise<void>(() => undefined))
+      )
+      void consume(createRawMessage())
+
+      await service.onModuleDestroy()
+
+      expect(confirmChannel.ack).not.toHaveBeenCalled()
+      expect(JSON.stringify(warn.mock.calls)).toContain(
+        'shutdown timeout reached'
+      )
+    })
+
+    it('requeues a message delivered during shutdown without handling it', async () => {
+      const handler = jest.fn().mockResolvedValue(undefined)
+      const { confirmChannel, service, consume } = await createHarness(handler)
+      const rawMessage = createRawMessage()
+
+      await service.onModuleDestroy()
+      await consume(rawMessage)
+
+      expect(handler).not.toHaveBeenCalled()
+      expect(confirmChannel.nack).toHaveBeenCalledWith(rawMessage, false, true)
+    })
   })
 })

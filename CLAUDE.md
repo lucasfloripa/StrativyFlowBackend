@@ -133,6 +133,10 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   (e.g. `payment.queue` / `payment.mark_overdue`, `notification.queue` / `lead.created`).
   Validate `message.data` defensively inside the handler (see `PaymentWorker.getPaymentId`).
 - Schedulers use `@Cron(..., { waitForCompletion: true })`, find ids, then `publishMany`.
+- Graceful shutdown: `main.ts` and `worker.ts` call `enableShutdownHooks()`. On SIGTERM the
+  consumer cancels its subscriptions and waits for in-flight messages (up to
+  `RABBIT_SHUTDOWN_TIMEOUT_MS`, default 8 s) in `onModuleDestroy`; the connection closes later, in
+  `onApplicationShutdown`. Don't close shared connections in `onModuleDestroy`.
 
 ### Realtime
 

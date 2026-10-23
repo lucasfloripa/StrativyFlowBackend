@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ChannelWrapper } from 'amqp-connection-manager'
 import { ConfirmChannel, ConsumeMessage } from 'amqplib'
 
@@ -6,6 +6,7 @@ import {
   DEFAULT_RABBIT_MAX_RETRY_ATTEMPTS,
   DEFAULT_RABBIT_PREFETCH,
   DEFAULT_RABBIT_RETRY_DELAYS_MS,
+  DEFAULT_RABBIT_SHUTDOWN_TIMEOUT_MS,
   RABBIT_DEAD_LETTER_EXCHANGE,
   RABBIT_EXCHANGE,
   RABBIT_RETRY_EXCHANGE
@@ -52,8 +53,13 @@ const parseRetryDelays = (rawValue: string | undefined): number[] => {
   return delays.length > 0 ? delays : DEFAULT_RABBIT_RETRY_DELAYS_MS
 }
 
+interface ActiveConsumer {
+  channel: ConfirmChannel
+  consumerTag: string
+}
+
 @Injectable()
-export class RabbitConsumerService {
+export class RabbitConsumerService implements OnModuleDestroy {
   private readonly logger = new Logger(RabbitConsumerService.name)
 
   // maxRetryAttempts excludes the original processing attempt.
@@ -71,6 +77,18 @@ export class RabbitConsumerService {
     process.env.RABBIT_RETRY_DELAYS_MS
   )
 
+  private readonly shutdownTimeoutMs = parsePositiveInteger(
+    process.env.RABBIT_SHUTDOWN_TIMEOUT_MS,
+    DEFAULT_RABBIT_SHUTDOWN_TIMEOUT_MS
+  )
+
+  // One entry per subscription; a reconnect replaces it with the new channel.
+  private readonly activeConsumers = new Map<string, ActiveConsumer>()
+
+  private readonly inFlightMessages = new Set<Promise<void>>()
+
+  private shuttingDown = false
+
   constructor(
     private readonly rabbitConnectionService: RabbitConnectionService
   ) {}
@@ -81,14 +99,100 @@ export class RabbitConsumerService {
     await channel.addSetup(async (confirmChannel: ConfirmChannel) => {
       await this.setupSubscription(confirmChannel, options)
 
-      await confirmChannel.consume(
+      const { consumerTag } = await confirmChannel.consume(
         options.queue,
         (rawMessage) => {
-          void this.handleMessage(channel, confirmChannel, rawMessage, options)
+          if (this.shuttingDown) {
+            // Delivered while the consumer was being cancelled: give it back.
+            if (rawMessage) {
+              confirmChannel.nack(rawMessage, false, true)
+            }
+            return
+          }
+
+          this.track(
+            this.handleMessage(channel, confirmChannel, rawMessage, options)
+          )
         },
         { noAck: false }
       )
+
+      this.activeConsumers.set(`${options.queue}:${options.routingKey}`, {
+        channel: confirmChannel,
+        consumerTag
+      })
     })
+  }
+
+  /**
+   * Graceful shutdown: stop receiving new messages, then let the ones already
+   * being processed finish (up to RABBIT_SHUTDOWN_TIMEOUT_MS). Anything still
+   * unacked when the connection closes is redelivered by RabbitMQ.
+   */
+  async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true
+    await this.cancelConsumers()
+    await this.waitForInFlightMessages()
+  }
+
+  private track(processing: Promise<void>): void {
+    const task = processing.then(
+      () => undefined,
+      (error: unknown) => {
+        this.logger.error(
+          'RabbitMQ message handling crashed',
+          error instanceof Error ? error.stack : undefined
+        )
+      }
+    )
+    this.inFlightMessages.add(task)
+    void task.finally(() => this.inFlightMessages.delete(task))
+  }
+
+  private async cancelConsumers(): Promise<void> {
+    const consumers = [...this.activeConsumers.entries()]
+    this.activeConsumers.clear()
+
+    await Promise.all(
+      consumers.map(async ([subscription, { channel, consumerTag }]) => {
+        try {
+          await channel.cancel(consumerTag)
+        } catch (error) {
+          this.logger.warn(
+            `RabbitMQ consumer cancel failed subscription=${subscription} error=${
+              error instanceof Error ? error.message : 'unknown'
+            }`
+          )
+        }
+      })
+    )
+  }
+
+  private async waitForInFlightMessages(): Promise<void> {
+    const pending = this.inFlightMessages.size
+
+    if (pending === 0) {
+      return
+    }
+
+    this.logger.log(
+      `Waiting for in-flight RabbitMQ messages count=${pending} timeoutMs=${this.shutdownTimeoutMs}`
+    )
+
+    let timer: NodeJS.Timeout | undefined
+    const timedOut = await Promise.race([
+      Promise.all([...this.inFlightMessages]).then(() => false),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(true), this.shutdownTimeoutMs)
+      })
+    ])
+    clearTimeout(timer)
+
+    if (timedOut) {
+      this.logger.warn(
+        `RabbitMQ shutdown timeout reached; unfinished messages will be redelivered count=${this.inFlightMessages.size}`
+      )
+    }
   }
 
   private async setupSubscription(
