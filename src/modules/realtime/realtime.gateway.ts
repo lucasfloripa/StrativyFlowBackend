@@ -20,6 +20,13 @@ import { CompanyAccessService } from '../auth/company-access.service'
 import { JoinLeadRoomDto } from './dto/join-lead-room.dto'
 import { RealtimeService } from './realtime.service'
 
+const LOCAL_DEVELOPMENT_ENVIRONMENTS = new Set([
+  'dev',
+  'development',
+  'local',
+  'test'
+])
+
 @WebSocketGateway({
   namespace: 'realtime',
   cors: {
@@ -211,10 +218,7 @@ export class RealtimeGateway
       return true
     }
 
-    const isDevelopment =
-      this.configService.get<string>('NODE_ENV') !== 'production'
-
-    if (isDevelopment) {
+    if (this.isLocalDevelopment()) {
       return (
         origin.startsWith('http://localhost:') ||
         origin.startsWith('http://127.0.0.1:')
@@ -222,6 +226,23 @@ export class RealtimeGateway
     }
 
     return false
+  }
+
+  /**
+   * Localhost origins are only trusted in environments explicitly marked as
+   * local development. Any other value, including `prod` and an unset
+   * `NODE_ENV`, is treated as a deployed environment.
+   */
+  private isLocalDevelopment(): boolean {
+    const environment = this.configService
+      .get<string>('NODE_ENV')
+      ?.trim()
+      .toLowerCase()
+
+    return (
+      environment !== undefined &&
+      LOCAL_DEVELOPMENT_ENVIRONMENTS.has(environment)
+    )
   }
 
   private getRootServer(server: Namespace | Server): Server | null {

@@ -117,3 +117,75 @@ describe('RealtimeGateway Company isolation', () => {
     expect(rejected).toHaveBeenCalledWith(expect.any(Error))
   })
 })
+
+describe('RealtimeGateway CORS origins', () => {
+  type OriginCallback = (error: Error | null, allow?: boolean) => void
+  type OriginCheck = (
+    origin: string | undefined,
+    callback: OriginCallback
+  ) => void
+
+  const buildOriginCheck = (env: Record<string, string | undefined>) => {
+    const config = { get: jest.fn((key: string) => env[key]) }
+    const gateway = new RealtimeGateway(
+      { registerGateway: jest.fn() } as unknown as RealtimeService,
+      config as unknown as ConfigService,
+      {} as unknown as CompanyAccessService
+    )
+    const server = {
+      server: { engine: { opts: { cors: {} as { origin?: OriginCheck } } } },
+      use: jest.fn()
+    }
+
+    gateway.afterInit(server as unknown as Namespace)
+
+    const originCheck = server.server.engine.opts.cors.origin
+    if (!originCheck) throw new Error('CORS origin check was not installed')
+
+    return (origin: string | undefined): boolean => {
+      let allowed = false
+      originCheck(origin, (error, allow) => {
+        allowed = !error && allow === true
+      })
+      return allowed
+    }
+  }
+
+  const appOrigin = 'https://app.strativyflow.com'
+
+  it.each(['prod', 'production', undefined, 'staging'])(
+    'rejects localhost origins when NODE_ENV is %s',
+    (nodeEnv) => {
+      const isAllowed = buildOriginCheck({
+        NODE_ENV: nodeEnv,
+        CORS_ORIGIN: appOrigin
+      })
+
+      expect(isAllowed('http://localhost:5173')).toBe(false)
+      expect(isAllowed('http://127.0.0.1:5173')).toBe(false)
+      expect(isAllowed(appOrigin)).toBe(true)
+    }
+  )
+
+  it.each(['dev', 'development', 'local', 'test'])(
+    'accepts localhost origins when NODE_ENV is %s',
+    (nodeEnv) => {
+      const isAllowed = buildOriginCheck({
+        NODE_ENV: nodeEnv,
+        CORS_ORIGIN: appOrigin
+      })
+
+      expect(isAllowed('http://localhost:5173')).toBe(true)
+      expect(isAllowed('http://127.0.0.1:5173')).toBe(true)
+    }
+  )
+
+  it('rejects an origin that is not configured', () => {
+    const isAllowed = buildOriginCheck({
+      NODE_ENV: 'prod',
+      CORS_ORIGIN: appOrigin
+    })
+
+    expect(isAllowed('https://evil.example.com')).toBe(false)
+  })
+})
