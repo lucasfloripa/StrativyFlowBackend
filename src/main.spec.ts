@@ -45,4 +45,14 @@ describe('API bootstrap', () => {
 
     expect(app.set).toHaveBeenCalledWith('trust proxy', 1)
   })
+
+  it('passes the CORS_ORIGIN list to CORS as a flat array', async () => {
+    const [created] = jest.mocked(NestFactory.create).mock.results
+    const app = (await created.value) as unknown as { enableCors: jest.Mock }
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(app.enableCors).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: ['https://app.example.com'] })
+    )
+  })
 })
