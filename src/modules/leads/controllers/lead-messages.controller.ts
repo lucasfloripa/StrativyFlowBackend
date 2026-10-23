@@ -17,11 +17,11 @@ import { SendContactLeadMessageDto } from '../dtos/send-contact-lead-message.dto
 import { SendMediaLeadMessageDto } from '../dtos/send-media-lead-message.dto'
 import { SendTemplateLeadMessageDto } from '../dtos/send-template-lead-message.dto'
 import { SendTextLeadMessageDto } from '../dtos/send-text-lead-message.dto'
+import { ChatMediaPolicyService } from '../services/chat-media-policy.service'
 import { SendContactLeadMessageCommand } from '../services/commands/send-contact-lead-message.command'
 import { SendMediaLeadMessageCommand } from '../services/commands/send-media-lead-message.command'
 import { SendTemplateLeadMessageCommand } from '../services/commands/send-template-lead-message.command'
 import { SendTextLeadMessageCommand } from '../services/commands/send-text-lead-message.command'
-import { ChatMediaPolicyService } from '../services/chat-media-policy.service'
 import { LeadMessageApplicationService } from '../services/lead-message-application.service'
 
 import type { Request } from 'express'
