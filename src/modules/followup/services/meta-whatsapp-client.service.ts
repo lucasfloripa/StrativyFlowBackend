@@ -1,7 +1,8 @@
 import {
   BadGatewayException,
   Injectable,
-  InternalServerErrorException
+  InternalServerErrorException,
+  Logger
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import axios from 'axios'
@@ -25,6 +26,8 @@ type AxiosLikeError<TResponse> = {
 
 @Injectable()
 export class MetaWhatsAppClient {
+  private readonly logger = new Logger(MetaWhatsAppClient.name)
+
   constructor(private readonly configService: ConfigService) {}
 
   async sendTemplate(
@@ -51,7 +54,9 @@ export class MetaWhatsAppClient {
         const metaError = error.response?.data?.error
         const statusCode = error.response?.status
 
-        console.log(JSON.stringify(error.response?.data, null, 2))
+        this.logger.warn(
+          `Meta WhatsApp template request failed. status=${statusCode ?? 'unknown'} code=${metaError?.code ?? 'unknown'} type=${metaError?.type ?? 'unknown'} fbtraceId=${metaError?.fbtrace_id ?? 'unknown'}`
+        )
 
         throw new BadGatewayException({
           message: 'Meta WhatsApp API request failed',

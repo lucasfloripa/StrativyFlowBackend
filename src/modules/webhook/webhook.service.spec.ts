@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import axios from 'axios'
 
 import { Company } from '../company/company.entity'
@@ -442,6 +443,86 @@ describe('WebhookService', () => {
         responseType: 'arraybuffer'
       })
       expect(dependencies.storageService.uploadFile).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  describe('logging', () => {
+    const PRIVATE_TEXT = 'texto privado do lead'
+    const collectLogs = () => {
+      const spies = (['log', 'debug', 'warn', 'error'] as const).map((method) =>
+        jest.spyOn(Logger.prototype, method).mockImplementation(() => undefined)
+      )
+
+      return () =>
+        spies
+          .flatMap((spy) => spy.mock.calls.flat())
+          .map((value) => String(value))
+          .join('\n')
+    }
+
+    afterEach(() => jest.restoreAllMocks())
+
+    it('does not log the content of inbound WhatsApp payloads', async () => {
+      const logged = collectLogs()
+
+      await createService().handleIncomingMessage({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    {
+                      from: '5548999990000',
+                      type: 'text',
+                      text: { body: PRIVATE_TEXT }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      })
+
+      expect(logged()).not.toContain(PRIVATE_TEXT)
+    })
+
+    it('does not log the content of inbound Messenger payloads', async () => {
+      const logged = collectLogs()
+
+      await createService().handleMessengerWebhook({
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [{ message: { mid: 'mid-1', text: PRIVATE_TEXT } }]
+          }
+        ]
+      })
+
+      expect(logged()).not.toContain(PRIVATE_TEXT)
+    })
+
+    it('does not log the content of inbound Instagram payloads', async () => {
+      const logged = collectLogs()
+
+      await createService({
+        companyRepo: { findOne: jest.fn().mockResolvedValue(null) }
+      }).handleDirectWebhook({
+        entry: [
+          {
+            id: 'instagram-account-1',
+            messaging: [
+              {
+                sender: { id: 'instagram-user-1' },
+                message: { mid: 'mid-1', text: PRIVATE_TEXT }
+              }
+            ]
+          }
+        ]
+      })
+
+      expect(logged()).not.toContain(PRIVATE_TEXT)
     })
   })
 

@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
-  InternalServerErrorException
+  InternalServerErrorException,
+  Logger
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import axios from 'axios'
@@ -59,7 +60,6 @@ describe('MetaWhatsAppClient', () => {
     })
 
     it('rejects with BadGatewayException when the Meta API answers with an error', async () => {
-      jest.spyOn(console, 'log').mockImplementation(() => undefined)
       jest.spyOn(axios, 'post').mockRejectedValue({
         response: {
           status: 400,
@@ -83,6 +83,35 @@ describe('MetaWhatsAppClient', () => {
           metaError: { code: 100 }
         }
       })
+    })
+
+    it('logs only technical fields of a Meta API error', async () => {
+      const warn = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined)
+      jest.spyOn(axios, 'post').mockRejectedValue({
+        response: {
+          status: 400,
+          data: {
+            error: {
+              message: 'Recipient 5548999990000 is not a valid user',
+              type: 'OAuthException',
+              code: 131026,
+              fbtrace_id: 'trace-1',
+              error_data: { details: 'Recipient 5548999990000 not found' }
+            }
+          }
+        }
+      })
+
+      await expect(
+        buildClient().sendTemplate(payload, credentials)
+      ).rejects.toBeInstanceOf(BadGatewayException)
+
+      const logged = JSON.stringify(warn.mock.calls)
+      expect(logged).toContain('code=131026')
+      expect(logged).toContain('fbtraceId=trace-1')
+      expect(logged).not.toContain('5548999990000')
     })
 
     it('rejects with InternalServerErrorException on an unexpected error', async () => {

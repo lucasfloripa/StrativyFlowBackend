@@ -524,6 +524,20 @@ describe('NotificationWorker', () => {
       )
     })
 
+    it('logs the received message event without its payload', async () => {
+      const log = jest
+        .spyOn(Logger.prototype, 'log')
+        .mockImplementation(() => undefined)
+      const dependencies = await createWorker()
+
+      await dependencies.handle(MESSAGE_RECEIVED_EVENT, messageEvent)
+
+      const logged = JSON.stringify(log.mock.calls)
+      expect(logged).toContain('eventId=event-1')
+      expect(logged).not.toContain('leadName')
+      log.mockRestore()
+    })
+
     it('notifies Company members individually when a message arrives', async () => {
       const dependencies = await createWorker()
 

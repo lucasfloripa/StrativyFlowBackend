@@ -209,7 +209,7 @@ export class NotificationWorker implements OnModuleInit {
     message: RabbitMessage
   ): Promise<void> {
     this.logger.log(
-      `Received job: ${message.event} message=${JSON.stringify(message)}`
+      `Received job: ${message.event} (eventId=${message.eventId})`
     )
 
     const data = this.asRecord(message.data)

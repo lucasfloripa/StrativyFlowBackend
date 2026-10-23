@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common'
 import { GUARDS_METADATA } from '@nestjs/common/constants'
 import { Test, TestingModule } from '@nestjs/testing'
 
@@ -52,5 +53,42 @@ describe('WebhookController', () => {
     ] as const)('leaves the %s subscription handshake unguarded', (handler) => {
       expect(guardsOf(handler)).toEqual([])
     })
+  })
+
+  describe('subscription handshake', () => {
+    afterEach(() => jest.restoreAllMocks())
+
+    it.each([
+      'verifyWebhook',
+      'verifyMessengerWebhook',
+      'verifyDirectWebhook'
+    ] as const)(
+      'does not log the verify token when %s rejects a request',
+      (handler) => {
+        const warn = jest
+          .spyOn(Logger.prototype, 'warn')
+          .mockImplementation(() => undefined)
+        const consoleLog = jest
+          .spyOn(console, 'log')
+          .mockImplementation(() => undefined)
+        const response = {
+          status: jest.fn().mockReturnThis(),
+          send: jest.fn()
+        }
+
+        controller[handler](
+          'subscribe',
+          'leaked-verify-token',
+          'challenge-1',
+          response as never
+        )
+
+        expect(response.status).toHaveBeenCalledWith(403)
+        expect(consoleLog).not.toHaveBeenCalled()
+        expect(JSON.stringify(warn.mock.calls)).not.toContain(
+          'leaked-verify-token'
+        )
+      }
+    )
   })
 })

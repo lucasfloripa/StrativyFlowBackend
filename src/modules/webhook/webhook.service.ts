@@ -291,8 +291,7 @@ export class WebhookService {
 
   async handleIncomingMessage(payload: WhatsAppWebhookPayload) {
     this.logger.log(
-      'Received WhatsApp webhook payload:',
-      JSON.stringify(payload)
+      `Received WhatsApp webhook. entries=${payload?.entry?.length ?? 0}`
     )
 
     let inboundMessageId: string | undefined
@@ -1516,7 +1515,7 @@ export class WebhookService {
 
   async handleMessengerWebhook(payload: MessengerWebhookPayload) {
     this.logger.log(
-      `Received Messenger webhook payload: ${JSON.stringify(payload)}`
+      `Received Messenger webhook. entries=${payload.entry?.length ?? 0}`
     )
 
     for (const entry of payload.entry ?? []) {
@@ -1970,7 +1969,7 @@ export class WebhookService {
 
   async handleDirectWebhook(payload: InstagramDirectWebhookPayload) {
     this.logger.log(
-      `Received Instagram Direct webhook payload: ${JSON.stringify(payload)}`
+      `Received Instagram Direct webhook. entries=${payload.entry?.length ?? 0}`
     )
 
     for (const entry of payload.entry ?? []) {

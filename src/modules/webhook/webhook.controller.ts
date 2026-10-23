@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   HttpCode,
+  Logger,
   Post,
   Query,
   Res,
@@ -21,6 +22,8 @@ import type { Response } from 'express'
 
 @Controller('webhook')
 export class WebhookController {
+  private readonly logger = new Logger(WebhookController.name)
+
   constructor(private readonly webhookService: WebhookService) {}
 
   @Post('whatsapp')
@@ -57,6 +60,9 @@ export class WebhookController {
       return res.status(200).send(challenge)
     }
 
+    this.logger.warn(
+      `Rejected webhook verification. channel=whatsapp mode=${mode ?? 'missing'}`
+    )
     return res.status(403).send('Invalid verification token')
   }
 
@@ -69,11 +75,13 @@ export class WebhookController {
   ) {
     const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN
 
-    console.log('Verifying Messenger webhook:', { mode, token, challenge })
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       return res.status(200).send(challenge)
     }
 
+    this.logger.warn(
+      `Rejected webhook verification. channel=messenger mode=${mode ?? 'missing'}`
+    )
     return res.status(403).send('Invalid verification token')
   }
 
@@ -86,11 +94,13 @@ export class WebhookController {
   ) {
     const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN
 
-    console.log('Verifying Direct webhook:', { mode, token, challenge })
     if (mode === 'subscribe' && token === VERIFY_TOKEN) {
       return res.status(200).send(challenge)
     }
 
+    this.logger.warn(
+      `Rejected webhook verification. channel=direct mode=${mode ?? 'missing'}`
+    )
     return res.status(403).send('Invalid verification token')
   }
 }
