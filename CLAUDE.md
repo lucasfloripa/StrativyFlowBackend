@@ -79,6 +79,9 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   token with `JWT_SECRET` and sets `request.user = { id, userId, role }`.
 - Controllers declare a local `AuthenticatedRequest = Request & { user: { id: string } }` and pass
   `request.user.id` as the **first argument** to the service. Services scope every query by that user.
+- Platform administration routes (today only `POST /user/user-informations`, used to onboard a
+  client) add `AdminApiKeyGuard`: the `X-Admin-Api-Key` header must match `ADMIN_API_KEY`; when the
+  variable is unset every request is refused.
 - Routes that take ids of company-owned resources add `CompanyAccessGuard`
   (`@UseGuards(JwtAuthGuard, CompanyAccessGuard)`). It checks any `leadId`, `negotiationId`,
   `attachmentId`, `followUpId`, `parentId`, `replyMessageId`, `costId`, `paymentId` in params, query or

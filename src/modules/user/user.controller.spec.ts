@@ -1,4 +1,7 @@
+import { GUARDS_METADATA } from '@nestjs/common/constants'
+
 import { buildCompany, buildUserInformations } from '../../testing'
+import { AdminApiKeyGuard } from '../auth/admin-api-key.guard'
 
 import { UserController } from './user.controller'
 import { UserService } from './user.service'
@@ -48,6 +51,15 @@ describe('UserController', () => {
   })
 
   describe('createUserInformations', () => {
+    it('requires the admin API key', () => {
+      const guards: unknown = Reflect.getMetadata(
+        GUARDS_METADATA,
+        UserController.prototype.createUserInformations
+      )
+
+      expect(guards).toEqual([AdminApiKeyGuard])
+    })
+
     it('does not expose channel tokens after creating UserInformations', async () => {
       const userService = {
         createUserInformations: jest.fn().mockResolvedValue(configuredUser)
@@ -69,5 +81,19 @@ describe('UserController', () => {
         'instagram-user-access-token'
       )
     })
+  })
+
+  it.each([
+    'listUserInformations',
+    'updateUserInformationsNotifications',
+    'updateUserInformationsPreferences',
+    'updateUserInformationsShortcuts'
+  ] as const)('keeps %s available to any authenticated user', (handler) => {
+    const guards: unknown = Reflect.getMetadata(
+      GUARDS_METADATA,
+      UserController.prototype[handler]
+    )
+
+    expect(guards ?? []).toEqual([])
   })
 })

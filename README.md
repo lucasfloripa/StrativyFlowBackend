@@ -25,7 +25,7 @@ As variáveis são lidas de `.env.${NODE_ENV}` (`.env.dev`, `.env.prod`), que n�
 
 | Grupo | Variáveis |
 | --- | --- |
-| App | `PORT`, `CORS_ORIGIN`, `JWT_SECRET` |
+| App | `PORT`, `CORS_ORIGIN`, `JWT_SECRET`, `ADMIN_API_KEY` (rotas de administração, enviada no header `X-Admin-Api-Key`; sem ela essas rotas recusam tudo) |
 | Banco | `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`, `DB_SSL`, `DB_SYNCHRONIZE`, `DB_MIGRATIONS_RUN` |
 | RabbitMQ | `RABBITMQ_ENABLED`, `RABBITMQ_URL`, `RABBITMQ_QUEUE`, `RABBIT_PREFETCH`, `RABBIT_PUBLISH_CONCURRENCY`, `RABBIT_MAX_RETRY_ATTEMPTS`, `RABBIT_RETRY_DELAYS_MS` |
 | E-mail | `RESEND_API_KEY` |

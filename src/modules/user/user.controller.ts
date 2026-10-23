@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common'
 import { Request } from 'express'
 
+import { AdminApiKeyGuard } from '../auth/admin-api-key.guard'
 import { JwtAuthGuard } from '../auth/jwt-auth.guard'
 
 import { CreateUserInformationsDto } from './dtos/create-user-informations.dto'
@@ -36,7 +37,12 @@ export class UserController {
     return userInformations.map(toUserInformationsResponse)
   }
 
+  /**
+   * Platform onboarding: an administrator creates the UserInformations of
+   * another user, so `userId` comes from the body. Requires the admin API key.
+   */
   @Post('user-informations')
+  @UseGuards(AdminApiKeyGuard)
   async createUserInformations(@Body() dto: CreateUserInformationsDto) {
     const userInformations = await this.userService.createUserInformations(dto)
     return toUserInformationsResponse(userInformations)
