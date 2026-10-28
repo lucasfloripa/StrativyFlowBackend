@@ -1,4 +1,3 @@
-import type { LeadChannel } from '../../leads/entities/lead-channel-identity.entity'
 import type {
   InstagramMessagingEvent,
   MessengerMessagingEvent,
@@ -7,6 +6,7 @@ import type {
   WhatsAppMessageStatus,
   WhatsAppMetadata
 } from './meta-webhook-payload.types'
+import type { LeadChannel } from '../../leads/entities/lead-channel-identity.entity'
 
 export enum InboundEventKind {
   MESSAGE = 'message',

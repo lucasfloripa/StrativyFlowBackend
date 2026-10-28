@@ -179,15 +179,16 @@ export class WebhookService {
   }
 
   private logSkippedInboundItems(skipped: SkippedInboundItem[]): void {
-    const counts = new Map<string, number>()
+    const groups = new Map<string, SkippedInboundItem & { count: number }>()
 
     for (const item of skipped) {
       const key = `${item.channel}|${item.reason}`
-      counts.set(key, (counts.get(key) ?? 0) + 1)
+      const group = groups.get(key) ?? { ...item, count: 0 }
+      group.count += 1
+      groups.set(key, group)
     }
 
-    for (const [key, count] of counts) {
-      const [channel, reason] = key.split('|')
+    for (const { channel, reason, count } of groups.values()) {
       const message = `Skipped inbound webhook items. channel=${channel} reason=${reason} count=${count}`
 
       if (reason === InboundSkipReason.ECHO) {
