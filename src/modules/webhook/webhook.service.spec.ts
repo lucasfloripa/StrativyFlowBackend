@@ -20,7 +20,9 @@ import {
 
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
-import { WebhookService, WhatsAppWebhookPayload } from './webhook.service'
+import { WebhookService } from './webhook.service'
+
+import type { WhatsAppWebhookPayload } from './inbound/meta-webhook-payload.types'
 
 describe('WebhookService', () => {
   const createService = (overrides?: {
@@ -350,6 +352,107 @@ describe('WebhookService', () => {
           }
         ]
       })
+    })
+
+    // Regression P1: only entry[0].changes[0].messages[0] used to be processed,
+    // so the second message of a batched POST was lost.
+    it('processes every message when Meta batches several in one POST', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity.mockResolvedValue(
+        {
+          identity: { id: 'identity-1' },
+          lead: dependencies.lead,
+          leadCreated: false
+        }
+      )
+
+      await expect(
+        dependencies.service.handleIncomingMessage({
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    metadata: { phone_number_id: 'company-phone-id' },
+                    messages: [
+                      {
+                        id: 'wamid.inbound-1',
+                        from: '5548984296447',
+                        type: 'text',
+                        text: { body: 'Primeira' }
+                      },
+                      {
+                        id: 'wamid.inbound-2',
+                        from: '5548984296447',
+                        type: 'text',
+                        text: { body: 'Segunda' }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      ).resolves.toEqual({
+        status: 'processed_batch',
+        results: [
+          { status: 'updated_human_mode_skipped', leadId: 'lead-1' },
+          { status: 'updated_human_mode_skipped', leadId: 'lead-1' }
+        ]
+      })
+      expect(dependencies.messageRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ externalMessageId: 'wamid.inbound-1' })
+      )
+      expect(dependencies.messageRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ externalMessageId: 'wamid.inbound-2' })
+      )
+      expect(dependencies.lead.lastInboundMessageId).toBe('wamid.inbound-2')
+    })
+
+    it('processes statuses and messages that arrive in the same POST', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity.mockResolvedValue(
+        {
+          identity: { id: 'identity-1' },
+          lead: dependencies.lead,
+          leadCreated: false
+        }
+      )
+
+      await expect(
+        dependencies.service.handleIncomingMessage({
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    metadata: { phone_number_id: 'company-phone-id' },
+                    statuses: [{ id: 'wamid.outbound', status: 'delivered' }],
+                    messages: [
+                      {
+                        id: 'wamid.inbound-1',
+                        from: '5548984296447',
+                        type: 'text',
+                        text: { body: 'Olá' }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      ).resolves.toEqual({
+        status: 'processed_batch',
+        results: [
+          { status: 'processed_status_updates', processedCount: 0 },
+          { status: 'updated_human_mode_skipped', leadId: 'lead-1' }
+        ]
+      })
+      expect(dependencies.messageRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ externalMessageId: 'wamid.inbound-1' })
+      )
     })
 
     it('uses the Company token for flow replies on an existing conversation', async () => {

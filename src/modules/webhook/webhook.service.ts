@@ -38,10 +38,30 @@ import {
   LeadFlowProcessResult
 } from './flow/lead-flow.types'
 import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
+import {
+  InboundSkipReason,
+  type SkippedInboundItem,
+  type WhatsAppMessageInboundEvent
+} from './inbound/inbound-event.types'
+import { normalizeInstagramWebhook } from './inbound/instagram-inbound.normalizer'
+import { normalizeMessengerWebhook } from './inbound/messenger-inbound.normalizer'
+import {
+  isWhatsAppMessageEvent,
+  isWhatsAppStatusEvent,
+  normalizeWhatsAppWebhook
+} from './inbound/whatsapp-inbound.normalizer'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { canTransitionMessageStatus } from './message-status.policy'
 import { MessengerMessagingService } from './messenger-messaging.service'
 import { isAllowedMetaMediaUrl } from './security/meta-media-url'
+
+import type {
+  InstagramDirectWebhookPayload,
+  MessengerWebhookPayload,
+  WhatsAppInboundMessage,
+  WhatsAppMessageStatus,
+  WhatsAppWebhookPayload
+} from './inbound/meta-webhook-payload.types'
 
 const SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
 
@@ -67,191 +87,7 @@ type WhatsAppMediaResponse = {
 
 type WhatsAppMessageStatusType = 'sent' | 'delivered' | 'read'
 
-type WhatsAppMessageStatus = {
-  id?: string
-  status?: string
-  timestamp?: string
-  recipient_id?: string
-}
-
-type WhatsAppAudioMessage = {
-  id?: string
-  mime_type?: string
-  sha256?: string
-  voice?: boolean
-}
-
-type WhatsAppImageMessage = {
-  id?: string
-  mime_type?: string
-  sha256?: string
-  caption?: string
-}
-
-type WhatsAppVideoMessage = {
-  id?: string
-  mime_type?: string
-  sha256?: string
-  caption?: string
-}
-
-type WhatsAppDocumentMessage = {
-  id?: string
-  filename?: string
-  mime_type?: string
-  sha256?: string
-  caption?: string
-}
-
-export type WhatsAppWebhookPayload = {
-  entry?: Array<{
-    changes?: Array<{
-      value?: {
-        metadata?: {
-          display_phone_number?: string
-          phone_number_id?: string
-        }
-        statuses?: WhatsAppMessageStatus[]
-        messages?: Array<{
-          type?: string
-          from?: string
-          timestamp?: string
-          text?: {
-            body?: string
-          }
-          audio?: WhatsAppAudioMessage
-          image?: WhatsAppImageMessage
-          video?: WhatsAppVideoMessage
-          document?: WhatsAppDocumentMessage
-          button?: {
-            text?: string
-            payload?: string
-          }
-          reaction?: {
-            message_id?: string
-            emoji?: string | null
-          }
-          id?: string
-          referral?: {
-            source_type?: string
-            source_id?: string
-            source_url?: string
-            welcome_message?: {
-              text?: string
-            }
-          }
-        }>
-        contacts?: Array<{
-          profile?: {
-            name?: string
-          }
-        }>
-      }
-    }>
-  }>
-}
-
-export type MessengerWebhookPayload = {
-  entry?: Array<{
-    id?: string
-    messaging?: Array<{
-      sender?: {
-        id?: string
-      }
-      recipient?: {
-        id?: string
-      }
-      timestamp?: number
-      message?: {
-        mid?: string
-        text?: string
-        is_echo?: boolean
-        attachments?: Array<{
-          type?: string
-          payload?: {
-            url?: string
-          }
-        }>
-      }
-    }>
-  }>
-}
-
-export type InstagramDirectWebhookPayload = {
-  object?: string
-  entry?: Array<{
-    id?: string
-    messaging?: Array<{
-      sender?: {
-        id?: string
-      }
-      recipient?: {
-        id?: string
-      }
-      timestamp?: number
-      reaction?: {
-        mid?: string
-        action?: string
-        reaction?: string
-        emoji?: string | null
-      }
-      message?: {
-        mid?: string
-        text?: string
-        is_echo?: boolean
-        attachments?: Array<{
-          type?: string
-          payload?: {
-            url?: string
-          }
-        }>
-      }
-    }>
-  }>
-}
-
-type WhatsAppInboundMessage = {
-  type?: string
-  from?: string
-  timestamp?: string
-  text?: {
-    body?: string
-  }
-  audio?: WhatsAppAudioMessage
-  image?: WhatsAppImageMessage
-  video?: WhatsAppVideoMessage
-  document?: WhatsAppDocumentMessage
-  contacts?: Array<{
-    name?: {
-      formatted_name?: string
-      first_name?: string
-      last_name?: string
-    }
-    phones?: Array<{
-      phone?: string
-      wa_id?: string
-      type?: string
-    }>
-    vcard?: string
-  }>
-  button?: {
-    text?: string
-    payload?: string
-  }
-  reaction?: {
-    message_id?: string
-    emoji?: string | null
-  }
-  id?: string
-  referral?: {
-    source_type?: string
-    source_id?: string
-    source_url?: string
-    welcome_message?: {
-      text?: string
-    }
-  }
-}
+type WhatsAppWebhookResult = Record<string, unknown>
 
 @Injectable()
 export class WebhookService {
@@ -289,54 +125,89 @@ export class WebhookService {
     [LeadFlowState.IN_CONVERSATION]: []
   }
 
-  async handleIncomingMessage(payload: WhatsAppWebhookPayload) {
+  async handleIncomingMessage(
+    payload: WhatsAppWebhookPayload
+  ): Promise<WhatsAppWebhookResult> {
     this.logger.log(
       `Received WhatsApp webhook. entries=${payload?.entry?.length ?? 0}`
     )
+
+    if (!payload?.entry?.length) {
+      this.logger.warn(
+        'Stopping webhook processing: missing entry in WhatsApp payload'
+      )
+      return { status: 'ignored_missing_entry' }
+    }
+
+    const { events, skipped } = normalizeWhatsAppWebhook(payload)
+    this.logSkippedInboundItems(skipped)
+
+    const statusEvents = events.filter(isWhatsAppStatusEvent)
+    const messageEvents = events.filter(isWhatsAppMessageEvent)
+
+    if (!statusEvents.length && !messageEvents.length) {
+      this.logger.warn(
+        'Stopping webhook processing: webhook event has no inbound messages or statuses'
+      )
+      return { status: 'ignored_no_message' }
+    }
+
+    const results: WhatsAppWebhookResult[] = []
+
+    if (statusEvents.length) {
+      results.push(
+        await this.handleMessageStatuses(
+          statusEvents.map((statusEvent) => statusEvent.payload.status)
+        )
+      )
+    }
+
+    // Meta may batch several messages in one POST: every one is processed.
+    for (const messageEvent of messageEvents) {
+      results.push(await this.processWhatsAppMessageEvent(messageEvent))
+    }
+
+    if (results.length === 1) {
+      return results[0]
+    }
+
+    this.logger.log(
+      `WhatsApp webhook batch processed. statuses=${statusEvents.length} messages=${messageEvents.length}`
+    )
+
+    return { status: 'processed_batch', results }
+  }
+
+  private logSkippedInboundItems(skipped: SkippedInboundItem[]): void {
+    const counts = new Map<string, number>()
+
+    for (const item of skipped) {
+      const key = `${item.channel}|${item.reason}`
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+
+    for (const [key, count] of counts) {
+      const [channel, reason] = key.split('|')
+      const message = `Skipped inbound webhook items. channel=${channel} reason=${reason} count=${count}`
+
+      if (reason === InboundSkipReason.ECHO) {
+        this.logger.debug(message)
+      } else {
+        this.logger.warn(message)
+      }
+    }
+  }
+
+  private async processWhatsAppMessageEvent(
+    event: WhatsAppMessageInboundEvent
+  ): Promise<WhatsAppWebhookResult> {
+    const { message, metadata, contacts } = event.payload
+    const value = { metadata, contacts }
 
     let inboundMessageId: string | undefined
     let from: string | undefined
 
     try {
-      const entry = payload?.entry?.[0]
-      if (!entry) {
-        this.logger.warn(
-          'Stopping webhook processing: missing entry in WhatsApp payload'
-        )
-        return { status: 'ignored_missing_entry' }
-      }
-
-      const change = entry.changes?.[0]
-      if (!change) {
-        this.logger.warn(
-          'Stopping webhook processing: missing change in WhatsApp payload'
-        )
-        return { status: 'ignored_missing_change' }
-      }
-
-      const value = change.value
-      if (!value) {
-        this.logger.warn(
-          'Stopping webhook processing: missing value in WhatsApp payload'
-        )
-        return { status: 'ignored_missing_value' }
-      }
-
-      const statuses = value.statuses
-      if (statuses?.length) {
-        return await this.handleMessageStatuses(statuses)
-      }
-
-      const messages = value.messages
-      if (!messages?.length) {
-        this.logger.warn(
-          'Stopping webhook processing: webhook event has no inbound messages'
-        )
-        return { status: 'ignored_no_message' }
-      }
-
-      const message = messages[0]
-
       const displayPhoneNumber = value?.metadata?.display_phone_number
       const phoneNumberId = value?.metadata?.phone_number_id
       const profileName = this.resolveInboundContactProfileName(value?.contacts)
@@ -1518,297 +1389,300 @@ export class WebhookService {
       `Received Messenger webhook. entries=${payload.entry?.length ?? 0}`
     )
 
-    for (const entry of payload.entry ?? []) {
-      for (const event of entry.messaging ?? []) {
-        const pageId = entry.id?.trim() || event.recipient?.id?.trim()
-        const psid = event.sender?.id?.trim()
-        const inboundMessageId = event.message?.mid?.trim()
-        const messageText = event.message?.text?.trim()
-        const attachment = event.message?.attachments?.find((item) =>
-          Boolean(item.payload?.url?.trim())
+    const { events: inboundEvents, skipped } =
+      normalizeMessengerWebhook(payload)
+    this.logSkippedInboundItems(skipped)
+
+    for (const inboundEvent of inboundEvents) {
+      const { event } = inboundEvent.payload
+      const pageId = inboundEvent.externalAccountId ?? undefined
+      const psid = event.sender?.id?.trim()
+      const inboundMessageId = event.message?.mid?.trim()
+      const messageText = event.message?.text?.trim()
+      const attachment = event.message?.attachments?.find((item) =>
+        Boolean(item.payload?.url?.trim())
+      )
+      const attachmentType = this.resolveSocialAttachmentMessageType(
+        attachment?.type
+      )
+
+      if (event.message?.is_echo) {
+        continue
+      }
+
+      if (
+        !pageId ||
+        !psid ||
+        !inboundMessageId ||
+        ((!messageText || !messageText.length) && !attachmentType)
+      ) {
+        this.logger.warn(
+          'Ignoring Messenger event: Page ID, PSID, message ID and supported content are required'
         )
-        const attachmentType = this.resolveSocialAttachmentMessageType(
-          attachment?.type
-        )
+        continue
+      }
 
-        if (event.message?.is_echo) {
-          continue
-        }
-
-        if (
-          !pageId ||
-          !psid ||
-          !inboundMessageId ||
-          ((!messageText || !messageText.length) && !attachmentType)
-        ) {
-          this.logger.warn(
-            'Ignoring Messenger event: Page ID, PSID, message ID and supported content are required'
-          )
-          continue
-        }
-
-        const existingMessage = await this.messageRepo.findOne({
-          where: {
-            channel: MessageChannel.MESSENGER,
-            externalMessageId: inboundMessageId
-          }
-        })
-
-        if (existingMessage) {
-          this.logger.warn(
-            `Ignoring duplicate Messenger message ${inboundMessageId}`
-          )
-          continue
-        }
-
-        const company = await this.companyRepo.findOne({
-          where: { messengerPageId: pageId }
-        })
-
-        if (!company) {
-          this.logger.warn(
-            'Ignoring Messenger event: no Company is connected to the receiving Page'
-          )
-          continue
-        }
-
-        if (!company.messengerToken?.trim()) {
-          throw new BadRequestException(
-            'Messenger token is not configured for this company'
-          )
-        }
-
-        const existingIdentity =
-          await this.leadChannelIdentityService.findIdentity({
-            channel: LeadChannel.MESSENGER,
-            externalAccountId: pageId,
-            externalUserId: psid
-          })
-
-        let profileName: string | null = null
-        let profilePictureUrl: string | null = null
-
-        if (!existingIdentity && company.messengerToken?.trim()) {
-          try {
-            const { data: profile } =
-              await this.messengerMessagingService.getMessengerUserInfo(
-                psid,
-                company.messengerToken
-              )
-
-            profileName = [profile.first_name, profile.last_name]
-              .filter(Boolean)
-              .join(' ')
-              .trim()
-            profilePictureUrl = profile.profile_pic?.trim() || null
-          } catch {
-            this.logger.warn(
-              'Could not load the Messenger profile; creating the Lead without profile data'
-            )
-          }
-        }
-
-        const interactionAt = event.timestamp
-          ? new Date(event.timestamp)
-          : new Date()
-
-        const shouldUseProfileName = this.hasValidLeadName(profileName)
-        const identityResolution =
-          await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
-            channel: LeadChannel.MESSENGER,
-            externalAccountId: pageId,
-            externalUserId: psid,
-            profileName,
-            profilePictureUrl,
-            lastInteractionAt: interactionAt,
-            leadDraft: {
-              companyId: company.id,
-              name: shouldUseProfileName ? profileName!.trim() : undefined,
-              source: LeadChannel.MESSENGER,
-              flowState: shouldUseProfileName
-                ? LeadFlowState.ASKING_LOCATION
-                : LeadFlowState.ASKING_NAME,
-              state: LeadState.ACTIVE,
-              runtimeMode: LeadRuntimeMode.AUTOMATION,
-              lastInboundMessageId: inboundMessageId,
-              lastActivityAt: interactionAt
-            }
-          })
-        let lead = identityResolution.lead
-
-        if (lead.companyId !== company.id) {
-          this.logger.error(
-            `Ignoring Messenger identity ${identityResolution.identity.id}: it belongs to another Company`
-          )
-          continue
-        }
-
-        const inboundMedia =
-          attachmentType && attachment?.payload?.url
-            ? await this.storeSocialInboundAttachment({
-                leadId: lead.id,
-                externalMessageId: inboundMessageId,
-                type: attachmentType,
-                url: attachment.payload.url
-              })
-            : null
-
-        const persistedMessageResult = await this.persistSocialInboundMessage({
+      const existingMessage = await this.messageRepo.findOne({
+        where: {
           channel: MessageChannel.MESSENGER,
-          leadId: lead.id,
-          leadName: lead.name,
-          companyId: company.id,
+          externalMessageId: inboundMessageId
+        }
+      })
+
+      if (existingMessage) {
+        this.logger.warn(
+          `Ignoring duplicate Messenger message ${inboundMessageId}`
+        )
+        continue
+      }
+
+      const company = await this.companyRepo.findOne({
+        where: { messengerPageId: pageId }
+      })
+
+      if (!company) {
+        this.logger.warn(
+          'Ignoring Messenger event: no Company is connected to the receiving Page'
+        )
+        continue
+      }
+
+      if (!company.messengerToken?.trim()) {
+        throw new BadRequestException(
+          'Messenger token is not configured for this company'
+        )
+      }
+
+      const existingIdentity =
+        await this.leadChannelIdentityService.findIdentity({
+          channel: LeadChannel.MESSENGER,
+          externalAccountId: pageId,
+          externalUserId: psid
+        })
+
+      let profileName: string | null = null
+      let profilePictureUrl: string | null = null
+
+      if (!existingIdentity && company.messengerToken?.trim()) {
+        try {
+          const { data: profile } =
+            await this.messengerMessagingService.getMessengerUserInfo(
+              psid,
+              company.messengerToken
+            )
+
+          profileName = [profile.first_name, profile.last_name]
+            .filter(Boolean)
+            .join(' ')
+            .trim()
+          profilePictureUrl = profile.profile_pic?.trim() || null
+        } catch {
+          this.logger.warn(
+            'Could not load the Messenger profile; creating the Lead without profile data'
+          )
+        }
+      }
+
+      const interactionAt = event.timestamp
+        ? new Date(event.timestamp)
+        : new Date()
+
+      const shouldUseProfileName = this.hasValidLeadName(profileName)
+      const identityResolution =
+        await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
+          channel: LeadChannel.MESSENGER,
           externalAccountId: pageId,
           externalUserId: psid,
-          externalMessageId: inboundMessageId,
-          content: messageText || null,
-          externalTimestamp: interactionAt,
-          type: attachmentType ?? MessageType.TEXT,
-          mediaUrl: inboundMedia?.mediaUrl ?? null,
-          mimeType: inboundMedia?.mimeType ?? null,
-          mediaSize: inboundMedia?.mediaSize ?? null
-        })
-
-        if (!persistedMessageResult.wasCreated) {
-          continue
-        }
-
-        await this.emitMessageCreated(persistedMessageResult.message)
-
-        lead = await this.leadRepo.findOneOrFail({
-          where: { id: lead.id }
-        })
-
-        if (identityResolution.leadCreated) {
-          await this.rabbitPublisherService.publish('lead.created', {
-            leadId: lead.id,
+          profileName,
+          profilePictureUrl,
+          lastInteractionAt: interactionAt,
+          leadDraft: {
             companyId: company.id,
-            origin: 'webhook',
-            organizationId: null,
-            leadName: lead.name,
-            description: lead.name,
-            source: lead.source ?? null,
-            createdAt: lead.createdAt
-          })
+            name: shouldUseProfileName ? profileName!.trim() : undefined,
+            source: LeadChannel.MESSENGER,
+            flowState: shouldUseProfileName
+              ? LeadFlowState.ASKING_LOCATION
+              : LeadFlowState.ASKING_NAME,
+            state: LeadState.ACTIVE,
+            runtimeMode: LeadRuntimeMode.AUTOMATION,
+            lastInboundMessageId: inboundMessageId,
+            lastActivityAt: interactionAt
+          }
+        })
+      let lead = identityResolution.lead
 
-          const reply = shouldUseProfileName
-            ? 'Olá! 👋 \nDa onde você fala?'
-            : 'Olá! 👋 \nComo podemos te chamar?'
+      if (lead.companyId !== company.id) {
+        this.logger.error(
+          `Ignoring Messenger identity ${identityResolution.identity.id}: it belongs to another Company`
+        )
+        continue
+      }
+
+      const inboundMedia =
+        attachmentType && attachment?.payload?.url
+          ? await this.storeSocialInboundAttachment({
+              leadId: lead.id,
+              externalMessageId: inboundMessageId,
+              type: attachmentType,
+              url: attachment.payload.url
+            })
+          : null
+
+      const persistedMessageResult = await this.persistSocialInboundMessage({
+        channel: MessageChannel.MESSENGER,
+        leadId: lead.id,
+        leadName: lead.name,
+        companyId: company.id,
+        externalAccountId: pageId,
+        externalUserId: psid,
+        externalMessageId: inboundMessageId,
+        content: messageText || null,
+        externalTimestamp: interactionAt,
+        type: attachmentType ?? MessageType.TEXT,
+        mediaUrl: inboundMedia?.mediaUrl ?? null,
+        mimeType: inboundMedia?.mimeType ?? null,
+        mediaSize: inboundMedia?.mediaSize ?? null
+      })
+
+      if (!persistedMessageResult.wasCreated) {
+        continue
+      }
+
+      await this.emitMessageCreated(persistedMessageResult.message)
+
+      lead = await this.leadRepo.findOneOrFail({
+        where: { id: lead.id }
+      })
+
+      if (identityResolution.leadCreated) {
+        await this.rabbitPublisherService.publish('lead.created', {
+          leadId: lead.id,
+          companyId: company.id,
+          origin: 'webhook',
+          organizationId: null,
+          leadName: lead.name,
+          description: lead.name,
+          source: lead.source ?? null,
+          createdAt: lead.createdAt
+        })
+
+        const reply = shouldUseProfileName
+          ? 'Olá! 👋 \nDa onde você fala?'
+          : 'Olá! 👋 \nComo podemos te chamar?'
+        const response =
+          await this.messengerMessagingService.sendMessengerMessage(
+            psid,
+            reply,
+            pageId,
+            company.messengerToken ?? undefined
+          )
+        const externalMessageId = response.data.message_id ?? null
+
+        lead.lastAutoReplyMessageId = externalMessageId ?? undefined
+        await this.persistAutomaticMessage({
+          leadId: lead.id,
+          content: reply,
+          channel: MessageChannel.MESSENGER,
+          externalMessageId
+        })
+        await this.leadRepo.save(lead)
+        continue
+      }
+
+      lead = await this.leadRepo.findOneOrFail({
+        where: { id: lead.id }
+      })
+
+      if (!messageText) {
+        lead.lastInboundMessageId = inboundMessageId
+        lead.lastActivityAt = interactionAt
+        await this.leadRepo.save(lead)
+        continue
+      }
+
+      const conversationContext = await this.conversationContextBuilder.build({
+        lead
+      })
+      const conversationType = classifyConversation(conversationContext)
+      const shouldRunAutomation = canRunAutomation({
+        lead,
+        conversationType
+      })
+
+      if (!shouldRunAutomation) {
+        lead.lastInboundMessageId = inboundMessageId
+        lead.lastActivityAt = interactionAt
+        await this.leadRepo.save(lead)
+        continue
+      }
+
+      const flowResult = this.leadFlowEngine.process({
+        lead,
+        messageText,
+        conversationContext
+      })
+      const actionContext: LeadFlowActionContext = {
+        trigger: 'webhook',
+        phoneNumberId: pageId,
+        externalUserId: psid,
+        inboundMessageId,
+        correlationId: randomUUID()
+      }
+      const leadNameBeforeFlowExecution = lead.name
+
+      await this.leadFlowActionExecutor.execute({
+        context: actionContext,
+        lead,
+        actions: flowResult.actions,
+        transitionLeadFlowState: ({ lead: transitionLead, to }) =>
+          this.transitionLeadFlowState({ lead: transitionLead, to }),
+        sendMessage: async ({ to, content }) => {
           const response =
             await this.messengerMessagingService.sendMessengerMessage(
-              psid,
-              reply,
+              to,
+              content,
               pageId,
               company.messengerToken ?? undefined
             )
           const externalMessageId = response.data.message_id ?? null
 
           lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-          await this.persistAutomaticMessage({
-            leadId: lead.id,
-            content: reply,
+          return { externalMessageId }
+        },
+        persistAutomaticMessage: ({
+          context,
+          leadId,
+          content,
+          externalMessageId
+        }) =>
+          this.persistAutomaticMessage({
+            correlationId: context.correlationId,
+            leadId,
+            content,
             channel: MessageChannel.MESSENGER,
             externalMessageId
           })
-          await this.leadRepo.save(lead)
-          continue
-        }
+      })
 
-        lead = await this.leadRepo.findOneOrFail({
-          where: { id: lead.id }
+      if (
+        !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
+        this.hasValidLeadName(lead.name)
+      ) {
+        await this.rabbitPublisherService.publish('lead.created', {
+          leadId: lead.id,
+          companyId: company.id,
+          origin: 'webhook',
+          organizationId: null,
+          leadName: lead.name,
+          description: lead.name,
+          source: lead.source ?? null,
+          createdAt: lead.createdAt
         })
-
-        if (!messageText) {
-          lead.lastInboundMessageId = inboundMessageId
-          lead.lastActivityAt = interactionAt
-          await this.leadRepo.save(lead)
-          continue
-        }
-
-        const conversationContext = await this.conversationContextBuilder.build(
-          { lead }
-        )
-        const conversationType = classifyConversation(conversationContext)
-        const shouldRunAutomation = canRunAutomation({
-          lead,
-          conversationType
-        })
-
-        if (!shouldRunAutomation) {
-          lead.lastInboundMessageId = inboundMessageId
-          lead.lastActivityAt = interactionAt
-          await this.leadRepo.save(lead)
-          continue
-        }
-
-        const flowResult = this.leadFlowEngine.process({
-          lead,
-          messageText,
-          conversationContext
-        })
-        const actionContext: LeadFlowActionContext = {
-          trigger: 'webhook',
-          phoneNumberId: pageId,
-          externalUserId: psid,
-          inboundMessageId,
-          correlationId: randomUUID()
-        }
-        const leadNameBeforeFlowExecution = lead.name
-
-        await this.leadFlowActionExecutor.execute({
-          context: actionContext,
-          lead,
-          actions: flowResult.actions,
-          transitionLeadFlowState: ({ lead: transitionLead, to }) =>
-            this.transitionLeadFlowState({ lead: transitionLead, to }),
-          sendMessage: async ({ to, content }) => {
-            const response =
-              await this.messengerMessagingService.sendMessengerMessage(
-                to,
-                content,
-                pageId,
-                company.messengerToken ?? undefined
-              )
-            const externalMessageId = response.data.message_id ?? null
-
-            lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-            return { externalMessageId }
-          },
-          persistAutomaticMessage: ({
-            context,
-            leadId,
-            content,
-            externalMessageId
-          }) =>
-            this.persistAutomaticMessage({
-              correlationId: context.correlationId,
-              leadId,
-              content,
-              channel: MessageChannel.MESSENGER,
-              externalMessageId
-            })
-        })
-
-        if (
-          !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
-          this.hasValidLeadName(lead.name)
-        ) {
-          await this.rabbitPublisherService.publish('lead.created', {
-            leadId: lead.id,
-            companyId: company.id,
-            origin: 'webhook',
-            organizationId: null,
-            leadName: lead.name,
-            description: lead.name,
-            source: lead.source ?? null,
-            createdAt: lead.createdAt
-          })
-        }
-
-        lead.lastInboundMessageId = inboundMessageId
-        lead.lastActivityAt = interactionAt
-        await this.leadRepo.save(lead)
       }
+
+      lead.lastInboundMessageId = inboundMessageId
+      lead.lastActivityAt = interactionAt
+      await this.leadRepo.save(lead)
     }
 
     return { status: 'received' }
@@ -1972,302 +1846,305 @@ export class WebhookService {
       `Received Instagram Direct webhook. entries=${payload.entry?.length ?? 0}`
     )
 
-    for (const entry of payload.entry ?? []) {
-      for (const event of entry.messaging ?? []) {
-        const instagramAccountId = entry.id?.trim()
-        const instagramUserId = event.sender?.id?.trim()
+    const { events: inboundEvents, skipped } =
+      normalizeInstagramWebhook(payload)
+    this.logSkippedInboundItems(skipped)
 
-        if (event.message?.is_echo) {
-          continue
-        }
+    for (const inboundEvent of inboundEvents) {
+      const { event } = inboundEvent.payload
+      const instagramAccountId = inboundEvent.externalAccountId ?? undefined
+      const instagramUserId = inboundEvent.externalUserId ?? undefined
 
-        const company = instagramAccountId
-          ? await this.companyRepo.findOne({ where: { instagramAccountId } })
-          : null
+      if (event.message?.is_echo) {
+        continue
+      }
 
-        if (!company) {
-          this.logger.warn(
-            `Ignoring Instagram Direct event: no Company is connected to instagramAccountId=${instagramAccountId ?? 'missing'}`
-          )
-          continue
-        }
+      const company = instagramAccountId
+        ? await this.companyRepo.findOne({ where: { instagramAccountId } })
+        : null
 
-        if (event.reaction) {
-          await this.handleInstagramDirectReaction({
-            companyId: company.id,
-            externalAccountId: instagramAccountId,
-            externalUserId: instagramUserId,
-            timestamp: event.timestamp,
-            reaction: event.reaction
-          })
-          continue
-        }
-
-        const inboundMessageId = event.message?.mid?.trim()
-        const messageText = event.message?.text?.trim()
-        const attachment = event.message?.attachments?.find((item) =>
-          Boolean(item.payload?.url?.trim())
+      if (!company) {
+        this.logger.warn(
+          `Ignoring Instagram Direct event: no Company is connected to instagramAccountId=${instagramAccountId ?? 'missing'}`
         )
-        const attachmentType = this.resolveSocialAttachmentMessageType(
-          attachment?.type
-        )
+        continue
+      }
 
-        if (
-          !instagramAccountId ||
-          !instagramUserId ||
-          !inboundMessageId ||
-          ((!messageText || !messageText.length) && !attachmentType)
-        ) {
-          this.logger.warn(
-            'Ignoring Instagram Direct event: Account ID, User ID, message ID and supported content are required'
-          )
-          continue
-        }
-
-        const existingMessage = await this.messageRepo.findOne({
-          where: {
-            channel: MessageChannel.INSTAGRAM,
-            externalMessageId: inboundMessageId
-          }
-        })
-
-        if (existingMessage) {
-          this.logger.warn(
-            `Ignoring duplicate Instagram Direct message ${inboundMessageId}`
-          )
-          continue
-        }
-
-        if (!company.instagramToken?.trim()) {
-          this.logger.warn(
-            `Ignoring Instagram Direct message: token is not configured for companyId=${company.id}`
-          )
-          continue
-        }
-
-        const existingIdentity =
-          await this.leadChannelIdentityService.findIdentity({
-            channel: LeadChannel.INSTAGRAM,
-            externalAccountId: instagramAccountId,
-            externalUserId: instagramUserId
-          })
-
-        let profileName: string | null = null
-        let profilePictureUrl: string | null = null
-
-        if (!existingIdentity) {
-          try {
-            const profile =
-              await this.instagramMessagingService.getInstagramUserProfile(
-                instagramAccountId,
-                instagramUserId
-              )
-
-            profileName = profile.name?.trim() || null
-            profilePictureUrl = profile.profile_pic?.trim() || null
-          } catch {
-            this.logger.warn(
-              'Could not load the Instagram Direct profile; creating the Lead without profile data'
-            )
-          }
-        }
-
-        const interactionAt = event.timestamp
-          ? new Date(event.timestamp)
-          : new Date()
-        const shouldUseProfileName = this.hasValidLeadName(profileName)
-        const identityResolution =
-          await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
-            channel: LeadChannel.INSTAGRAM,
-            externalAccountId: instagramAccountId,
-            externalUserId: instagramUserId,
-            profileName,
-            profilePictureUrl,
-            lastInteractionAt: interactionAt,
-            leadDraft: {
-              companyId: company.id,
-              name: shouldUseProfileName ? profileName!.trim() : undefined,
-              source: 'direct',
-              flowState: shouldUseProfileName
-                ? LeadFlowState.ASKING_LOCATION
-                : LeadFlowState.ASKING_NAME,
-              state: LeadState.ACTIVE,
-              runtimeMode: LeadRuntimeMode.AUTOMATION,
-              lastInboundMessageId: inboundMessageId,
-              lastActivityAt: interactionAt
-            }
-          })
-        let lead = identityResolution.lead
-
-        if (lead.companyId !== company.id) {
-          this.logger.error(
-            `Ignoring Instagram identity ${identityResolution.identity.id}: it belongs to another Company`
-          )
-          continue
-        }
-
-        const inboundMedia =
-          attachmentType && attachment?.payload?.url
-            ? await this.storeSocialInboundAttachment({
-                leadId: lead.id,
-                externalMessageId: inboundMessageId,
-                type: attachmentType,
-                url: attachment.payload.url
-              })
-            : null
-
-        const persistedMessageResult = await this.persistSocialInboundMessage({
-          channel: MessageChannel.INSTAGRAM,
-          leadId: lead.id,
-          leadName: lead.name,
+      if (event.reaction) {
+        await this.handleInstagramDirectReaction({
           companyId: company.id,
           externalAccountId: instagramAccountId,
           externalUserId: instagramUserId,
-          externalMessageId: inboundMessageId,
-          content: messageText || null,
-          externalTimestamp: interactionAt,
-          type: attachmentType ?? MessageType.TEXT,
-          mediaUrl: inboundMedia?.mediaUrl ?? null,
-          mimeType: inboundMedia?.mimeType ?? null,
-          mediaSize: inboundMedia?.mediaSize ?? null
+          timestamp: event.timestamp,
+          reaction: event.reaction
         })
+        continue
+      }
 
-        if (!persistedMessageResult.wasCreated) {
-          continue
+      const inboundMessageId = event.message?.mid?.trim()
+      const messageText = event.message?.text?.trim()
+      const attachment = event.message?.attachments?.find((item) =>
+        Boolean(item.payload?.url?.trim())
+      )
+      const attachmentType = this.resolveSocialAttachmentMessageType(
+        attachment?.type
+      )
+
+      if (
+        !instagramAccountId ||
+        !instagramUserId ||
+        !inboundMessageId ||
+        ((!messageText || !messageText.length) && !attachmentType)
+      ) {
+        this.logger.warn(
+          'Ignoring Instagram Direct event: Account ID, User ID, message ID and supported content are required'
+        )
+        continue
+      }
+
+      const existingMessage = await this.messageRepo.findOne({
+        where: {
+          channel: MessageChannel.INSTAGRAM,
+          externalMessageId: inboundMessageId
         }
+      })
 
-        await this.emitMessageCreated(persistedMessageResult.message)
+      if (existingMessage) {
+        this.logger.warn(
+          `Ignoring duplicate Instagram Direct message ${inboundMessageId}`
+        )
+        continue
+      }
 
-        lead = await this.leadRepo.findOneOrFail({
-          where: { id: lead.id }
+      if (!company.instagramToken?.trim()) {
+        this.logger.warn(
+          `Ignoring Instagram Direct message: token is not configured for companyId=${company.id}`
+        )
+        continue
+      }
+
+      const existingIdentity =
+        await this.leadChannelIdentityService.findIdentity({
+          channel: LeadChannel.INSTAGRAM,
+          externalAccountId: instagramAccountId,
+          externalUserId: instagramUserId
         })
 
-        if (identityResolution.leadCreated) {
-          await this.rabbitPublisherService.publish('lead.created', {
-            leadId: lead.id,
-            companyId: company.id,
-            origin: 'webhook',
-            organizationId: null,
-            leadName: lead.name,
-            description: lead.name,
-            source: lead.source ?? null,
-            createdAt: lead.createdAt
-          })
+      let profileName: string | null = null
+      let profilePictureUrl: string | null = null
 
-          const reply = shouldUseProfileName
-            ? 'Olá! 👋 \nDa onde você fala?'
-            : 'Olá! 👋 \nComo podemos te chamar?'
+      if (!existingIdentity) {
+        try {
+          const profile =
+            await this.instagramMessagingService.getInstagramUserProfile(
+              instagramAccountId,
+              instagramUserId
+            )
+
+          profileName = profile.name?.trim() || null
+          profilePictureUrl = profile.profile_pic?.trim() || null
+        } catch {
+          this.logger.warn(
+            'Could not load the Instagram Direct profile; creating the Lead without profile data'
+          )
+        }
+      }
+
+      const interactionAt = event.timestamp
+        ? new Date(event.timestamp)
+        : new Date()
+      const shouldUseProfileName = this.hasValidLeadName(profileName)
+      const identityResolution =
+        await this.leadChannelIdentityService.findOrCreateLeadForIdentity({
+          channel: LeadChannel.INSTAGRAM,
+          externalAccountId: instagramAccountId,
+          externalUserId: instagramUserId,
+          profileName,
+          profilePictureUrl,
+          lastInteractionAt: interactionAt,
+          leadDraft: {
+            companyId: company.id,
+            name: shouldUseProfileName ? profileName!.trim() : undefined,
+            source: 'direct',
+            flowState: shouldUseProfileName
+              ? LeadFlowState.ASKING_LOCATION
+              : LeadFlowState.ASKING_NAME,
+            state: LeadState.ACTIVE,
+            runtimeMode: LeadRuntimeMode.AUTOMATION,
+            lastInboundMessageId: inboundMessageId,
+            lastActivityAt: interactionAt
+          }
+        })
+      let lead = identityResolution.lead
+
+      if (lead.companyId !== company.id) {
+        this.logger.error(
+          `Ignoring Instagram identity ${identityResolution.identity.id}: it belongs to another Company`
+        )
+        continue
+      }
+
+      const inboundMedia =
+        attachmentType && attachment?.payload?.url
+          ? await this.storeSocialInboundAttachment({
+              leadId: lead.id,
+              externalMessageId: inboundMessageId,
+              type: attachmentType,
+              url: attachment.payload.url
+            })
+          : null
+
+      const persistedMessageResult = await this.persistSocialInboundMessage({
+        channel: MessageChannel.INSTAGRAM,
+        leadId: lead.id,
+        leadName: lead.name,
+        companyId: company.id,
+        externalAccountId: instagramAccountId,
+        externalUserId: instagramUserId,
+        externalMessageId: inboundMessageId,
+        content: messageText || null,
+        externalTimestamp: interactionAt,
+        type: attachmentType ?? MessageType.TEXT,
+        mediaUrl: inboundMedia?.mediaUrl ?? null,
+        mimeType: inboundMedia?.mimeType ?? null,
+        mediaSize: inboundMedia?.mediaSize ?? null
+      })
+
+      if (!persistedMessageResult.wasCreated) {
+        continue
+      }
+
+      await this.emitMessageCreated(persistedMessageResult.message)
+
+      lead = await this.leadRepo.findOneOrFail({
+        where: { id: lead.id }
+      })
+
+      if (identityResolution.leadCreated) {
+        await this.rabbitPublisherService.publish('lead.created', {
+          leadId: lead.id,
+          companyId: company.id,
+          origin: 'webhook',
+          organizationId: null,
+          leadName: lead.name,
+          description: lead.name,
+          source: lead.source ?? null,
+          createdAt: lead.createdAt
+        })
+
+        const reply = shouldUseProfileName
+          ? 'Olá! 👋 \nDa onde você fala?'
+          : 'Olá! 👋 \nComo podemos te chamar?'
+        const response = await this.instagramMessagingService.sendMessage(
+          instagramAccountId,
+          instagramUserId,
+          reply
+        )
+        const externalMessageId = response.message_id ?? null
+
+        lead.lastAutoReplyMessageId = externalMessageId ?? undefined
+        await this.persistAutomaticMessage({
+          leadId: lead.id,
+          content: reply,
+          channel: MessageChannel.INSTAGRAM,
+          externalMessageId
+        })
+        await this.leadRepo.save(lead)
+        continue
+      }
+
+      lead = await this.leadRepo.findOneOrFail({
+        where: { id: lead.id }
+      })
+
+      if (!messageText) {
+        lead.lastInboundMessageId = inboundMessageId
+        lead.lastActivityAt = interactionAt
+        await this.leadRepo.save(lead)
+        continue
+      }
+
+      const conversationContext = await this.conversationContextBuilder.build({
+        lead
+      })
+      const conversationType = classifyConversation(conversationContext)
+      const shouldRunAutomation = canRunAutomation({
+        lead,
+        conversationType
+      })
+
+      if (!shouldRunAutomation) {
+        lead.lastInboundMessageId = inboundMessageId
+        lead.lastActivityAt = interactionAt
+        await this.leadRepo.save(lead)
+        continue
+      }
+
+      const flowResult = this.leadFlowEngine.process({
+        lead,
+        messageText,
+        conversationContext
+      })
+      const actionContext: LeadFlowActionContext = {
+        trigger: 'webhook',
+        phoneNumberId: instagramAccountId,
+        externalUserId: instagramUserId,
+        inboundMessageId,
+        correlationId: randomUUID()
+      }
+      const leadNameBeforeFlowExecution = lead.name
+
+      await this.leadFlowActionExecutor.execute({
+        context: actionContext,
+        lead,
+        actions: flowResult.actions,
+        transitionLeadFlowState: ({ lead: transitionLead, to }) =>
+          this.transitionLeadFlowState({ lead: transitionLead, to }),
+        sendMessage: async ({ to, content }) => {
           const response = await this.instagramMessagingService.sendMessage(
             instagramAccountId,
-            instagramUserId,
-            reply
+            to,
+            content
           )
           const externalMessageId = response.message_id ?? null
 
           lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-          await this.persistAutomaticMessage({
-            leadId: lead.id,
-            content: reply,
+          return { externalMessageId }
+        },
+        persistAutomaticMessage: ({
+          context,
+          leadId,
+          content,
+          externalMessageId
+        }) =>
+          this.persistAutomaticMessage({
+            correlationId: context.correlationId,
+            leadId,
+            content,
             channel: MessageChannel.INSTAGRAM,
             externalMessageId
           })
-          await this.leadRepo.save(lead)
-          continue
-        }
+      })
 
-        lead = await this.leadRepo.findOneOrFail({
-          where: { id: lead.id }
+      if (
+        !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
+        this.hasValidLeadName(lead.name)
+      ) {
+        await this.rabbitPublisherService.publish('lead.created', {
+          leadId: lead.id,
+          companyId: company.id,
+          origin: 'webhook',
+          organizationId: null,
+          leadName: lead.name,
+          description: lead.name,
+          source: lead.source ?? null,
+          createdAt: lead.createdAt
         })
-
-        if (!messageText) {
-          lead.lastInboundMessageId = inboundMessageId
-          lead.lastActivityAt = interactionAt
-          await this.leadRepo.save(lead)
-          continue
-        }
-
-        const conversationContext = await this.conversationContextBuilder.build(
-          { lead }
-        )
-        const conversationType = classifyConversation(conversationContext)
-        const shouldRunAutomation = canRunAutomation({
-          lead,
-          conversationType
-        })
-
-        if (!shouldRunAutomation) {
-          lead.lastInboundMessageId = inboundMessageId
-          lead.lastActivityAt = interactionAt
-          await this.leadRepo.save(lead)
-          continue
-        }
-
-        const flowResult = this.leadFlowEngine.process({
-          lead,
-          messageText,
-          conversationContext
-        })
-        const actionContext: LeadFlowActionContext = {
-          trigger: 'webhook',
-          phoneNumberId: instagramAccountId,
-          externalUserId: instagramUserId,
-          inboundMessageId,
-          correlationId: randomUUID()
-        }
-        const leadNameBeforeFlowExecution = lead.name
-
-        await this.leadFlowActionExecutor.execute({
-          context: actionContext,
-          lead,
-          actions: flowResult.actions,
-          transitionLeadFlowState: ({ lead: transitionLead, to }) =>
-            this.transitionLeadFlowState({ lead: transitionLead, to }),
-          sendMessage: async ({ to, content }) => {
-            const response = await this.instagramMessagingService.sendMessage(
-              instagramAccountId,
-              to,
-              content
-            )
-            const externalMessageId = response.message_id ?? null
-
-            lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-            return { externalMessageId }
-          },
-          persistAutomaticMessage: ({
-            context,
-            leadId,
-            content,
-            externalMessageId
-          }) =>
-            this.persistAutomaticMessage({
-              correlationId: context.correlationId,
-              leadId,
-              content,
-              channel: MessageChannel.INSTAGRAM,
-              externalMessageId
-            })
-        })
-
-        if (
-          !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
-          this.hasValidLeadName(lead.name)
-        ) {
-          await this.rabbitPublisherService.publish('lead.created', {
-            leadId: lead.id,
-            companyId: company.id,
-            origin: 'webhook',
-            organizationId: null,
-            leadName: lead.name,
-            description: lead.name,
-            source: lead.source ?? null,
-            createdAt: lead.createdAt
-          })
-        }
-
-        lead.lastInboundMessageId = inboundMessageId
-        lead.lastActivityAt = interactionAt
-        await this.leadRepo.save(lead)
       }
+
+      lead.lastInboundMessageId = inboundMessageId
+      lead.lastActivityAt = interactionAt
+      await this.leadRepo.save(lead)
     }
 
     return { status: 'received' }

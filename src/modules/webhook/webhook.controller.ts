@@ -14,13 +14,13 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
 import { WEBHOOK_HANDSHAKE_THROTTLE } from '../rate-limit/rate-limit.constants'
 
 import { MetaWebhookSignatureGuard } from './security/meta-webhook-signature.guard'
-import {
-  type InstagramDirectWebhookPayload,
-  type MessengerWebhookPayload,
-  WebhookService,
-  type WhatsAppWebhookPayload
-} from './webhook.service'
+import { WebhookService } from './webhook.service'
 
+import type {
+  InstagramDirectWebhookPayload,
+  MessengerWebhookPayload,
+  WhatsAppWebhookPayload
+} from './inbound/meta-webhook-payload.types'
 import type { Response } from 'express'
 
 @Controller('webhook')
