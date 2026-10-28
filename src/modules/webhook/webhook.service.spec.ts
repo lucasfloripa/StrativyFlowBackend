@@ -20,10 +20,12 @@ import {
 
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
+import { DeferredInboundEventError } from './inbound/deferred-inbound-event.error'
 import { InboundEventStatus } from './inbound/inbound-event.entity'
 import { normalizeInstagramWebhook } from './inbound/instagram-inbound.normalizer'
 import { normalizeMessengerWebhook } from './inbound/messenger-inbound.normalizer'
 import { normalizeWhatsAppWebhook } from './inbound/whatsapp-inbound.normalizer'
+import { InboundMediaService } from './media/inbound-media.service'
 import { AutomaticReplyService } from './outbound/automatic-reply.service'
 import { WebhookService } from './webhook.service'
 
@@ -108,6 +110,28 @@ const createAutomaticReplyService = (overrides?: {
     (overrides?.realtimeService ?? { emitToLead: jest.fn() }) as never
   )
 
+/** The real `InboundMediaService` over the same doubles, async mode off. */
+const createInboundMediaService = (overrides?: {
+  messageRepo?: object
+  companyRepo?: object
+  storageService?: object
+  outboxService?: object
+  leadsService?: object
+  realtimeService?: object
+}) =>
+  new InboundMediaService(
+    {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      ...(overrides?.messageRepo ?? {})
+    } as never,
+    (overrides?.companyRepo ?? {}) as never,
+    (overrides?.storageService ?? {}) as never,
+    (overrides?.outboxService ?? { publish: jest.fn() }) as never,
+    { get: () => undefined } as never,
+    (overrides?.leadsService ?? {}) as never,
+    (overrides?.realtimeService ?? { emitToLead: jest.fn() }) as never
+  )
+
 describe('WebhookService', () => {
   const createService = (overrides?: {
     leadRepo?: object
@@ -127,6 +151,7 @@ describe('WebhookService', () => {
     companyRepo?: object
     inboundEventInbox?: object
     automaticReplyService?: object
+    inboundMediaService?: object
   }) =>
     new WebhookService(
       (overrides?.leadRepo ?? {}) as never,
@@ -136,7 +161,6 @@ describe('WebhookService', () => {
       (overrides?.leadFlowEngine ?? {}) as never,
       (overrides?.leadFlowActionExecutor ?? {}) as never,
       (overrides?.outboxService ?? {}) as never,
-      (overrides?.storageService ?? {}) as never,
       (overrides?.leadsService ?? {}) as never,
       (overrides?.leadChannelIdentityService ?? {}) as never,
       (overrides?.messengerMessagingService ?? {}) as never,
@@ -148,7 +172,9 @@ describe('WebhookService', () => {
       (overrides?.companyRepo ?? {}) as never,
       (overrides?.inboundEventInbox ?? createRecordingInbox().inbox) as never,
       (overrides?.automaticReplyService ??
-        createAutomaticReplyService(overrides)) as never
+        createAutomaticReplyService(overrides)) as never,
+      (overrides?.inboundMediaService ??
+        createInboundMediaService(overrides)) as never
     )
 
   describe('WhatsApp Company ownership', () => {
@@ -744,7 +770,8 @@ describe('WebhookService', () => {
           headers: {
             Authorization: 'Bearer company-token',
             'Content-Type': 'application/json'
-          }
+          },
+          timeout: 30_000
         }
       )
       expect(get).toHaveBeenNthCalledWith(2, 'https://media.test/image', {
@@ -752,7 +779,8 @@ describe('WebhookService', () => {
           Authorization: 'Bearer company-token',
           'Content-Type': 'application/json'
         },
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
+        timeout: 30_000
       })
       expect(dependencies.storageService.uploadFile).toHaveBeenCalledTimes(1)
     })
@@ -2468,21 +2496,44 @@ describe('WebhookService', () => {
   })
 
   describe('processInboundEvent', () => {
-    it('applies a stored WhatsApp status and reports when it changed nothing', async () => {
+    const storedStatus = (status: string) =>
+      normalizeWhatsAppWebhook({
+        entry: [
+          { changes: [{ value: { statuses: [{ id: 'wamid.out', status }] } }] }
+        ]
+      }).events[0]
+
+    // Regression P8: a status that arrived before its outbound message was
+    // stored used to be dropped, leaving the wrong ticks in the chat.
+    it('defers a stored WhatsApp status whose message does not exist yet', async () => {
       const service = createService({
         messageRepo: { findOne: jest.fn().mockResolvedValue(null) }
       })
-      const [statusEvent] = normalizeWhatsAppWebhook({
-        entry: [
-          {
-            changes: [
-              { value: { statuses: [{ id: 'wamid.out', status: 'read' }] } }
-            ]
-          }
-        ]
-      }).events
 
-      await expect(service.processInboundEvent(statusEvent)).resolves.toEqual({
+      await expect(
+        service.processInboundEvent(storedStatus('read'))
+      ).rejects.toEqual(
+        new DeferredInboundEventError('status_target_not_found')
+      )
+    })
+
+    it('reports a stored WhatsApp status that would move the message backwards', async () => {
+      const service = createService({
+        messageRepo: {
+          findOne: jest.fn().mockResolvedValue(
+            Object.assign(new Message(), {
+              id: 'message-1',
+              leadId: 'lead-1',
+              status: MessageStatus.READ
+            })
+          )
+        }
+      })
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+      await expect(
+        service.processInboundEvent(storedStatus('delivered'))
+      ).resolves.toEqual({
         status: InboundEventStatus.IGNORED,
         reason: 'status_not_applied'
       })

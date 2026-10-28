@@ -2,6 +2,7 @@ import { Logger } from '@nestjs/common'
 
 import { LeadChannel } from '../../leads/entities/lead-channel-identity.entity'
 
+import { DeferredInboundEventError } from './deferred-inbound-event.error'
 import {
   InboundEventInboxService,
   STALE_PROCESSING_MS
@@ -550,6 +551,64 @@ describe('InboundEventInboxService', () => {
         processedAt: null
       })
       expect((update.attempts as () => string)()).toBe('"attempts" + 1')
+    })
+
+    it('retries a deferred event like any failure while attempts remain', async () => {
+      const { service, inboundEventRepo } = createService(
+        [],
+        stored({ attempts: 1 })
+      )
+      const deferred = new DeferredInboundEventError('status_target_not_found')
+
+      await expect(
+        service.processStored('inbound-1', () => Promise.reject(deferred), {
+          maxAttempts: 4
+        })
+      ).rejects.toBe(deferred)
+      expect(inboundEventRepo.update).toHaveBeenCalledWith(
+        { id: 'inbound-1' },
+        expect.objectContaining({ status: InboundEventStatus.FAILED })
+      )
+    })
+
+    it('records a deferred event as ignored on the last attempt', async () => {
+      const { service, inboundEventRepo } = createService(
+        [],
+        stored({ attempts: 3 })
+      )
+
+      await expect(
+        service.processStored(
+          'inbound-1',
+          () =>
+            Promise.reject(
+              new DeferredInboundEventError('status_target_not_found')
+            ),
+          { maxAttempts: 4 }
+        )
+      ).resolves.toBe(InboundEventStatus.IGNORED)
+
+      const [, update] = inboundEventRepo.update.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>
+      ]
+      expect(update).toMatchObject({
+        status: InboundEventStatus.IGNORED,
+        lastError: 'status_target_not_found',
+        processedAt: FIXED_NOW
+      })
+    })
+
+    it('still fails a regular error on the last attempt', async () => {
+      const { service } = createService([], stored({ attempts: 3 }))
+
+      await expect(
+        service.processStored(
+          'inbound-1',
+          () => Promise.reject(new Error('bug')),
+          { maxAttempts: 4 }
+        )
+      ).rejects.toThrow('bug')
     })
 
     it('reports a missing event without failing', async () => {

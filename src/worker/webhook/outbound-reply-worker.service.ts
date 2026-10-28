@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
-import { DEFAULT_RABBIT_MAX_RETRY_ATTEMPTS } from '../../modules/rabbit/constants/rabbit.constants'
+import { rabbitDeliveryAttempts } from '../../modules/rabbit/rabbit-attempts'
 import { RabbitConsumerService } from '../../modules/rabbit/services/rabbit-consumer.service'
 import { AutomaticReplyService } from '../../modules/webhook/outbound/automatic-reply.service'
 import {
@@ -28,14 +28,7 @@ export class OutboundReplyWorker implements OnModuleInit {
     private readonly automaticReplyService: AutomaticReplyService,
     configService: ConfigService
   ) {
-    const retries = Number(
-      configService.get<string>('RABBIT_MAX_RETRY_ATTEMPTS')
-    )
-    this.maxAttempts =
-      1 +
-      (Number.isInteger(retries) && retries >= 0
-        ? retries
-        : DEFAULT_RABBIT_MAX_RETRY_ATTEMPTS)
+    this.maxAttempts = rabbitDeliveryAttempts(configService)
   }
 
   async onModuleInit(): Promise<void> {

@@ -35,7 +35,8 @@ describe('InboundEventWorker', () => {
     const worker = new InboundEventWorker(
       rabbitConsumerService as never,
       inboundEventInbox as never,
-      webhookService as never
+      webhookService as never,
+      { get: () => undefined } as never
     )
 
     return { worker, rabbitConsumerService, inboundEventInbox, webhookService }
@@ -64,7 +65,8 @@ describe('InboundEventWorker', () => {
 
       expect(inboundEventInbox.processStored).toHaveBeenCalledWith(
         'inbound-1',
-        expect.any(Function)
+        expect.any(Function),
+        { maxAttempts: 4 }
       )
       const [, handler] = inboundEventInbox.processStored.mock.calls[0] as [
         string,

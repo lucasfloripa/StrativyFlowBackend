@@ -5,6 +5,7 @@ import { Brackets, DataSource, Repository } from 'typeorm'
 import { runInTransaction } from '../../../database/transaction-context'
 import { OutboxService } from '../../outbox/services/outbox.service'
 
+import { DeferredInboundEventError } from './deferred-inbound-event.error'
 import {
   WEBHOOK_INBOUND_ROUTING_KEY,
   type WebhookInboundJob
@@ -115,7 +116,8 @@ export class InboundEventInboxService {
    */
   async processStored(
     inboundEventId: string,
-    handler: (event: InboundEvent) => Promise<InboxOutcome>
+    handler: (event: InboundEvent) => Promise<InboxOutcome>,
+    options: { maxAttempts?: number } = {}
   ): Promise<StoredEventResult> {
     const stored = await this.inboundEventRepo.findOne({
       where: { id: inboundEventId }
@@ -170,6 +172,15 @@ export class InboundEventInboxService {
         return outcome.status
       })
     } catch (error) {
+      if (
+        error instanceof DeferredInboundEventError &&
+        options.maxAttempts !== undefined &&
+        stored.attempts + 1 >= options.maxAttempts
+      ) {
+        await this.markGivenUp(inboundEventId, error.reason)
+        return InboundEventStatus.IGNORED
+      }
+
       await this.markFailed(inboundEventId, error)
       throw error
     }
@@ -302,6 +313,22 @@ export class InboundEventInboxService {
       occurredAt: event.occurredAt,
       payload: event.payload
     }
+  }
+
+  /** A deferred event that never became applicable: done, with the reason. */
+  private async markGivenUp(id: string, reason: string): Promise<void> {
+    const now = new Date()
+
+    await this.inboundEventRepo.update(
+      { id },
+      {
+        status: InboundEventStatus.IGNORED,
+        lastError: reason,
+        attempts: () => '"attempts" + 1',
+        lastAttemptAt: now,
+        processedAt: now
+      }
+    )
   }
 
   private async markFailed(id: string, error: unknown): Promise<void> {

@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto'
 
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
-import axios from 'axios'
 import { Repository } from 'typeorm'
 
 import { Company } from '../company/company.entity'
@@ -28,7 +27,6 @@ import {
   REALTIME_EMITTER,
   type RealtimeEmitter
 } from '../realtime/realtime-emitter'
-import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
 import { classifyConversation } from './flow/conversation-classifier'
@@ -41,6 +39,7 @@ import {
   LeadFlowProcessResult
 } from './flow/lead-flow.types'
 import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
+import { DeferredInboundEventError } from './inbound/deferred-inbound-event.error'
 import {
   InboundEventInboxService,
   type InboxOutcome
@@ -64,10 +63,10 @@ import {
 } from './inbound/whatsapp-inbound.normalizer'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { LeadWriter } from './lead-writer'
+import { InboundMediaService } from './media/inbound-media.service'
 import { canTransitionMessageStatus } from './message-status.policy'
 import { MessengerMessagingService } from './messenger-messaging.service'
 import { AutomaticReplyService } from './outbound/automatic-reply.service'
-import { isAllowedMetaMediaUrl } from './security/meta-media-url'
 
 import type {
   InstagramDirectWebhookPayload,
@@ -76,17 +75,6 @@ import type {
   WhatsAppMessageStatus,
   WhatsAppWebhookPayload
 } from './inbound/meta-webhook-payload.types'
-
-const SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
-
-type WhatsAppMediaResponse = {
-  url: string
-  mime_type?: string
-  sha256?: string
-  file_size?: number
-  id: string
-  messaging_product?: string
-}
 
 type WhatsAppMessageStatusType = 'sent' | 'delivered' | 'read'
 
@@ -141,7 +129,6 @@ export class WebhookService {
     private readonly leadFlowEngine: LeadFlowEngine,
     private readonly leadFlowActionExecutor: LeadFlowActionExecutor,
     private readonly outboxService: OutboxService,
-    private readonly storageService: StorageService,
     private readonly leadsService: LeadsService,
     private readonly leadChannelIdentityService: LeadChannelIdentityService,
     private readonly messengerMessagingService: MessengerMessagingService,
@@ -152,7 +139,8 @@ export class WebhookService {
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
     private readonly inboundEventInbox: InboundEventInboxService,
-    private readonly automaticReplyService: AutomaticReplyService
+    private readonly automaticReplyService: AutomaticReplyService,
+    private readonly inboundMediaService: InboundMediaService
   ) {
     this.leadWriter = new LeadWriter(leadRepo)
   }
@@ -230,7 +218,9 @@ export class WebhookService {
       case LeadChannel.WHATSAPP:
         return isWhatsAppStatusEvent(event)
           ? toStatusInboxOutcome(
-              await this.handleMessageStatuses([event.payload.status])
+              await this.handleMessageStatuses([event.payload.status], {
+                deferWhenMissing: true
+              })
             )
           : toWhatsAppInboxOutcome(
               await this.processWhatsAppMessageEvent(event)
@@ -554,10 +544,9 @@ export class WebhookService {
       if (!isTextMessage) {
         return this.processInboundMediaMessage({
           lead,
-          companyId: company.id,
+          company,
           message,
-          inboundMessageId,
-          whatsappToken: company.whatsappToken ?? undefined
+          inboundMessageId
         })
       }
 
@@ -635,10 +624,9 @@ export class WebhookService {
     if (!isTextMessage) {
       return this.processInboundMediaMessage({
         lead,
-        companyId: company.id,
+        company,
         message,
-        inboundMessageId,
-        whatsappToken: company.whatsappToken ?? undefined
+        inboundMessageId
       })
     }
 
@@ -764,7 +752,14 @@ export class WebhookService {
     return { status: 'updated_and_replied', leadId: lead.id }
   }
 
-  private async handleMessageStatuses(statuses: WhatsAppMessageStatus[]) {
+  /**
+   * `deferWhenMissing` (worker): a status for a message not stored yet throws
+   * `DeferredInboundEventError`, so it is retried instead of dropped.
+   */
+  private async handleMessageStatuses(
+    statuses: WhatsAppMessageStatus[],
+    options: { deferWhenMissing?: boolean } = {}
+  ) {
     let processedCount = 0
 
     for (const messageStatus of statuses) {
@@ -793,6 +788,10 @@ export class WebhookService {
       })
 
       if (!message) {
+        if (options.deferWhenMissing) {
+          throw new DeferredInboundEventError('status_target_not_found')
+        }
+
         this.logger.warn(
           `Message not found for WhatsApp status update. whatsappMessageId=${whatsappMessageId} status=${status}`
         )
@@ -958,12 +957,12 @@ export class WebhookService {
 
   private async processInboundMediaMessage(params: {
     lead: Lead
-    companyId: string
+    company: Company
     message: WhatsAppInboundMessage
     inboundMessageId: string
-    whatsappToken?: string
   }): Promise<{ status: string; leadId: string }> {
-    const { lead, companyId, message, inboundMessageId, whatsappToken } = params
+    const { lead, company, message, inboundMessageId } = params
+    const companyId = company.id
 
     const persistedMessageResult = await this.persistMessage({
       leadId: lead.id,
@@ -975,10 +974,11 @@ export class WebhookService {
     const persistedMessage = persistedMessageResult.message
     const isContactMessage = persistedMessage.type === MessageType.CONTACT
 
-    if (!isContactMessage) {
-      await this.uploadInboundMedia({
-        message: persistedMessage,
-        whatsappToken
+    const metaMediaId = persistedMessage.metaMediaId?.trim()
+    if (!isContactMessage && metaMediaId && !persistedMessage.mediaUrl) {
+      await this.inboundMediaService.attach(persistedMessage, company, {
+        kind: 'whatsapp',
+        metaMediaId
       })
     }
 
@@ -1099,64 +1099,6 @@ export class WebhookService {
     }
   }
 
-  private async uploadInboundMedia(params: {
-    message: Message
-    whatsappToken?: string
-  }): Promise<void> {
-    const { message, whatsappToken } = params
-
-    if (!message.id) {
-      this.logger.warn(
-        `Inbound media message has no persisted id. leadId=${message.leadId} externalMessageId=${message.externalMessageId ?? 'unknown'}`
-      )
-      return
-    }
-
-    if (!message.metaMediaId?.trim()) {
-      this.logger.warn(
-        `Inbound media message has no meta media id. leadId=${message.leadId} messageId=${message.id} externalMessageId=${message.externalMessageId ?? 'unknown'}`
-      )
-      return
-    }
-
-    try {
-      const mediaInfo = await this.getWhatsAppMediaInfo(
-        message.metaMediaId,
-        whatsappToken
-      )
-      const buffer = await this.downloadWhatsAppMedia(
-        mediaInfo.data.url,
-        whatsappToken
-      )
-      const mimeType =
-        mediaInfo.data.mime_type?.trim() ||
-        message.mimeType?.trim() ||
-        'application/octet-stream'
-      const extension = this.resolveMediaFileExtension(mimeType)
-      const key = `leads/${message.leadId}/messages/${message.id}.${extension}`
-      const uploadResponse = await this.storageService.uploadFile(
-        {
-          originalname:
-            message.fileName?.trim() || `${message.id}.${extension}`,
-          mimetype: mimeType,
-          size: buffer.length,
-          buffer
-        },
-        { key }
-      )
-
-      message.mediaUrl = uploadResponse.url
-      message.mediaSize = mediaInfo.data.file_size ?? buffer.length
-      message.mimeType = mimeType
-
-      await this.messageRepo.save(message)
-    } catch (error) {
-      this.logger.warn(
-        `Failed to upload inbound media message. leadId=${message.leadId} messageId=${message.id} externalMessageId=${message.externalMessageId ?? 'unknown'} error=${error instanceof Error ? error.message : 'unknown error'}`
-      )
-    }
-  }
-
   private async transitionLeadFlowState(params: {
     lead: Lead
     to: LeadFlowState
@@ -1212,35 +1154,6 @@ export class WebhookService {
     })
   }
 
-  private async getWhatsAppMediaInfo(
-    mediaId: string,
-    whatsappToken?: string
-  ): Promise<{ data: WhatsAppMediaResponse }> {
-    const token = whatsappToken?.trim()
-    return axios.get(`https://graph.facebook.com/v22.0/${mediaId}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    })
-  }
-
-  private async downloadWhatsAppMedia(
-    url: string,
-    whatsappToken?: string
-  ): Promise<Buffer> {
-    const token = whatsappToken?.trim()
-    const response = await axios.get<ArrayBuffer>(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      responseType: 'arraybuffer'
-    })
-
-    return Buffer.from(response.data)
-  }
-
   private resolveInboundMessageContent(
     message: WhatsAppInboundMessage
   ): string | null {
@@ -1286,66 +1199,6 @@ export class WebhookService {
       case MessageType.TEXT:
       default:
         return MessageType.TEXT
-    }
-  }
-
-  private resolveMediaFileExtension(mimeType?: string): string {
-    const normalizedMimeType = mimeType?.trim().toLowerCase()
-
-    if (!normalizedMimeType) {
-      return 'bin'
-    }
-
-    const [rawType] = normalizedMimeType.split(';', 1)
-
-    switch (rawType) {
-      case 'audio/ogg':
-        return 'ogg'
-      case 'audio/mpeg':
-        return 'mp3'
-      case 'audio/mp4':
-        return 'mp4'
-      case 'audio/aac':
-        return 'aac'
-      case 'audio/amr':
-        return 'amr'
-      case 'image/jpeg':
-        return 'jpg'
-      case 'image/png':
-        return 'png'
-      case 'image/webp':
-        return 'webp'
-      case 'image/gif':
-        return 'gif'
-      case 'video/mp4':
-        return 'mp4'
-      case 'application/pdf':
-        return 'pdf'
-      case 'text/plain':
-        return 'txt'
-      case 'text/csv':
-        return 'csv'
-      case 'application/msword':
-        return 'doc'
-      case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-        return 'docx'
-      case 'application/vnd.ms-excel':
-        return 'xls'
-      case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-        return 'xlsx'
-      case 'application/vnd.ms-powerpoint':
-        return 'ppt'
-      case 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
-        return 'pptx'
-      default: {
-        const slashIndex = rawType.indexOf('/')
-
-        if (slashIndex === -1 || slashIndex === rawType.length - 1) {
-          return 'bin'
-        }
-
-        return rawType.slice(slashIndex + 1)
-      }
     }
   }
 
@@ -1560,16 +1413,6 @@ export class WebhookService {
       return ignoredSocialEvent('identity_owner_mismatch')
     }
 
-    const inboundMedia =
-      attachmentType && attachment?.payload?.url
-        ? await this.storeSocialInboundAttachment({
-            leadId: lead.id,
-            externalMessageId: inboundMessageId,
-            type: attachmentType,
-            url: attachment.payload.url
-          })
-        : null
-
     const persistedMessageResult = await this.persistSocialInboundMessage({
       channel: MessageChannel.MESSENGER,
       leadId: lead.id,
@@ -1580,14 +1423,20 @@ export class WebhookService {
       externalMessageId: inboundMessageId,
       content: messageText || null,
       externalTimestamp: interactionAt,
-      type: attachmentType ?? MessageType.TEXT,
-      mediaUrl: inboundMedia?.mediaUrl ?? null,
-      mimeType: inboundMedia?.mimeType ?? null,
-      mediaSize: inboundMedia?.mediaSize ?? null
+      type: attachmentType ?? MessageType.TEXT
     })
 
     if (!persistedMessageResult.wasCreated) {
       return ignoredSocialEvent('duplicate_message')
+    }
+
+    const attachmentUrl = attachmentType ? attachment?.payload?.url : undefined
+    if (attachmentUrl) {
+      await this.inboundMediaService.attach(
+        persistedMessageResult.message,
+        company,
+        { kind: 'url', url: attachmentUrl }
+      )
     }
 
     await this.emitMessageCreated(persistedMessageResult.message)
@@ -1805,59 +1654,6 @@ export class WebhookService {
     }
   }
 
-  private async storeSocialInboundAttachment(params: {
-    leadId: string
-    externalMessageId: string
-    type: MessageType
-    url: string
-  }): Promise<{
-    mediaUrl: string
-    mimeType: string
-    mediaSize: number
-  } | null> {
-    if (!isAllowedMetaMediaUrl(params.url)) {
-      this.logger.warn(
-        `Refused to download inbound social attachment from a non-Meta host. leadId=${params.leadId} externalMessageId=${params.externalMessageId} type=${params.type}`
-      )
-      return null
-    }
-
-    try {
-      const response = await axios.get<ArrayBuffer>(params.url, {
-        responseType: 'arraybuffer',
-        timeout: SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS
-      })
-      const buffer = Buffer.from(response.data)
-      const responseContentType: unknown = response.headers['content-type']
-      const mimeType =
-        (typeof responseContentType === 'string'
-          ? responseContentType.split(';')[0]?.trim()
-          : null) || 'application/octet-stream'
-      const extension = this.resolveMediaFileExtension(mimeType)
-      const storageKey = `leads/${params.leadId}/messages/${params.externalMessageId}.${extension}`
-      const uploadResponse = await this.storageService.uploadFile(
-        {
-          originalname: `${params.externalMessageId}.${extension}`,
-          mimetype: mimeType,
-          size: buffer.length,
-          buffer
-        },
-        { key: storageKey }
-      )
-
-      return {
-        mediaUrl: uploadResponse.url,
-        mimeType,
-        mediaSize: buffer.length
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to store inbound social attachment. leadId=${params.leadId} externalMessageId=${params.externalMessageId} type=${params.type} error=${error instanceof Error ? error.message : 'unknown error'}`
-      )
-      return null
-    }
-  }
-
   async handleDirectWebhook(payload: InstagramDirectWebhookPayload) {
     this.logger.log(
       `Received Instagram Direct webhook. entries=${payload.entry?.length ?? 0}`
@@ -2015,16 +1811,6 @@ export class WebhookService {
       return ignoredSocialEvent('identity_owner_mismatch')
     }
 
-    const inboundMedia =
-      attachmentType && attachment?.payload?.url
-        ? await this.storeSocialInboundAttachment({
-            leadId: lead.id,
-            externalMessageId: inboundMessageId,
-            type: attachmentType,
-            url: attachment.payload.url
-          })
-        : null
-
     const persistedMessageResult = await this.persistSocialInboundMessage({
       channel: MessageChannel.INSTAGRAM,
       leadId: lead.id,
@@ -2035,14 +1821,20 @@ export class WebhookService {
       externalMessageId: inboundMessageId,
       content: messageText || null,
       externalTimestamp: interactionAt,
-      type: attachmentType ?? MessageType.TEXT,
-      mediaUrl: inboundMedia?.mediaUrl ?? null,
-      mimeType: inboundMedia?.mimeType ?? null,
-      mediaSize: inboundMedia?.mediaSize ?? null
+      type: attachmentType ?? MessageType.TEXT
     })
 
     if (!persistedMessageResult.wasCreated) {
       return ignoredSocialEvent('duplicate_message')
+    }
+
+    const attachmentUrl = attachmentType ? attachment?.payload?.url : undefined
+    if (attachmentUrl) {
+      await this.inboundMediaService.attach(
+        persistedMessageResult.message,
+        company,
+        { kind: 'url', url: attachmentUrl }
+      )
     }
 
     await this.emitMessageCreated(persistedMessageResult.message)

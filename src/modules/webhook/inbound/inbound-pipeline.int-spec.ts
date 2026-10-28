@@ -12,6 +12,7 @@ import {
 import { OutboxRelayService } from '../../outbox/services/outbox-relay.service'
 import { OutboxService } from '../../outbox/services/outbox.service'
 
+import { DeferredInboundEventError } from './deferred-inbound-event.error'
 import { InboundEventInboxService } from './inbound-event-inbox.service'
 import { InboundEventRecord, InboundEventStatus } from './inbound-event.entity'
 import { InboundEventKind } from './inbound-event.types'
@@ -223,6 +224,36 @@ describeWithDatabase('inbound pipeline (Postgres)', () => {
         status: InboundEventStatus.IGNORED,
         lastError: 'missing_company',
         attempts: 2
+      })
+    })
+  })
+
+  describe('deferred events (P8)', () => {
+    it('retries a status whose message is not there yet and gives up as ignored', async () => {
+      await inbox.accept([event('wamid.status')])
+      const { id } = await dataSource
+        .getRepository(InboundEventRecord)
+        .findOneByOrFail({ dedupeKey: 'wamid.status' })
+      const notYet = () =>
+        Promise.reject(new DeferredInboundEventError('status_target_not_found'))
+
+      for (let attempt = 1; attempt < 3; attempt += 1) {
+        await expect(
+          inbox.processStored(id, notYet, { maxAttempts: 3 })
+        ).rejects.toBeInstanceOf(DeferredInboundEventError)
+      }
+      await expect(
+        inbox.processStored(id, notYet, { maxAttempts: 3 })
+      ).resolves.toBe(InboundEventStatus.IGNORED)
+
+      expect(
+        await dataSource
+          .getRepository(InboundEventRecord)
+          .findOneByOrFail({ id })
+      ).toMatchObject({
+        status: InboundEventStatus.IGNORED,
+        lastError: 'status_target_not_found',
+        attempts: 3
       })
     })
   })

@@ -166,6 +166,10 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
 - Automatic replies go through `AutomaticReplyService.queue`: stored as a `queued` message
   first, then sent (by `OutboundReplyWorker` on `message.outbound.send` when async, inline
   otherwise) and turned `sent` with the Graph API ID, or `failed` (4xx, or retries exhausted).
+- Inbound attachments go through `InboundMediaService.attach` (`message.media.fetch` →
+  `InboundMediaWorker` when async, inline otherwise); the message is stored first, the file
+  follows with `message.updated`. A handler that must wait for data not stored yet throws
+  `DeferredInboundEventError`: retried, then recorded as `ignored` (not `failed`).
 
 ### Realtime
 

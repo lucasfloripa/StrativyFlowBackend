@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 
+import { rabbitDeliveryAttempts } from '../../modules/rabbit/rabbit-attempts'
 import { RabbitConsumerService } from '../../modules/rabbit/services/rabbit-consumer.service'
 import { InboundEventInboxService } from '../../modules/webhook/inbound/inbound-event-inbox.service'
 import {
@@ -20,11 +22,17 @@ import type { RabbitMessage } from '../../modules/rabbit/interfaces/rabbit-messa
 export class InboundEventWorker implements OnModuleInit {
   private readonly logger = new Logger(InboundEventWorker.name)
 
+  /** The first delivery plus every RabbitMQ retry. */
+  readonly maxAttempts: number
+
   constructor(
     private readonly rabbitConsumerService: RabbitConsumerService,
     private readonly inboundEventInbox: InboundEventInboxService,
-    private readonly webhookService: WebhookService
-  ) {}
+    private readonly webhookService: WebhookService,
+    configService: ConfigService
+  ) {
+    this.maxAttempts = rabbitDeliveryAttempts(configService)
+  }
 
   async onModuleInit(): Promise<void> {
     await this.rabbitConsumerService.subscribe({
@@ -46,7 +54,8 @@ export class InboundEventWorker implements OnModuleInit {
 
     const result = await this.inboundEventInbox.processStored(
       inboundEventId,
-      (event) => this.webhookService.processInboundEvent(event)
+      (event) => this.webhookService.processInboundEvent(event),
+      { maxAttempts: this.maxAttempts }
     )
 
     this.logger.log(

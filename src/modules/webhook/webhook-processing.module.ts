@@ -19,6 +19,7 @@ import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
 import { InboundEventInboxService } from './inbound/inbound-event-inbox.service'
 import { InboundEventRecord } from './inbound/inbound-event.entity'
 import { InstagramMessagingService } from './instagram-messaging.service'
+import { InboundMediaService } from './media/inbound-media.service'
 import { MessengerMessagingService } from './messenger-messaging.service'
 import { AutomaticReplyService } from './outbound/automatic-reply.service'
 import { WebhookService } from './webhook.service'
@@ -47,6 +48,7 @@ import { WebhookService } from './webhook.service'
   providers: [
     WebhookService,
     AutomaticReplyService,
+    InboundMediaService,
     FollowUpReplyLinkerService,
     InboundEventInboxService,
     MessengerMessagingService,
@@ -59,6 +61,7 @@ import { WebhookService } from './webhook.service'
     WebhookService,
     InboundEventInboxService,
     AutomaticReplyService,
+    InboundMediaService,
     InstagramMessagingService
   ]
 })
