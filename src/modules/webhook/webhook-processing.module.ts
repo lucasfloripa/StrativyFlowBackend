@@ -20,6 +20,7 @@ import { InboundEventInboxService } from './inbound/inbound-event-inbox.service'
 import { InboundEventRecord } from './inbound/inbound-event.entity'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { MessengerMessagingService } from './messenger-messaging.service'
+import { AutomaticReplyService } from './outbound/automatic-reply.service'
 import { WebhookService } from './webhook.service'
 
 /**
@@ -45,6 +46,7 @@ import { WebhookService } from './webhook.service'
   ],
   providers: [
     WebhookService,
+    AutomaticReplyService,
     FollowUpReplyLinkerService,
     InboundEventInboxService,
     MessengerMessagingService,
@@ -53,6 +55,11 @@ import { WebhookService } from './webhook.service'
     LeadFlowEngine,
     LeadFlowActionExecutor
   ],
-  exports: [WebhookService, InboundEventInboxService, InstagramMessagingService]
+  exports: [
+    WebhookService,
+    InboundEventInboxService,
+    AutomaticReplyService,
+    InstagramMessagingService
+  ]
 })
 export class WebhookProcessingModule {}

@@ -1,9 +1,7 @@
 import { Logger } from '@nestjs/common'
 
-import {
-  WEBHOOK_ASYNC_PROCESSING,
-  WebhookIngestionService
-} from './webhook-ingestion.service'
+import { WEBHOOK_ASYNC_PROCESSING } from './webhook-async.flag'
+import { WebhookIngestionService } from './webhook-ingestion.service'
 
 import type { ConfigService } from '@nestjs/config'
 

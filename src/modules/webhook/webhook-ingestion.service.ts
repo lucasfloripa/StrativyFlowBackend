@@ -5,6 +5,7 @@ import { InboundEventInboxService } from './inbound/inbound-event-inbox.service'
 import { normalizeInstagramWebhook } from './inbound/instagram-inbound.normalizer'
 import { normalizeMessengerWebhook } from './inbound/messenger-inbound.normalizer'
 import { normalizeWhatsAppWebhook } from './inbound/whatsapp-inbound.normalizer'
+import { isWebhookAsyncProcessingEnabled } from './webhook-async.flag'
 import { WebhookService } from './webhook.service'
 
 import type {
@@ -16,8 +17,6 @@ import type {
   MessengerWebhookPayload,
   WhatsAppWebhookPayload
 } from './inbound/meta-webhook-payload.types'
-
-export const WEBHOOK_ASYNC_PROCESSING = 'WEBHOOK_ASYNC_PROCESSING'
 
 /**
  * What the webhook POST does. With `WEBHOOK_ASYNC_PROCESSING=true` it only
@@ -36,8 +35,7 @@ export class WebhookIngestionService {
   ) {}
 
   isAsyncProcessingEnabled(): boolean {
-    const value = this.configService.get<string>(WEBHOOK_ASYNC_PROCESSING)
-    return ['true', '1'].includes(value?.trim().toLowerCase() ?? '')
+    return isWebhookAsyncProcessingEnabled(this.configService)
   }
 
   ingestWhatsApp(payload: WhatsAppWebhookPayload) {

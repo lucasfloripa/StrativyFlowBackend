@@ -163,6 +163,9 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
 - `WebhookProcessingModule` holds the processing (no HTTP) for both processes; `WebhookModule`
   adds the controller. Lead writes in the webhook flow go through `LeadWriter` (only changed
   columns).
+- Automatic replies go through `AutomaticReplyService.queue`: stored as a `queued` message
+  first, then sent (by `OutboundReplyWorker` on `message.outbound.send` when async, inline
+  otherwise) and turned `sent` with the Graph API ID, or `failed` (4xx, or retries exhausted).
 
 ### Realtime
 

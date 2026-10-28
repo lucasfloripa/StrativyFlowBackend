@@ -26,6 +26,7 @@ import { OutboxRelayScheduler } from './worker/outbox/outbox-relay-scheduler.ser
 import { PaymentScheduler } from './worker/payments/payment-scheduler.service'
 import { PaymentWorker } from './worker/payments/payment-worker.service'
 import { InboundEventWorker } from './worker/webhook/inbound-event-worker.service'
+import { OutboundReplyWorker } from './worker/webhook/outbound-reply-worker.service'
 
 @Module({
   imports: [
@@ -57,7 +58,8 @@ import { InboundEventWorker } from './worker/webhook/inbound-event-worker.servic
     FollowUpReminderScheduler,
     NotificationWorker,
     OutboxRelayScheduler,
-    InboundEventWorker
+    InboundEventWorker,
+    OutboundReplyWorker
   ]
 })
 export class WorkerModule {}

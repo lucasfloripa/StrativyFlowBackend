@@ -66,6 +66,7 @@ import { InstagramMessagingService } from './instagram-messaging.service'
 import { LeadWriter } from './lead-writer'
 import { canTransitionMessageStatus } from './message-status.policy'
 import { MessengerMessagingService } from './messenger-messaging.service'
+import { AutomaticReplyService } from './outbound/automatic-reply.service'
 import { isAllowedMetaMediaUrl } from './security/meta-media-url'
 
 import type {
@@ -77,17 +78,6 @@ import type {
 } from './inbound/meta-webhook-payload.types'
 
 const SOCIAL_MEDIA_DOWNLOAD_TIMEOUT_MS = 30_000
-
-type WhatsAppSendMessageResponse = {
-  messaging_product: string
-  contacts: {
-    input: string
-    wa_id: string
-  }[]
-  messages: {
-    id: string
-  }[]
-}
 
 type WhatsAppMediaResponse = {
   url: string
@@ -161,7 +151,8 @@ export class WebhookService {
     private readonly followUpReplyLinkerService: FollowUpReplyLinkerService,
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
-    private readonly inboundEventInbox: InboundEventInboxService
+    private readonly inboundEventInbox: InboundEventInboxService,
+    private readonly automaticReplyService: AutomaticReplyService
   ) {
     this.leadWriter = new LeadWriter(leadRepo)
   }
@@ -591,21 +582,13 @@ export class WebhookService {
         ? 'Olá! 👋 \nDa onde você fala?'
         : 'Olá! 👋 \nComo podemos te chamar?'
 
-      const response = await this.sendWhatsAppMessage(
-        from,
-        reply,
-        externalAccountId,
-        company.whatsappToken ?? undefined
-      )
-      const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
-
-      lead.lastAutoReplyMessageId = whatsappMessageId ?? undefined
-
-      await this.persistAutomaticMessage({
+      await this.automaticReplyService.queue({
         leadId: lead.id,
-        content: reply,
+        company,
         channel: MessageChannel.WHATSAPP,
-        externalMessageId: whatsappMessageId
+        content: reply,
+        externalAccountId,
+        to: from
       })
 
       this.logger.log('[10] Saving lead after first auto-reply dispatch')
@@ -745,39 +728,16 @@ export class WebhookService {
           lead: transitionLead,
           to
         }),
-      sendMessage: async ({ context, to, content }) => {
-        const response = await this.sendWhatsAppMessage(
-          to,
-          content,
-          context.phoneNumberId,
-          company.whatsappToken ?? undefined
-        )
-        const whatsappMessageId = response?.data?.messages?.[0]?.id ?? null
-
-        lead.lastAutoReplyMessageId = whatsappMessageId ?? undefined
-
-        return {
-          externalMessageId: whatsappMessageId
-        }
-      },
-      persistAutomaticMessage: async ({
-        context,
-        leadId,
-        content,
-        externalMessageId
-      }: {
-        context: LeadFlowActionContext
-        leadId: string
-        content: string
-        externalMessageId?: string | null
-      }) =>
-        this.persistAutomaticMessage({
-          correlationId: context.correlationId,
+      sendMessage: async ({ leadId, to, content }) => {
+        await this.automaticReplyService.queue({
           leadId,
-          content,
+          company,
           channel: MessageChannel.WHATSAPP,
-          externalMessageId
+          content,
+          externalAccountId,
+          to
         })
+      }
     })
 
     if (
@@ -993,43 +953,6 @@ export class WebhookService {
         message: inboundMessage,
         wasCreated: false
       }
-    }
-  }
-
-  private async persistAutomaticMessage(params: {
-    correlationId?: string
-    leadId: string
-    content: string
-    channel: MessageChannel
-    externalMessageId?: string | null
-  }) {
-    const { correlationId, leadId, content, channel, externalMessageId } =
-      params
-
-    try {
-      if (correlationId) {
-        this.logger.debug(
-          `[${correlationId}] Persisting automatic message for lead ${leadId}`
-        )
-      }
-
-      await this.messageRepo.save(
-        this.messageRepo.create({
-          leadId,
-          direction: MessageDirection.AUTOMATIC,
-          channel,
-          content,
-          type: MessageType.TEXT,
-          externalMessageId: externalMessageId ?? null,
-          metadata: {
-            runtimeMode: LeadRuntimeMode.AUTOMATION
-          }
-        })
-      )
-    } catch (error) {
-      this.logger.warn(
-        `Failed to persist automatic ${channel} message: ${error instanceof Error ? error.message : 'unknown error'}`
-      )
     }
   }
 
@@ -1287,30 +1210,6 @@ export class WebhookService {
         state: LeadState.ACTIVE
       }))
     })
-  }
-
-  private async sendWhatsAppMessage(
-    to: string,
-    reply: string,
-    phoneNumberId?: string,
-    whatsappToken?: string
-  ): Promise<{ data: WhatsAppSendMessageResponse }> {
-    const token = whatsappToken?.trim()
-    return axios.post(
-      `https://graph.facebook.com/v22.0/${phoneNumberId}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        to,
-        type: 'text',
-        text: { body: reply }
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    )
   }
 
   private async getWhatsAppMediaInfo(
@@ -1712,21 +1611,13 @@ export class WebhookService {
       const reply = shouldUseProfileName
         ? 'Olá! 👋 \nDa onde você fala?'
         : 'Olá! 👋 \nComo podemos te chamar?'
-      const response =
-        await this.messengerMessagingService.sendMessengerMessage(
-          psid,
-          reply,
-          pageId,
-          company.messengerToken ?? undefined
-        )
-      const externalMessageId = response.data.message_id ?? null
-
-      lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-      await this.persistAutomaticMessage({
+      await this.automaticReplyService.queue({
         leadId: lead.id,
-        content: reply,
+        company,
         channel: MessageChannel.MESSENGER,
-        externalMessageId
+        content: reply,
+        externalAccountId: pageId,
+        to: psid
       })
       await this.leadWriter.save(lead)
       return processedSocialEvent('first_contact_replied', lead.id)
@@ -1779,32 +1670,16 @@ export class WebhookService {
       actions: flowResult.actions,
       transitionLeadFlowState: ({ lead: transitionLead, to }) =>
         this.transitionLeadFlowState({ lead: transitionLead, to }),
-      sendMessage: async ({ to, content }) => {
-        const response =
-          await this.messengerMessagingService.sendMessengerMessage(
-            to,
-            content,
-            pageId,
-            company.messengerToken ?? undefined
-          )
-        const externalMessageId = response.data.message_id ?? null
-
-        lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-        return { externalMessageId }
-      },
-      persistAutomaticMessage: ({
-        context,
-        leadId,
-        content,
-        externalMessageId
-      }) =>
-        this.persistAutomaticMessage({
-          correlationId: context.correlationId,
+      sendMessage: async ({ leadId, to, content }) => {
+        await this.automaticReplyService.queue({
           leadId,
-          content,
+          company,
           channel: MessageChannel.MESSENGER,
-          externalMessageId
+          content,
+          externalAccountId: pageId,
+          to
         })
+      }
     })
 
     if (
@@ -2191,19 +2066,13 @@ export class WebhookService {
       const reply = shouldUseProfileName
         ? 'Olá! 👋 \nDa onde você fala?'
         : 'Olá! 👋 \nComo podemos te chamar?'
-      const response = await this.instagramMessagingService.sendMessage(
-        instagramAccountId,
-        instagramUserId,
-        reply
-      )
-      const externalMessageId = response.message_id ?? null
-
-      lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-      await this.persistAutomaticMessage({
+      await this.automaticReplyService.queue({
         leadId: lead.id,
-        content: reply,
+        company,
         channel: MessageChannel.INSTAGRAM,
-        externalMessageId
+        content: reply,
+        externalAccountId: instagramAccountId,
+        to: instagramUserId
       })
       await this.leadWriter.save(lead)
       return processedSocialEvent('first_contact_replied', lead.id)
@@ -2256,30 +2125,16 @@ export class WebhookService {
       actions: flowResult.actions,
       transitionLeadFlowState: ({ lead: transitionLead, to }) =>
         this.transitionLeadFlowState({ lead: transitionLead, to }),
-      sendMessage: async ({ to, content }) => {
-        const response = await this.instagramMessagingService.sendMessage(
-          instagramAccountId,
-          to,
-          content
-        )
-        const externalMessageId = response.message_id ?? null
-
-        lead.lastAutoReplyMessageId = externalMessageId ?? undefined
-        return { externalMessageId }
-      },
-      persistAutomaticMessage: ({
-        context,
-        leadId,
-        content,
-        externalMessageId
-      }) =>
-        this.persistAutomaticMessage({
-          correlationId: context.correlationId,
+      sendMessage: async ({ leadId, to, content }) => {
+        await this.automaticReplyService.queue({
           leadId,
-          content,
+          company,
           channel: MessageChannel.INSTAGRAM,
-          externalMessageId
+          content,
+          externalAccountId: instagramAccountId,
+          to
         })
+      }
     })
 
     if (

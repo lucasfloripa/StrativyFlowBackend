@@ -27,10 +27,14 @@ export enum MessageType {
 }
 
 export enum MessageStatus {
+  /** Automatic reply stored, not sent yet. */
+  QUEUED = 'queued',
   SENT = 'sent',
   DELIVERED = 'delivered',
   READ = 'read',
-  RECEIVED = 'received'
+  RECEIVED = 'received',
+  /** Automatic reply the Graph API did not accept (see `metadata.outbound.error`). */
+  FAILED = 'failed'
 }
 
 export enum MessageSource {

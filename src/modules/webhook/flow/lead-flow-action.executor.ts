@@ -20,28 +20,16 @@ export class LeadFlowActionExecutor {
       lead: Lead
       to: LeadFlowState
     }) => Promise<void>
+    /** Queues an automatic reply (stored first, then sent). */
     sendMessage: (params: {
       context: LeadFlowActionContext
+      leadId: string
       to: string
       content: string
-    }) => Promise<{
-      externalMessageId?: string | null
-    }>
-    persistAutomaticMessage: (params: {
-      context: LeadFlowActionContext
-      leadId: string
-      content: string
-      externalMessageId?: string | null
     }) => Promise<void>
   }): Promise<void> {
-    const {
-      context,
-      lead,
-      actions,
-      transitionLeadFlowState,
-      sendMessage,
-      persistAutomaticMessage
-    } = params
+    const { context, lead, actions, transitionLeadFlowState, sendMessage } =
+      params
 
     for (const action of actions) {
       switch (action.type) {
@@ -72,17 +60,11 @@ export class LeadFlowActionExecutor {
             )
           }
 
-          const { externalMessageId } = await sendMessage({
-            context,
-            to: destination,
-            content: action.payload.content
-          })
-
-          await persistAutomaticMessage({
+          await sendMessage({
             context,
             leadId: lead.id,
-            content: action.payload.content,
-            externalMessageId
+            to: destination,
+            content: action.payload.content
           })
           break
         }

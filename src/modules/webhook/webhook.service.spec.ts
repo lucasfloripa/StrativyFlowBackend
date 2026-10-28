@@ -24,6 +24,7 @@ import { InboundEventStatus } from './inbound/inbound-event.entity'
 import { normalizeInstagramWebhook } from './inbound/instagram-inbound.normalizer'
 import { normalizeMessengerWebhook } from './inbound/messenger-inbound.normalizer'
 import { normalizeWhatsAppWebhook } from './inbound/whatsapp-inbound.normalizer'
+import { AutomaticReplyService } from './outbound/automatic-reply.service'
 import { WebhookService } from './webhook.service'
 
 import type { InboxOutcome } from './inbound/inbound-event-inbox.service'
@@ -69,6 +70,44 @@ const createRecordingInbox = (options?: { duplicateKeys?: string[] }) => {
   return { inbox, outcomes, failures }
 }
 
+/**
+ * The real `AutomaticReplyService` over the same doubles, with
+ * `WEBHOOK_ASYNC_PROCESSING` off: replies are stored and sent inline.
+ */
+const createAutomaticReplyService = (overrides?: {
+  messageRepo?: object
+  companyRepo?: object
+  leadRepo?: object
+  outboxService?: object
+  messengerMessagingService?: object
+  instagramMessagingService?: object
+  leadsService?: object
+  realtimeService?: object
+}) =>
+  new AutomaticReplyService(
+    {
+      create: jest.fn((message: Partial<Message>) =>
+        Object.assign(new Message(), message)
+      ),
+      save: jest.fn((message: Message) =>
+        Promise.resolve(Object.assign(message, { id: 'reply-1' }))
+      ),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      ...(overrides?.messageRepo ?? {})
+    } as never,
+    (overrides?.companyRepo ?? {}) as never,
+    {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      ...(overrides?.leadRepo ?? {})
+    } as never,
+    (overrides?.outboxService ?? { publish: jest.fn() }) as never,
+    { get: () => undefined } as never,
+    (overrides?.messengerMessagingService ?? {}) as never,
+    (overrides?.instagramMessagingService ?? {}) as never,
+    (overrides?.leadsService ?? {}) as never,
+    (overrides?.realtimeService ?? { emitToLead: jest.fn() }) as never
+  )
+
 describe('WebhookService', () => {
   const createService = (overrides?: {
     leadRepo?: object
@@ -87,6 +126,7 @@ describe('WebhookService', () => {
     followUpReplyLinkerService?: object
     companyRepo?: object
     inboundEventInbox?: object
+    automaticReplyService?: object
   }) =>
     new WebhookService(
       (overrides?.leadRepo ?? {}) as never,
@@ -106,7 +146,9 @@ describe('WebhookService', () => {
         linkReply: jest.fn()
       }) as never,
       (overrides?.companyRepo ?? {}) as never,
-      (overrides?.inboundEventInbox ?? createRecordingInbox().inbox) as never
+      (overrides?.inboundEventInbox ?? createRecordingInbox().inbox) as never,
+      (overrides?.automaticReplyService ??
+        createAutomaticReplyService(overrides)) as never
     )
 
   describe('WhatsApp Company ownership', () => {
