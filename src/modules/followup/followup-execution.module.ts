@@ -9,7 +9,6 @@ import { Message } from '../leads/entities/message.entity'
 import { LeadMessageDispatchService } from '../leads/services/lead-message-dispatch.service'
 import { MailModule } from '../mail/mail.module'
 import { Negotiation } from '../negotiation/entities/negotiation.entity'
-import { RealtimeModule } from '../realtime/realtime.module'
 import { StorageModule } from '../storage/storage.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 import { InstagramMessagingService } from '../webhook/instagram-messaging.service'
@@ -29,7 +28,6 @@ import { WhatsAppTemplateSender } from './services/whatsapp-template-sender.serv
   imports: [
     HttpModule,
     MailModule,
-    RealtimeModule,
     StorageModule,
     TypeOrmModule.forFeature([
       FollowUp,

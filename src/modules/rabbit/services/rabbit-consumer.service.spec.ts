@@ -55,7 +55,8 @@ const createHarness = async (
     .fn()
     .mockResolvedValue(undefined),
   queue = 'payment.queue',
-  routingKey = 'payment.mark_overdue'
+  routingKey = 'payment.mark_overdue',
+  exclusive?: boolean
 ): Promise<ConsumerHarness> => {
   let consumeHandler: ((message: ConsumeMessage | null) => void) | undefined
   let processing: Promise<void> | undefined
@@ -95,7 +96,8 @@ const createHarness = async (
   await service.subscribe({
     queue,
     routingKey,
-    handler
+    handler,
+    exclusive
   })
 
   return {
@@ -316,6 +318,47 @@ describe('RabbitConsumerService', () => {
     )
     expect(confirmChannel.ack).toHaveBeenCalledWith(rawMessage)
     expect(confirmChannel.nack).not.toHaveBeenCalled()
+  })
+
+  describe('exclusive subscriptions', () => {
+    afterEach(() => jest.restoreAllMocks())
+
+    const createExclusiveHarness = (handler?: RabbitSubscription['handler']) =>
+      createHarness(
+        handler,
+        'realtime.emit.api-host.1a2b3c4d',
+        'realtime.emit',
+        true
+      )
+
+    it('declares an exclusive auto-delete queue without retry or DLQ queues', async () => {
+      const { confirmChannel } = await createExclusiveHarness()
+
+      expect(confirmChannel.assertQueue).toHaveBeenCalledTimes(1)
+      expect(confirmChannel.assertQueue).toHaveBeenCalledWith(
+        'realtime.emit.api-host.1a2b3c4d',
+        { durable: false, exclusive: true, autoDelete: true }
+      )
+      expect(confirmChannel.bindQueue).toHaveBeenCalledTimes(1)
+      expect(confirmChannel.bindQueue).toHaveBeenCalledWith(
+        'realtime.emit.api-host.1a2b3c4d',
+        'strativyflow.events',
+        'realtime.emit'
+      )
+    })
+
+    it('drops a failed message with an ACK instead of retrying it', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+      const handler = jest.fn().mockRejectedValue(new Error('socket gone'))
+      const { confirmChannel, publish, consume } =
+        await createExclusiveHarness(handler)
+
+      await consume(createRawMessage())
+
+      expect(confirmChannel.ack).toHaveBeenCalledTimes(1)
+      expect(confirmChannel.nack).not.toHaveBeenCalled()
+      expect(publish).not.toHaveBeenCalled()
+    })
   })
 
   describe('onModuleDestroy', () => {

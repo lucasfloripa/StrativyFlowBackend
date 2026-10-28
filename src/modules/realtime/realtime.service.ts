@@ -1,9 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common'
 
+import type { RealtimeEmitter } from './realtime-emitter'
 import type { RealtimeGateway } from './realtime.gateway'
 
 @Injectable()
-export class RealtimeService {
+export class RealtimeService implements RealtimeEmitter {
   private readonly logger = new Logger(RealtimeService.name)
   private gateway: RealtimeGateway | null = null
 

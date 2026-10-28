@@ -6,7 +6,6 @@ import { ContactsModule } from '../contacts/contacts.module'
 import { FollowUp } from '../followup/entities/followup.entity'
 import { FollowUpModule } from '../followup/followup.module'
 import { RabbitModule } from '../rabbit/rabbit.module'
-import { RealtimeModule } from '../realtime/realtime.module'
 import { StorageModule } from '../storage/storage.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 import { InstagramMessagingService } from '../webhook/instagram-messaging.service'
@@ -39,7 +38,6 @@ import { WhatsAppOutboundService } from './services/whatsapp-outbound.service'
       FollowUp
     ]),
     RabbitModule,
-    RealtimeModule,
     StorageModule,
     FollowUpModule,
     ContactsModule

@@ -1,8 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { Repository } from 'typeorm'
 
-import { RealtimeService } from '../../realtime/realtime.service'
+import {
+  REALTIME_EMITTER,
+  type RealtimeEmitter
+} from '../../realtime/realtime-emitter'
 import { StorageService } from '../../storage/storage.service'
 import {
   Message,
@@ -20,7 +23,8 @@ export class LeadMessageDispatchService {
     @InjectRepository(Message)
     private readonly messageRepo: Repository<Message>,
     private readonly storageService: StorageService,
-    private readonly realtimeService: RealtimeService
+    @Inject(REALTIME_EMITTER)
+    private readonly realtimeService: RealtimeEmitter
   ) {}
 
   async persistAndEmitOutboundMessage(params: {

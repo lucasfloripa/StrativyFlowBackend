@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 
-import { BadRequestException, Injectable, Logger } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import axios from 'axios'
 import { Repository } from 'typeorm'
@@ -24,7 +24,10 @@ import { LeadsService } from '../leads/leads.service'
 import { LeadChannelIdentityService } from '../leads/services/lead-channel-identity.service'
 import { buildBrazilianPhoneVariants } from '../leads/utils/brazilian-phone'
 import { OutboxService } from '../outbox/services/outbox.service'
-import { RealtimeService } from '../realtime/realtime.service'
+import {
+  REALTIME_EMITTER,
+  type RealtimeEmitter
+} from '../realtime/realtime-emitter'
 import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -144,7 +147,8 @@ export class WebhookService {
     private readonly leadChannelIdentityService: LeadChannelIdentityService,
     private readonly messengerMessagingService: MessengerMessagingService,
     private readonly instagramMessagingService: InstagramMessagingService,
-    private readonly realtimeService: RealtimeService,
+    @Inject(REALTIME_EMITTER)
+    private readonly realtimeService: RealtimeEmitter,
     private readonly followUpReplyLinkerService: FollowUpReplyLinkerService,
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,

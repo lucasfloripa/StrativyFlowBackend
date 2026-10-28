@@ -210,6 +210,20 @@ export class RabbitConsumerService implements OnModuleDestroy {
     })
     await confirmChannel.prefetch(this.prefetch)
 
+    if (options.exclusive) {
+      await confirmChannel.assertQueue(options.queue, {
+        durable: false,
+        exclusive: true,
+        autoDelete: true
+      })
+      await confirmChannel.bindQueue(
+        options.queue,
+        RABBIT_EXCHANGE,
+        options.routingKey
+      )
+      return
+    }
+
     await confirmChannel.assertQueue(options.queue, { durable: true })
     await confirmChannel.bindQueue(
       options.queue,
@@ -278,6 +292,12 @@ export class RabbitConsumerService implements OnModuleDestroy {
         `RabbitMQ message processing failed queue=${options.queue} event=${event} eventId=${eventId} retryCount=${retryCount}`,
         error instanceof Error ? error.stack : undefined
       )
+
+      if (options.exclusive) {
+        // Fan-out messages are not retried: drop it and free the slot.
+        confirmChannel.ack(rawMessage)
+        return
+      }
 
       try {
         if (retryCount >= this.maxRetryAttempts) {

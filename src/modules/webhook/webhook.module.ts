@@ -9,7 +9,6 @@ import { Lead } from '../leads/entities/lead.entity'
 import { Message } from '../leads/entities/message.entity'
 import { LeadsModule } from '../leads/leads.module'
 import { OutboxModule } from '../outbox/outbox.module'
-import { RealtimeModule } from '../realtime/realtime.module'
 import { StorageModule } from '../storage/storage.module'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -42,7 +41,6 @@ import { WebhookService } from './webhook.service'
     FollowUpModule,
     LeadsModule,
     OutboxModule,
-    RealtimeModule,
     StorageModule
   ],
   providers: [

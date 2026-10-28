@@ -16,6 +16,7 @@ import { NotificationService } from './modules/notification/notification.service
 import { NotificationRepository } from './modules/notification/repositories/notification.repository'
 import { OutboxModule } from './modules/outbox/outbox.module'
 import { RabbitModule } from './modules/rabbit/rabbit.module'
+import { RealtimeOutboxModule } from './modules/realtime/realtime-outbox.module'
 import { UserInformations } from './modules/user/entities/user-informations.entity'
 import { FollowUpExecutionScheduler } from './worker/notifications/followup-execution-scheduler.service'
 import { FollowUpReminderScheduler } from './worker/notifications/followup-reminder-scheduler.service'
@@ -41,6 +42,7 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
     EvolutionModule,
     OutboxModule,
     RabbitModule,
+    RealtimeOutboxModule,
     ScheduleModule.forRoot()
   ],
   providers: [
