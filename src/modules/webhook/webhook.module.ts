@@ -17,6 +17,8 @@ import { ConversationContextBuilder } from './flow/conversation-context.builder'
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
 import { FollowUpReplyLinkerService } from './follow-up-reply-linker.service'
+import { InboundEventInboxService } from './inbound/inbound-event-inbox.service'
+import { InboundEventRecord } from './inbound/inbound-event.entity'
 import { InstagramMessagingService } from './instagram-messaging.service'
 import { MessengerMessagingService } from './messenger-messaging.service'
 import {
@@ -32,6 +34,7 @@ import { WebhookService } from './webhook.service'
       Company,
       FollowUp,
       FollowUpStep,
+      InboundEventRecord,
       Lead,
       Message,
       UserInformations
@@ -47,6 +50,7 @@ import { WebhookService } from './webhook.service'
     MetaWebhookSignatureGuard,
     WebhookService,
     FollowUpReplyLinkerService,
+    InboundEventInboxService,
     MessengerMessagingService,
     InstagramMessagingService,
     ConversationContextBuilder,

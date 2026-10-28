@@ -20,9 +20,51 @@ import {
 
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
+import { InboundEventStatus } from './inbound/inbound-event.entity'
 import { WebhookService } from './webhook.service'
 
+import type { InboxOutcome } from './inbound/inbound-event-inbox.service'
+import type { InboundEvent } from './inbound/inbound-event.types'
 import type { WhatsAppWebhookPayload } from './inbound/meta-webhook-payload.types'
+
+/**
+ * Stand-in for `InboundEventInboxService`: runs every handler and records the
+ * outcome the service classified, or the error it threw.
+ */
+const createRecordingInbox = (options?: { duplicateKeys?: string[] }) => {
+  const outcomes: Array<{ dedupeKey: string; outcome: InboxOutcome }> = []
+  const failures: Array<{ dedupeKey: string; error: unknown }> = []
+  const inbox = {
+    run: jest.fn(
+      async <T>(
+        event: InboundEvent,
+        handler: () => Promise<T>,
+        classify: (result: T) => InboxOutcome
+      ) => {
+        if (options?.duplicateKeys?.includes(event.dedupeKey)) {
+          return {
+            claimed: false,
+            currentStatus: InboundEventStatus.PROCESSED
+          }
+        }
+
+        try {
+          const result = await handler()
+          outcomes.push({
+            dedupeKey: event.dedupeKey,
+            outcome: classify(result)
+          })
+          return { claimed: true, result }
+        } catch (error) {
+          failures.push({ dedupeKey: event.dedupeKey, error })
+          throw error
+        }
+      }
+    )
+  }
+
+  return { inbox, outcomes, failures }
+}
 
 describe('WebhookService', () => {
   const createService = (overrides?: {
@@ -41,6 +83,7 @@ describe('WebhookService', () => {
     realtimeService?: object
     followUpReplyLinkerService?: object
     companyRepo?: object
+    inboundEventInbox?: object
   }) =>
     new WebhookService(
       (overrides?.leadRepo ?? {}) as never,
@@ -59,7 +102,8 @@ describe('WebhookService', () => {
       (overrides?.followUpReplyLinkerService ?? {
         linkReply: jest.fn()
       }) as never,
-      (overrides?.companyRepo ?? {}) as never
+      (overrides?.companyRepo ?? {}) as never,
+      (overrides?.inboundEventInbox ?? createRecordingInbox().inbox) as never
     )
 
   describe('WhatsApp Company ownership', () => {
@@ -93,7 +137,7 @@ describe('WebhookService', () => {
       ]
     })
 
-    const createWhatsAppService = () => {
+    const createWhatsAppService = (recording = createRecordingInbox()) => {
       const company = Object.assign(new Company(), {
         id: 'company-1',
         companyPhoneNumber: '5548999999999',
@@ -171,10 +215,12 @@ describe('WebhookService', () => {
         realtimeService: { emitToLead: jest.fn() },
         conversationContextBuilder: {
           build: jest.fn().mockResolvedValue({ lead, recentMessages: [] })
-        }
+        },
+        inboundEventInbox: recording.inbox
       })
 
       return {
+        recording,
         service,
         company,
         companyRepo,
@@ -453,6 +499,124 @@ describe('WebhookService', () => {
       expect(dependencies.messageRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ externalMessageId: 'wamid.inbound-1' })
       )
+    })
+
+    it('records the outcome of each WhatsApp message in the inbox', async () => {
+      const dependencies = createWhatsAppService()
+      dependencies.companyRepo.findOne.mockResolvedValue(null)
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({ status: 'ignored_missing_company' })
+      expect(dependencies.recording.outcomes).toEqual([
+        {
+          dedupeKey: 'wamid.inbound',
+          outcome: {
+            status: InboundEventStatus.IGNORED,
+            reason: 'ignored_missing_company'
+          }
+        }
+      ])
+    })
+
+    it('skips a WhatsApp message the inbox already handled', async () => {
+      const dependencies = createWhatsAppService(
+        createRecordingInbox({ duplicateKeys: ['wamid.inbound'] })
+      )
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({
+        status: 'ignored_duplicate_message',
+        inboundMessageId: 'wamid.inbound'
+      })
+      expect(dependencies.messageRepo.findOne).not.toHaveBeenCalled()
+      expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
+    })
+
+    // Regression P2: the error was swallowed with a 200 and left no trace.
+    it('records a WhatsApp processing failure in the inbox and still answers 200', async () => {
+      const dependencies = createWhatsAppService()
+      const failure = new Error('database unavailable')
+      dependencies.companyRepo.findOne.mockRejectedValue(failure)
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined)
+
+      await expect(
+        dependencies.service.handleIncomingMessage(createPayload())
+      ).resolves.toEqual({
+        status: 'error',
+        inboundMessageId: 'wamid.inbound',
+        from: '5548984296447'
+      })
+      expect(dependencies.recording.failures).toEqual([
+        { dedupeKey: 'wamid.inbound', error: failure }
+      ])
+    })
+
+    it('runs every status of a batch through the inbox on its own', async () => {
+      const recording = createRecordingInbox({
+        duplicateKeys: ['wamid.out-2:read']
+      })
+      const message = Object.assign(new Message(), {
+        id: 'message-1',
+        leadId: 'lead-1',
+        channel: MessageChannel.WHATSAPP,
+        externalMessageId: 'wamid.out-1',
+        status: MessageStatus.SENT
+      })
+      const service = createService({
+        messageRepo: {
+          findOne: jest
+            .fn()
+            .mockResolvedValueOnce(message)
+            .mockResolvedValue(null),
+          save: jest.fn((saved: Message) => Promise.resolve(saved))
+        },
+        leadsService: {
+          toResponseMessageDto: jest.fn((saved: Message) =>
+            Promise.resolve(saved)
+          )
+        },
+        realtimeService: { emitToLead: jest.fn() },
+        inboundEventInbox: recording.inbox
+      })
+
+      await expect(
+        service.handleIncomingMessage({
+          entry: [
+            {
+              changes: [
+                {
+                  value: {
+                    statuses: [
+                      { id: 'wamid.out-1', status: 'delivered' },
+                      { id: 'wamid.out-2', status: 'read' },
+                      { id: 'wamid.out-3', status: 'read' }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        })
+      ).resolves.toEqual({
+        status: 'processed_status_updates',
+        processedCount: 1
+      })
+      expect(recording.inbox.run).toHaveBeenCalledTimes(3)
+      expect(recording.outcomes).toEqual([
+        {
+          dedupeKey: 'wamid.out-1:delivered',
+          outcome: { status: InboundEventStatus.PROCESSED }
+        },
+        {
+          dedupeKey: 'wamid.out-3:read',
+          outcome: {
+            status: InboundEventStatus.IGNORED,
+            reason: 'status_not_applied'
+          }
+        }
+      ])
     })
 
     it('uses the Company token for flow replies on an existing conversation', async () => {
@@ -1532,15 +1696,18 @@ describe('WebhookService', () => {
       }
       const messengerMessagingService = { sendMessengerMessage: jest.fn() }
       const rabbitPublisherService = { publish: jest.fn() }
+      const recording = createRecordingInbox()
       const service = createService({
         companyRepo,
         userInformationsRepo,
         messageRepo,
         leadChannelIdentityService,
         messengerMessagingService,
-        rabbitPublisherService
+        rabbitPublisherService,
+        inboundEventInbox: recording.inbox
       })
       return {
+        recording,
         service,
         company,
         companyRepo,
@@ -1562,6 +1729,50 @@ describe('WebhookService', () => {
       expect(
         dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
       ).not.toHaveBeenCalled()
+    })
+
+    it('records why a Messenger event was ignored', async () => {
+      const dependencies = setup()
+      dependencies.companyRepo.findOne.mockResolvedValue(null)
+
+      await dependencies.service.handleMessengerWebhook(payload)
+
+      expect(dependencies.recording.outcomes).toEqual([
+        {
+          dedupeKey: 'mid-1',
+          outcome: {
+            status: InboundEventStatus.IGNORED,
+            reason: 'missing_company'
+          }
+        }
+      ])
+    })
+
+    it('records a Messenger failure in the inbox and rethrows so Meta redelivers', async () => {
+      const dependencies = setup()
+      const failure = new Error('database unavailable')
+      dependencies.companyRepo.findOne.mockRejectedValue(failure)
+
+      await expect(
+        dependencies.service.handleMessengerWebhook(payload)
+      ).rejects.toBe(failure)
+      expect(dependencies.recording.failures).toEqual([
+        { dedupeKey: 'mid-1', error: failure }
+      ])
+    })
+
+    it('skips a Messenger event the inbox already handled', async () => {
+      const recording = createRecordingInbox({ duplicateKeys: ['mid-1'] })
+      const companyRepo = { findOne: jest.fn() }
+      const service = createService({
+        companyRepo,
+        inboundEventInbox: recording.inbox
+      })
+
+      await expect(service.handleMessengerWebhook(payload)).resolves.toEqual({
+        status: 'received'
+      })
+      expect(companyRepo.findOne).not.toHaveBeenCalled()
     })
 
     it('rejects a lead identity from another Company before persisting or replying', async () => {
@@ -2098,15 +2309,18 @@ describe('WebhookService', () => {
         getInstagramUserProfile: jest.fn().mockResolvedValue(null)
       }
       const rabbitPublisherService = { publish: jest.fn() }
+      const recording = createRecordingInbox()
       const service = createService({
         companyRepo,
         userInformationsRepo,
         messageRepo,
         leadChannelIdentityService,
         instagramMessagingService: messenger,
-        rabbitPublisherService
+        rabbitPublisherService,
+        inboundEventInbox: recording.inbox
       })
       return {
+        recording,
         service,
         company,
         companyRepo,
@@ -2138,6 +2352,15 @@ describe('WebhookService', () => {
         dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
       ).not.toHaveBeenCalled()
       expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
+      expect(dependencies.recording.outcomes).toEqual([
+        {
+          dedupeKey: 'instagram-message-1',
+          outcome: {
+            status: InboundEventStatus.IGNORED,
+            reason: 'missing_token'
+          }
+        }
+      ])
     })
 
     it('rejects an identity already linked to another Company', async () => {
