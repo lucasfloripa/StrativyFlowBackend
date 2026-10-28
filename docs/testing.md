@@ -12,6 +12,12 @@ forem tocados; não é preciso reescrevê-los de uma vez.
 | Integração | `*.int-spec.ts` | Ao lado do código, em `src/` | `npm run test:int` | Repositories e queries com Postgres real; consumers com RabbitMQ real. |
 | E2E (HTTP) | `*.e2e-spec.ts` | `test/e2e/` | `npm run test:e2e` | Request real via supertest, passando por guards, pipes, filtros de erro e isolamento de tenant. |
 
+Testes de integração usam o Postgres de `TEST_DATABASE_URL` (ex.:
+`postgres://postgres@localhost:5432/strativy_it`) e são pulados quando ela não existe. Cada
+arquivo cria um schema próprio com `createIntegrationDatabase` (`src/testing`), roda as
+migrations de que precisa e apaga o schema no fim; use `describeWithDatabase` no lugar de
+`describe`.
+
 O CI (`.github/workflows/ci.yml`) roda `lint:check`, os testes unitários e o build em todo
 push para `main` e `big-refactor-backend` e em todo pull request. Integração e E2E entram no
 CI quando os primeiros testes desses níveis existirem.

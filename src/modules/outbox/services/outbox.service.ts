@@ -4,6 +4,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { InjectRepository } from '@nestjs/typeorm'
 import { EntityManager, Repository } from 'typeorm'
 
+import { currentTransaction } from '../../../database/transaction-context'
 import {
   OutboxMessage,
   OutboxMessageStatus
@@ -78,14 +79,26 @@ export class OutboxService {
   }
 
   /**
-   * Enqueue outside a transaction and dispatch right away. Throws only if the
-   * outbox row cannot be written.
+   * Writes the message to the outbox and publishes it as soon as possible.
+   * Inside `runInTransaction` the row joins the transaction (COMMIT waits for
+   * it even if the caller does not `await`) and is dispatched after COMMIT;
+   * otherwise it is dispatched right away. Throws only if the row cannot be
+   * written.
    */
   async publish(
     routingKey: string,
     payload: Record<string, unknown>
   ): Promise<void> {
-    const ids = await this.enqueue([{ routingKey, payload }])
-    await this.dispatch(ids)
+    const transaction = currentTransaction()
+    const enqueued = this.enqueue([{ routingKey, payload }])
+
+    if (!transaction) {
+      await this.dispatch(await enqueued)
+      return
+    }
+
+    transaction.track(enqueued)
+    const ids = await enqueued
+    transaction.afterCommit(() => this.dispatch(ids))
   }
 }

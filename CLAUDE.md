@@ -143,11 +143,33 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   `RABBIT_SHUTDOWN_TIMEOUT_MS`, default 8 s) in `onModuleDestroy`; the connection closes later, in
   `onApplicationShutdown`. Don't close shared connections in `onModuleDestroy`.
 
+### Transactions and the outbox
+
+- `runInTransaction(dataSource, work)` (`src/database/transaction-context.ts`) opens an ambient
+  transaction: inside it every injected TypeORM repository runs on the transaction's connection,
+  and a nested `dataSource.transaction(...)` joins it as a SAVEPOINT. Use it instead of passing
+  `EntityManager`s through existing services.
+- Events for RabbitMQ go through `OutboxService.publish` (`modules/outbox`), not
+  `RabbitPublisherService`, when they follow a database write: the row joins the ambient
+  transaction and is published after COMMIT; the worker's `OutboxRelayScheduler` retries.
+
+### Inbound webhook pipeline
+
+- POST → normalizers (`modules/webhook/inbound`) → `InboundEvent[]`, recorded in
+  `inbound_events` (idempotent on `(channel, dedupeKey)`).
+- `WEBHOOK_ASYNC_PROCESSING=true`: `WebhookIngestionService` only stores the events and answers
+  200; `InboundEventWorker` (worker) processes each one in a transaction holding
+  `pg_advisory_xact_lock` on its `conversationKey`. Otherwise the request processes them.
+- `WebhookProcessingModule` holds the processing (no HTTP) for both processes; `WebhookModule`
+  adds the controller. Lead writes in the webhook flow go through `LeadWriter` (only changed
+  columns).
+
 ### Realtime
 
-- Emit to the web app through `RealtimeService.emitToLead | emitToUser | emitBroadcast`;
-  don't inject the gateway directly. The gateway authenticates sockets with the JWT and checks
-  company access before joining lead rooms.
+- Inject `REALTIME_EMITTER` (`RealtimeEmitter`) to emit to the web app; don't inject the gateway.
+  The API binds it to the Socket.IO gateway (`RealtimeModule`, global); the worker binds it to
+  the RabbitMQ bridge (`RealtimeOutboxModule`, `realtime.emit` → every API instance). The gateway
+  authenticates sockets with the JWT and checks company access before joining lead rooms.
 
 ### External services
 

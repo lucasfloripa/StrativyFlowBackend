@@ -21,6 +21,9 @@ import {
 import { LeadFlowActionExecutor } from './flow/lead-flow-action.executor'
 import { LeadFlowEngine } from './flow/lead-flow.engine'
 import { InboundEventStatus } from './inbound/inbound-event.entity'
+import { normalizeInstagramWebhook } from './inbound/instagram-inbound.normalizer'
+import { normalizeMessengerWebhook } from './inbound/messenger-inbound.normalizer'
+import { normalizeWhatsAppWebhook } from './inbound/whatsapp-inbound.normalizer'
 import { WebhookService } from './webhook.service'
 
 import type { InboxOutcome } from './inbound/inbound-event-inbox.service'
@@ -158,6 +161,7 @@ describe('WebhookService', () => {
       }
       const userInformationsRepo = { findOne: jest.fn(), save: jest.fn() }
       const leadRepo = {
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
         findOne: jest.fn().mockResolvedValue(null),
         findOneOrFail: jest.fn().mockResolvedValue(lead),
         save: jest.fn((leadToSave: Lead) => Promise.resolve(leadToSave))
@@ -898,6 +902,7 @@ describe('WebhookService', () => {
     ]
     const service = createService({
       leadRepo: {
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
         findOneOrFail: jest.fn().mockResolvedValue(lead),
         save: jest.fn()
       },
@@ -990,6 +995,10 @@ describe('WebhookService', () => {
       lastInboundMessageId: 'wamid.previous'
     } as Lead
     const leadRepo = {
+      update: jest.fn((_criteria: unknown, changes: Partial<Lead>) => {
+        persistedLead = { ...persistedLead, ...changes } as Lead
+        return Promise.resolve({ affected: 1 })
+      }),
       findOneOrFail: jest.fn(() => Promise.resolve({ ...persistedLead })),
       save: jest.fn((lead: Lead) => {
         persistedLead = { ...lead }
@@ -1087,11 +1096,14 @@ describe('WebhookService', () => {
     })
 
     expect(followUpReplyLinkerService.linkReply).toHaveBeenCalledTimes(1)
-    expect(leadRepo.save).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        leadQualification: LeadQualification.QUALIFY
-      })
-    )
+    expect(persistedLead).toMatchObject({
+      leadQualification: LeadQualification.QUALIFY,
+      lastInboundMessageId: 'wamid.reply-1'
+    })
+    expect(leadRepo.save).not.toHaveBeenCalled()
+    for (const [, changes] of leadRepo.update.mock.calls) {
+      expect(changes).not.toHaveProperty('leadQualification')
+    }
   })
 
   it('applies and removes a WhatsApp reaction on the target message', async () => {
@@ -1269,6 +1281,7 @@ describe('WebhookService', () => {
     const service = createService({
       messageRepo,
       leadRepo: {
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
         findOne: jest
           .fn()
           .mockResolvedValue({ id: 'lead-1', companyId: 'company-1' })
@@ -1386,6 +1399,7 @@ describe('WebhookService', () => {
       })
     }
     const leadRepo = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
       findOneOrFail: jest.fn(() => Promise.resolve(lead as Lead)),
       save: jest.fn((leadToSave: Lead) => Promise.resolve(leadToSave))
     }
@@ -1842,6 +1856,7 @@ describe('WebhookService', () => {
         },
         messageRepo,
         leadRepo: {
+          update: jest.fn().mockResolvedValue({ affected: 1 }),
           findOneOrFail: jest.fn().mockResolvedValue(lead),
           save: jest.fn((savedLead: Lead) => Promise.resolve(savedLead))
         },
@@ -1968,6 +1983,7 @@ describe('WebhookService', () => {
       })
     }
     const leadRepo = {
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
       findOneOrFail: jest.fn(() => Promise.resolve(lead as Lead)),
       save: jest.fn((leadToSave: Lead) => Promise.resolve(leadToSave))
     }
@@ -2406,6 +2422,133 @@ describe('WebhookService', () => {
       })
       expect(dependencies.companyRepo.findOne).not.toHaveBeenCalled()
       expect(dependencies.messageRepo.findOne).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('processInboundEvent', () => {
+    it('applies a stored WhatsApp status and reports when it changed nothing', async () => {
+      const service = createService({
+        messageRepo: { findOne: jest.fn().mockResolvedValue(null) }
+      })
+      const [statusEvent] = normalizeWhatsAppWebhook({
+        entry: [
+          {
+            changes: [
+              { value: { statuses: [{ id: 'wamid.out', status: 'read' }] } }
+            ]
+          }
+        ]
+      }).events
+
+      await expect(service.processInboundEvent(statusEvent)).resolves.toEqual({
+        status: InboundEventStatus.IGNORED,
+        reason: 'status_not_applied'
+      })
+    })
+
+    it('reports why a stored WhatsApp message was ignored', async () => {
+      const service = createService({
+        messageRepo: { findOne: jest.fn().mockResolvedValue(null) },
+        companyRepo: { findOne: jest.fn().mockResolvedValue(null) }
+      })
+      const [messageEvent] = normalizeWhatsAppWebhook({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  metadata: { phone_number_id: 'phone-number-1' },
+                  messages: [
+                    {
+                      id: 'wamid.1',
+                      from: '5548984296447',
+                      type: 'text',
+                      text: { body: 'Oi' }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }).events
+
+      await expect(service.processInboundEvent(messageEvent)).resolves.toEqual({
+        status: InboundEventStatus.IGNORED,
+        reason: 'ignored_missing_company'
+      })
+    })
+
+    it('lets a WhatsApp processing error propagate so the worker retries it', async () => {
+      const failure = new Error('database unavailable')
+      const service = createService({
+        messageRepo: { findOne: jest.fn().mockRejectedValue(failure) }
+      })
+      const [messageEvent] = normalizeWhatsAppWebhook({
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  messages: [
+                    { id: 'wamid.1', from: '5548984296447', type: 'text' }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }).events
+
+      await expect(service.processInboundEvent(messageEvent)).rejects.toBe(
+        failure
+      )
+    })
+
+    it('routes Messenger and Instagram events to their channel flow', async () => {
+      const service = createService({
+        companyRepo: { findOne: jest.fn().mockResolvedValue(null) },
+        messageRepo: { findOne: jest.fn().mockResolvedValue(null) }
+      })
+      const [messengerEvent] = normalizeMessengerWebhook({
+        entry: [
+          {
+            id: 'page-1',
+            messaging: [
+              {
+                sender: { id: 'psid-1' },
+                message: { mid: 'm_1', text: 'Oi' }
+              }
+            ]
+          }
+        ]
+      }).events
+      const [instagramEvent] = normalizeInstagramWebhook({
+        entry: [
+          {
+            id: 'ig-1',
+            messaging: [
+              {
+                sender: { id: 'user-1' },
+                message: { mid: 'ig_1', text: 'Oi' }
+              }
+            ]
+          }
+        ]
+      }).events
+
+      await expect(
+        service.processInboundEvent(messengerEvent)
+      ).resolves.toEqual({
+        status: InboundEventStatus.IGNORED,
+        reason: 'missing_company'
+      })
+      await expect(
+        service.processInboundEvent(instagramEvent)
+      ).resolves.toEqual({
+        status: InboundEventStatus.IGNORED,
+        reason: 'missing_company'
+      })
     })
   })
 })

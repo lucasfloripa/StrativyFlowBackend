@@ -18,12 +18,14 @@ import { OutboxModule } from './modules/outbox/outbox.module'
 import { RabbitModule } from './modules/rabbit/rabbit.module'
 import { RealtimeOutboxModule } from './modules/realtime/realtime-outbox.module'
 import { UserInformations } from './modules/user/entities/user-informations.entity'
+import { WebhookProcessingModule } from './modules/webhook/webhook-processing.module'
 import { FollowUpExecutionScheduler } from './worker/notifications/followup-execution-scheduler.service'
 import { FollowUpReminderScheduler } from './worker/notifications/followup-reminder-scheduler.service'
 import { NotificationWorker } from './worker/notifications/notification-worker.service'
 import { OutboxRelayScheduler } from './worker/outbox/outbox-relay-scheduler.service'
 import { PaymentScheduler } from './worker/payments/payment-scheduler.service'
 import { PaymentWorker } from './worker/payments/payment-worker.service'
+import { InboundEventWorker } from './worker/webhook/inbound-event-worker.service'
 
 @Module({
   imports: [
@@ -43,7 +45,8 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
     OutboxModule,
     RabbitModule,
     RealtimeOutboxModule,
-    ScheduleModule.forRoot()
+    ScheduleModule.forRoot(),
+    WebhookProcessingModule
   ],
   providers: [
     PaymentScheduler,
@@ -53,7 +56,8 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
     FollowUpExecutionScheduler,
     FollowUpReminderScheduler,
     NotificationWorker,
-    OutboxRelayScheduler
+    OutboxRelayScheduler,
+    InboundEventWorker
   ]
 })
 export class WorkerModule {}

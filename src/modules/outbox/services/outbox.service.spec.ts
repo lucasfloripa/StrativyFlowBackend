@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common'
 
+import { runInTransaction } from '../../../database/transaction-context'
 import {
   OutboxMessage,
   OutboxMessageStatus
@@ -7,7 +8,7 @@ import {
 
 import { OutboxService } from './outbox.service'
 
-import type { EntityManager, Repository } from 'typeorm'
+import type { DataSource, EntityManager, Repository } from 'typeorm'
 
 const UUID = /^[0-9a-f-]{36}$/
 
@@ -113,6 +114,60 @@ describe('OutboxService', () => {
       expect(outboxRepo.insert.mock.invocationCallOrder[0]).toBeLessThan(
         outboxRelayService.relayPending.mock.invocationCallOrder[0]
       )
+    })
+
+    it('inside a transaction, dispatches only after COMMIT', async () => {
+      const { service, outboxRepo, outboxRelayService } = createService()
+      const events: string[] = []
+      outboxRepo.insert.mockImplementation(() => {
+        events.push('insert')
+        return Promise.resolve({ identifiers: [] })
+      })
+      outboxRelayService.relayPending.mockImplementation(() => {
+        events.push('dispatch')
+        return Promise.resolve({ published: 1, failed: 0 })
+      })
+      const dataSource = {
+        transaction: async (work: (manager: object) => Promise<unknown>) => {
+          const result = await work({ connection: dataSource })
+          events.push('commit')
+          return result
+        }
+      }
+
+      await runInTransaction(dataSource as unknown as DataSource, () =>
+        service.publish('lead.created', { leadId: 'lead-1' })
+      )
+
+      expect(events).toEqual(['insert', 'commit', 'dispatch'])
+    })
+
+    it('inside a transaction, a publish nobody awaits still lands before COMMIT', async () => {
+      const { service, outboxRepo } = createService()
+      const events: string[] = []
+      outboxRepo.insert.mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setImmediate(() => {
+              events.push('insert')
+              resolve({ identifiers: [] })
+            })
+          )
+      )
+      const dataSource = {
+        transaction: async (work: (manager: object) => Promise<unknown>) => {
+          const result = await work({ connection: dataSource })
+          events.push('commit')
+          return result
+        }
+      }
+
+      await runInTransaction(dataSource as unknown as DataSource, () => {
+        void service.publish('realtime.emit', { target: 'broadcast' })
+        return Promise.resolve()
+      })
+
+      expect(events).toEqual(['insert', 'commit'])
     })
 
     it('fails when the outbox row cannot be written', async () => {

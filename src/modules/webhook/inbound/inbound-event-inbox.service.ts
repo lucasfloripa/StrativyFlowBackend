@@ -1,7 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { InjectRepository } from '@nestjs/typeorm'
-import { Brackets, Repository } from 'typeorm'
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm'
+import { Brackets, DataSource, Repository } from 'typeorm'
 
+import { runInTransaction } from '../../../database/transaction-context'
+import { OutboxService } from '../../outbox/services/outbox.service'
+
+import {
+  WEBHOOK_INBOUND_ROUTING_KEY,
+  type WebhookInboundJob
+} from './inbound-event.constants'
 import { InboundEventRecord, InboundEventStatus } from './inbound-event.entity'
 
 import type { InboundEvent } from './inbound-event.types'
@@ -26,6 +33,19 @@ type Claim =
 
 type ReturningRow = { id: string }
 
+export type AcceptResult = { accepted: number; duplicates: number }
+
+export type StoredEventResult =
+  | InboundEventStatus.PROCESSED
+  | InboundEventStatus.IGNORED
+  | 'already_handled'
+  | 'missing'
+
+const FINAL_STATUSES = [
+  InboundEventStatus.PROCESSED,
+  InboundEventStatus.IGNORED
+]
+
 /**
  * Transactional inbox for Meta webhook events. Every event is recorded in
  * `inbound_events` before it is processed, and claimed atomically, so a
@@ -38,8 +58,122 @@ export class InboundEventInboxService {
 
   constructor(
     @InjectRepository(InboundEventRecord)
-    private readonly inboundEventRepo: Repository<InboundEventRecord>
+    private readonly inboundEventRepo: Repository<InboundEventRecord>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly outboxService: OutboxService
   ) {}
+
+  /**
+   * Fast-ack path: stores each new event as `pending` and, in the same
+   * transaction, asks the worker to process it (`webhook.inbound` through the
+   * outbox). A repeated delivery is counted as a duplicate. Throws if the
+   * events cannot be stored, so Meta redelivers.
+   */
+  async accept(events: InboundEvent[]): Promise<AcceptResult> {
+    if (events.length === 0) {
+      return { accepted: 0, duplicates: 0 }
+    }
+
+    return runInTransaction(this.dataSource, async () => {
+      const result: AcceptResult = { accepted: 0, duplicates: 0 }
+
+      for (const event of events) {
+        const inserted = await this.inboundEventRepo
+          .createQueryBuilder()
+          .insert()
+          .into(InboundEventRecord)
+          .values({
+            ...this.toRow(event),
+            status: InboundEventStatus.PENDING,
+            attempts: 0
+          })
+          .orIgnore()
+          .returning(['id'])
+          .execute()
+
+        const inboundEventId = firstReturnedId(inserted.raw)
+        if (!inboundEventId) {
+          result.duplicates += 1
+          continue
+        }
+
+        const job: WebhookInboundJob = { inboundEventId }
+        await this.outboxService.publish(WEBHOOK_INBOUND_ROUTING_KEY, job)
+        result.accepted += 1
+      }
+
+      return result
+    })
+  }
+
+  /**
+   * Worker path: processes a stored event in one transaction that holds the
+   * conversation's advisory lock (events of one conversation run one at a
+   * time) and a row lock on the event, and records the outcome in that same
+   * transaction. A handler error rolls everything back, marks the event
+   * `failed` and is rethrown so RabbitMQ retries it.
+   */
+  async processStored(
+    inboundEventId: string,
+    handler: (event: InboundEvent) => Promise<InboxOutcome>
+  ): Promise<StoredEventResult> {
+    const stored = await this.inboundEventRepo.findOne({
+      where: { id: inboundEventId }
+    })
+
+    if (!stored) {
+      this.logger.warn(
+        `Inbound event not found, nothing to process. inboundEventId=${inboundEventId}`
+      )
+      return 'missing'
+    }
+
+    if (FINAL_STATUSES.includes(stored.status)) {
+      return 'already_handled'
+    }
+
+    try {
+      return await runInTransaction(this.dataSource, async (manager) => {
+        if (stored.conversationKey) {
+          await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+            stored.conversationKey
+          ])
+        }
+
+        const locked = await manager.getRepository(InboundEventRecord).findOne({
+          where: { id: inboundEventId },
+          lock: { mode: 'pessimistic_write' }
+        })
+
+        if (!locked || FINAL_STATUSES.includes(locked.status)) {
+          return 'already_handled'
+        }
+
+        const outcome = await handler(toInboundEvent(locked))
+        const now = new Date()
+
+        await manager.update(
+          InboundEventRecord,
+          { id: inboundEventId },
+          {
+            status: outcome.status,
+            lastError:
+              outcome.status === InboundEventStatus.IGNORED
+                ? outcome.reason
+                : null,
+            attempts: locked.attempts + 1,
+            lastAttemptAt: now,
+            processedAt: now
+          }
+        )
+
+        return outcome.status
+      })
+    } catch (error) {
+      await this.markFailed(inboundEventId, error)
+      throw error
+    }
+  }
 
   /**
    * Claims `event`, runs `handler` and records the outcome. When another
@@ -93,14 +227,7 @@ export class InboundEventInboxService {
         .insert()
         .into(InboundEventRecord)
         .values({
-          channel: event.channel,
-          kind: event.kind,
-          dedupeKey: event.dedupeKey,
-          externalAccountId: event.externalAccountId,
-          externalUserId: event.externalUserId,
-          conversationKey: event.conversationKey,
-          occurredAt: event.occurredAt,
-          payload: event.payload,
+          ...this.toRow(event),
           status: InboundEventStatus.PROCESSING,
           attempts: 1,
           lastAttemptAt: () => 'now()'
@@ -164,6 +291,38 @@ export class InboundEventInboxService {
     }
   }
 
+  private toRow(event: InboundEvent) {
+    return {
+      channel: event.channel,
+      kind: event.kind,
+      dedupeKey: event.dedupeKey,
+      externalAccountId: event.externalAccountId,
+      externalUserId: event.externalUserId,
+      conversationKey: event.conversationKey,
+      occurredAt: event.occurredAt,
+      payload: event.payload
+    }
+  }
+
+  private async markFailed(id: string, error: unknown): Promise<void> {
+    try {
+      await this.inboundEventRepo.update(
+        { id },
+        {
+          status: InboundEventStatus.FAILED,
+          lastError: describeError(error),
+          attempts: () => '"attempts" + 1',
+          lastAttemptAt: new Date(),
+          processedAt: null
+        }
+      )
+    } catch (updateError) {
+      this.logger.error(
+        `Could not mark inbound event failed. inboundEventId=${id} error=${describeError(updateError)}`
+      )
+    }
+  }
+
   private async finish(
     id: string | null,
     update: { status: InboundEventStatus; lastError: string | null }
@@ -188,6 +347,20 @@ export class InboundEventInboxService {
       )
     }
   }
+}
+
+/** Rebuilds the normalized event the webhook handlers expect. */
+export function toInboundEvent(record: InboundEventRecord): InboundEvent {
+  return {
+    channel: record.channel,
+    kind: record.kind,
+    dedupeKey: record.dedupeKey,
+    externalAccountId: record.externalAccountId,
+    externalUserId: record.externalUserId,
+    conversationKey: record.conversationKey,
+    occurredAt: record.occurredAt,
+    payload: record.payload
+  } as InboundEvent
 }
 
 function firstReturnedId(raw: unknown): string | null {

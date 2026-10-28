@@ -10,8 +10,8 @@ import {
   META_APP_SECRETS,
   MetaWebhookSignatureGuard
 } from './security/meta-webhook-signature.guard'
+import { WebhookIngestionService } from './webhook-ingestion.service'
 import { WebhookController } from './webhook.controller'
-import { WebhookService } from './webhook.service'
 
 import type { App } from 'supertest/types'
 
@@ -32,7 +32,7 @@ describe('WebhookController', () => {
       imports: [RateLimitModule],
       controllers: [WebhookController],
       providers: [
-        { provide: WebhookService, useValue: {} },
+        { provide: WebhookIngestionService, useValue: {} },
         { provide: META_APP_SECRETS, useValue: ['test-app-secret'] }
       ]
     }).compile()
@@ -121,7 +121,7 @@ describe('WebhookController', () => {
         imports: [RateLimitModule],
         controllers: [WebhookController],
         providers: [
-          { provide: WebhookService, useValue: {} },
+          { provide: WebhookIngestionService, useValue: {} },
           { provide: META_APP_SECRETS, useValue: ['test-app-secret'] }
         ]
       }).compile()

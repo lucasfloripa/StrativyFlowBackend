@@ -47,6 +47,7 @@ import {
 } from './inbound/inbound-event-inbox.service'
 import { InboundEventStatus } from './inbound/inbound-event.entity'
 import {
+  type InboundEvent,
   InboundSkipReason,
   type InstagramInboundEvent,
   type MessengerInboundEvent,
@@ -62,6 +63,7 @@ import {
   normalizeWhatsAppWebhook
 } from './inbound/whatsapp-inbound.normalizer'
 import { InstagramMessagingService } from './instagram-messaging.service'
+import { LeadWriter } from './lead-writer'
 import { canTransitionMessageStatus } from './message-status.policy'
 import { MessengerMessagingService } from './messenger-messaging.service'
 import { isAllowedMetaMediaUrl } from './security/meta-media-url'
@@ -119,6 +121,13 @@ const toSocialInboxOutcome = (result: SocialEventResult): InboxOutcome =>
     ? { status: InboundEventStatus.IGNORED, reason: result.reason }
     : { status: InboundEventStatus.PROCESSED, note: result.detail }
 
+const toStatusInboxOutcome = (result: {
+  processedCount: number
+}): InboxOutcome =>
+  result.processedCount > 0
+    ? { status: InboundEventStatus.PROCESSED }
+    : { status: InboundEventStatus.IGNORED, reason: 'status_not_applied' }
+
 /** Every early exit of the WhatsApp flow reports a status starting with `ignored_`. */
 const toWhatsAppInboxOutcome = (
   result: WhatsAppWebhookResult
@@ -153,7 +162,11 @@ export class WebhookService {
     @InjectRepository(Company)
     private readonly companyRepo: Repository<Company>,
     private readonly inboundEventInbox: InboundEventInboxService
-  ) {}
+  ) {
+    this.leadWriter = new LeadWriter(leadRepo)
+  }
+
+  private readonly leadWriter: LeadWriter
 
   private readonly logger = new Logger(WebhookService.name)
 
@@ -217,6 +230,27 @@ export class WebhookService {
     return { status: 'processed_batch', results }
   }
 
+  /**
+   * Worker entry point (`WEBHOOK_ASYNC_PROCESSING`): processes one stored
+   * event and reports how it ended. Errors propagate, so the event is retried.
+   */
+  async processInboundEvent(event: InboundEvent): Promise<InboxOutcome> {
+    switch (event.channel) {
+      case LeadChannel.WHATSAPP:
+        return isWhatsAppStatusEvent(event)
+          ? toStatusInboxOutcome(
+              await this.handleMessageStatuses([event.payload.status])
+            )
+          : toWhatsAppInboxOutcome(
+              await this.processWhatsAppMessageEvent(event)
+            )
+      case LeadChannel.MESSENGER:
+        return toSocialInboxOutcome(await this.processMessengerEvent(event))
+      case LeadChannel.INSTAGRAM:
+        return toSocialInboxOutcome(await this.processInstagramEvent(event))
+    }
+  }
+
   private logSkippedInboundItems(skipped: SkippedInboundItem[]): void {
     const groups = new Map<string, SkippedInboundItem & { count: number }>()
 
@@ -248,13 +282,7 @@ export class WebhookService {
         const run = await this.inboundEventInbox.run(
           statusEvent,
           () => this.handleMessageStatuses([statusEvent.payload.status]),
-          (result): InboxOutcome =>
-            result.processedCount > 0
-              ? { status: InboundEventStatus.PROCESSED }
-              : {
-                  status: InboundEventStatus.IGNORED,
-                  reason: 'status_not_applied'
-                }
+          toStatusInboxOutcome
         )
 
         if (run.claimed) {
@@ -489,7 +517,7 @@ export class WebhookService {
           lastActivityAt: new Date()
         }
       })
-    let lead = identityResolution.lead
+    let lead = this.leadWriter.track(identityResolution.lead)
 
     if (lead.companyId !== company.id) {
       this.logger.error(
@@ -553,7 +581,7 @@ export class WebhookService {
         await this.emitMessageCreated(persistedMessageResult.message)
       }
 
-      lead = await this.leadRepo.findOneOrFail({
+      lead = await this.leadWriter.findOneOrFail({
         where: {
           id: lead.id
         }
@@ -581,7 +609,7 @@ export class WebhookService {
       })
 
       this.logger.log('[10] Saving lead after first auto-reply dispatch')
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
 
       return { status: 'created_and_replied', leadId: lead.id }
     }
@@ -603,13 +631,13 @@ export class WebhookService {
         await this.emitMessageCreated(persistedMessageResult.message)
       }
 
-      lead = await this.leadRepo.findOneOrFail({
+      lead = await this.leadWriter.findOneOrFail({
         where: { id: lead.id }
       })
 
       lead.lastInboundMessageId = inboundMessageId ?? undefined
       lead.lastActivityAt = new Date()
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
 
       this.logger.log(
         `[11] Button message processed for lead ${lead.id}, skipping automation`
@@ -631,7 +659,7 @@ export class WebhookService {
       })
     }
 
-    lead = await this.leadRepo.findOneOrFail({
+    lead = await this.leadWriter.findOneOrFail({
       where: {
         id: lead.id
       }
@@ -648,7 +676,7 @@ export class WebhookService {
       await this.emitMessageCreated(persistedMessageResult.message)
     }
 
-    lead = await this.leadRepo.findOneOrFail({
+    lead = await this.leadWriter.findOneOrFail({
       where: { id: lead.id }
     })
 
@@ -683,7 +711,7 @@ export class WebhookService {
       this.logger.log(
         '[10] Saving lead after HUMAN runtime mode inbound update'
       )
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
 
       return { status: 'updated_human_mode_skipped', leadId: lead.id }
     }
@@ -771,7 +799,7 @@ export class WebhookService {
     lead.lastInboundMessageId = inboundMessageId ?? undefined
 
     this.logger.log('[10] Saving lead after FlowEngine execution')
-    await this.leadRepo.save(lead)
+    await this.leadWriter.save(lead)
 
     return { status: 'updated_and_replied', leadId: lead.id }
   }
@@ -1035,7 +1063,7 @@ export class WebhookService {
       await this.emitMessageCreated(persistedMessage)
     }
 
-    const refreshedLead = await this.leadRepo.findOneOrFail({
+    const refreshedLead = await this.leadWriter.findOneOrFail({
       where: { id: lead.id }
     })
 
@@ -1043,7 +1071,7 @@ export class WebhookService {
     refreshedLead.lastActivityAt = new Date()
 
     this.logger.log('[10] Saving lead after media message processing')
-    await this.leadRepo.save(refreshedLead)
+    await this.leadWriter.save(refreshedLead)
 
     return {
       status: isContactMessage
@@ -1252,7 +1280,7 @@ export class WebhookService {
   ): Promise<Lead | null> {
     const variants = buildBrazilianPhoneVariants(phone)
 
-    return this.leadRepo.findOne({
+    return this.leadWriter.findOne({
       where: variants.map((variant) => ({
         companyId,
         phone: variant,
@@ -1624,7 +1652,7 @@ export class WebhookService {
           lastActivityAt: interactionAt
         }
       })
-    let lead = identityResolution.lead
+    let lead = this.leadWriter.track(identityResolution.lead)
 
     if (lead.companyId !== company.id) {
       this.logger.error(
@@ -1665,7 +1693,7 @@ export class WebhookService {
 
     await this.emitMessageCreated(persistedMessageResult.message)
 
-    lead = await this.leadRepo.findOneOrFail({
+    lead = await this.leadWriter.findOneOrFail({
       where: { id: lead.id }
     })
 
@@ -1700,18 +1728,18 @@ export class WebhookService {
         channel: MessageChannel.MESSENGER,
         externalMessageId
       })
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
       return processedSocialEvent('first_contact_replied', lead.id)
     }
 
-    lead = await this.leadRepo.findOneOrFail({
+    lead = await this.leadWriter.findOneOrFail({
       where: { id: lead.id }
     })
 
     if (!messageText) {
       lead.lastInboundMessageId = inboundMessageId
       lead.lastActivityAt = interactionAt
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
       return processedSocialEvent('attachment_saved', lead.id)
     }
 
@@ -1727,7 +1755,7 @@ export class WebhookService {
     if (!shouldRunAutomation) {
       lead.lastInboundMessageId = inboundMessageId
       lead.lastActivityAt = interactionAt
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
       return processedSocialEvent('human_mode', lead.id)
     }
 
@@ -1797,7 +1825,7 @@ export class WebhookService {
 
     lead.lastInboundMessageId = inboundMessageId
     lead.lastActivityAt = interactionAt
-    await this.leadRepo.save(lead)
+    await this.leadWriter.save(lead)
 
     return processedSocialEvent('flow_executed', lead.id)
   }
@@ -2103,7 +2131,7 @@ export class WebhookService {
           lastActivityAt: interactionAt
         }
       })
-    let lead = identityResolution.lead
+    let lead = this.leadWriter.track(identityResolution.lead)
 
     if (lead.companyId !== company.id) {
       this.logger.error(
@@ -2144,7 +2172,7 @@ export class WebhookService {
 
     await this.emitMessageCreated(persistedMessageResult.message)
 
-    lead = await this.leadRepo.findOneOrFail({
+    lead = await this.leadWriter.findOneOrFail({
       where: { id: lead.id }
     })
 
@@ -2177,18 +2205,18 @@ export class WebhookService {
         channel: MessageChannel.INSTAGRAM,
         externalMessageId
       })
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
       return processedSocialEvent('first_contact_replied', lead.id)
     }
 
-    lead = await this.leadRepo.findOneOrFail({
+    lead = await this.leadWriter.findOneOrFail({
       where: { id: lead.id }
     })
 
     if (!messageText) {
       lead.lastInboundMessageId = inboundMessageId
       lead.lastActivityAt = interactionAt
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
       return processedSocialEvent('attachment_saved', lead.id)
     }
 
@@ -2204,7 +2232,7 @@ export class WebhookService {
     if (!shouldRunAutomation) {
       lead.lastInboundMessageId = inboundMessageId
       lead.lastActivityAt = interactionAt
-      await this.leadRepo.save(lead)
+      await this.leadWriter.save(lead)
       return processedSocialEvent('human_mode', lead.id)
     }
 
@@ -2272,7 +2300,7 @@ export class WebhookService {
 
     lead.lastInboundMessageId = inboundMessageId
     lead.lastActivityAt = interactionAt
-    await this.leadRepo.save(lead)
+    await this.leadWriter.save(lead)
 
     return processedSocialEvent('flow_executed', lead.id)
   }
@@ -2319,7 +2347,7 @@ export class WebhookService {
       externalUserId
     })
 
-    const targetLead = await this.leadRepo.findOne({
+    const targetLead = await this.leadWriter.findOne({
       where: { id: targetMessage.leadId }
     })
 

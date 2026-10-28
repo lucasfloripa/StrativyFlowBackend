@@ -10,7 +10,8 @@ import { InboundEventRecord, InboundEventStatus } from './inbound-event.entity'
 import { InboundEventKind } from './inbound-event.types'
 
 import type { InboundEvent } from './inbound-event.types'
-import type { Brackets, Repository } from 'typeorm'
+import type { OutboxService } from '../../outbox/services/outbox.service'
+import type { Brackets, DataSource, Repository } from 'typeorm'
 
 const FIXED_NOW = new Date('2026-10-28T12:00:00.000Z')
 
@@ -92,11 +93,54 @@ describe('InboundEventInboxService', () => {
       findOne: jest.fn().mockResolvedValue(existing ?? null),
       update: jest.fn().mockResolvedValue({ affected: 1 })
     }
+    const transactionRepo = {
+      findOne: jest.fn().mockResolvedValue(existing ?? null)
+    }
+    const manager: Record<string, unknown> & {
+      query: jest.Mock
+      getRepository: jest.Mock
+      update: jest.Mock
+    } = {
+      query: jest.fn().mockResolvedValue([]),
+      getRepository: jest.fn().mockReturnValue(transactionRepo),
+      update: jest.fn().mockResolvedValue({ affected: 1 })
+    }
+    const events: string[] = []
+    const dataSource = {
+      transaction: async (work: (m: typeof manager) => Promise<unknown>) => {
+        events.push('begin')
+        try {
+          const result = await work(manager)
+          events.push('commit')
+          return result
+        } catch (error) {
+          events.push('rollback')
+          throw error
+        }
+      }
+    }
+    manager.connection = dataSource as never
+    const outboxService = {
+      publish: jest.fn(() => {
+        events.push('outbox')
+        return Promise.resolve()
+      })
+    }
     const service = new InboundEventInboxService(
-      inboundEventRepo as unknown as Repository<InboundEventRecord>
+      inboundEventRepo as unknown as Repository<InboundEventRecord>,
+      dataSource as unknown as DataSource,
+      outboxService as unknown as OutboxService
     )
 
-    return { service, inboundEventRepo, builders }
+    return {
+      service,
+      inboundEventRepo,
+      builders,
+      manager,
+      transactionRepo,
+      outboxService,
+      events
+    }
   }
 
   describe('run', () => {
@@ -318,6 +362,203 @@ describe('InboundEventInboxService', () => {
         { lastError: string }
       ]
       expect(update.lastError).toHaveLength(2000)
+    })
+  })
+
+  describe('accept', () => {
+    it('stores new events as pending and queues one job per event in one transaction', async () => {
+      const { service, builders, outboxService, events } = createService([
+        { raw: [{ id: 'inbound-1' }] },
+        { raw: [] },
+        { raw: [{ id: 'inbound-3' }] }
+      ])
+
+      await expect(
+        service.accept([buildEvent(), buildEvent(), buildEvent()])
+      ).resolves.toEqual({ accepted: 2, duplicates: 1 })
+
+      expect(argsOf(builders[0], 'values')?.[0]).toMatchObject({
+        dedupeKey: 'wamid.1',
+        status: InboundEventStatus.PENDING,
+        attempts: 0
+      })
+      expect(builders[0].map((call) => call.method)).toContain('orIgnore')
+      expect(outboxService.publish).toHaveBeenCalledTimes(2)
+      expect(outboxService.publish).toHaveBeenCalledWith('webhook.inbound', {
+        inboundEventId: 'inbound-1'
+      })
+      expect(outboxService.publish).toHaveBeenCalledWith('webhook.inbound', {
+        inboundEventId: 'inbound-3'
+      })
+      expect(events).toEqual(['begin', 'outbox', 'outbox', 'commit'])
+    })
+
+    it('fails (so Meta redelivers) when the events cannot be stored', async () => {
+      const { service, events } = createService([
+        new Error('database unavailable')
+      ])
+
+      await expect(service.accept([buildEvent()])).rejects.toThrow(
+        'database unavailable'
+      )
+      expect(events).toEqual(['begin', 'rollback'])
+    })
+
+    it('does nothing for an empty batch', async () => {
+      const { service, events } = createService([])
+
+      await expect(service.accept([])).resolves.toEqual({
+        accepted: 0,
+        duplicates: 0
+      })
+      expect(events).toEqual([])
+    })
+  })
+
+  describe('processStored', () => {
+    const stored = (overrides: Partial<InboundEventRecord> = {}) =>
+      Object.assign(new InboundEventRecord(), {
+        id: 'inbound-1',
+        ...buildEvent(),
+        status: InboundEventStatus.PENDING,
+        attempts: 0,
+        ...overrides
+      })
+
+    it('locks the conversation and the row, runs the handler and records the outcome in the same transaction', async () => {
+      const record = stored()
+      const { service, manager, transactionRepo, events } = createService(
+        [],
+        record
+      )
+      const handler = jest.fn(() => {
+        events.push('handler')
+        return Promise.resolve({
+          status: InboundEventStatus.PROCESSED
+        } as const)
+      })
+
+      await expect(service.processStored('inbound-1', handler)).resolves.toBe(
+        InboundEventStatus.PROCESSED
+      )
+
+      expect(manager.query).toHaveBeenCalledWith(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        ['whatsapp:phone-number-1:5548984296447']
+      )
+      expect(transactionRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'inbound-1' },
+        lock: { mode: 'pessimistic_write' }
+      })
+      expect(handler).toHaveBeenCalledWith(buildEvent())
+      expect(manager.update).toHaveBeenCalledWith(
+        InboundEventRecord,
+        { id: 'inbound-1' },
+        {
+          status: InboundEventStatus.PROCESSED,
+          lastError: null,
+          attempts: 1,
+          lastAttemptAt: FIXED_NOW,
+          processedAt: FIXED_NOW
+        }
+      )
+      expect(events).toEqual(['begin', 'handler', 'commit'])
+    })
+
+    it('records why an event was ignored', async () => {
+      const { service, manager } = createService([], stored())
+
+      await service.processStored('inbound-1', () =>
+        Promise.resolve({
+          status: InboundEventStatus.IGNORED,
+          reason: 'missing_company'
+        })
+      )
+
+      expect(manager.update).toHaveBeenCalledWith(
+        InboundEventRecord,
+        { id: 'inbound-1' },
+        expect.objectContaining({
+          status: InboundEventStatus.IGNORED,
+          lastError: 'missing_company'
+        })
+      )
+    })
+
+    it('skips the conversation lock when the event has no conversation', async () => {
+      const { service, manager } = createService(
+        [],
+        stored({ conversationKey: null })
+      )
+
+      await service.processStored('inbound-1', () =>
+        Promise.resolve({ status: InboundEventStatus.PROCESSED })
+      )
+
+      expect(manager.query).not.toHaveBeenCalled()
+    })
+
+    it.each([InboundEventStatus.PROCESSED, InboundEventStatus.IGNORED])(
+      'does not run the handler again for an event already %s',
+      async (status) => {
+        const { service, events } = createService([], stored({ status }))
+        const handler = jest.fn()
+
+        await expect(service.processStored('inbound-1', handler)).resolves.toBe(
+          'already_handled'
+        )
+        expect(handler).not.toHaveBeenCalled()
+        expect(events).toEqual([])
+      }
+    )
+
+    it('does not run the handler when another worker finished it while this one waited for the lock', async () => {
+      const { service, transactionRepo } = createService([], stored())
+      transactionRepo.findOne.mockResolvedValue(
+        stored({ status: InboundEventStatus.PROCESSED })
+      )
+      const handler = jest.fn()
+
+      await expect(service.processStored('inbound-1', handler)).resolves.toBe(
+        'already_handled'
+      )
+      expect(handler).not.toHaveBeenCalled()
+    })
+
+    it('rolls back, marks the event failed and rethrows for a RabbitMQ retry', async () => {
+      const { service, inboundEventRepo, manager, events } = createService(
+        [],
+        stored({ status: InboundEventStatus.FAILED, attempts: 1 })
+      )
+      const failure = new Error('Graph API timeout')
+
+      await expect(
+        service.processStored('inbound-1', () => Promise.reject(failure))
+      ).rejects.toBe(failure)
+
+      expect(events).toEqual(['begin', 'rollback'])
+      expect(manager.update).not.toHaveBeenCalled()
+      const [criteria, update] = inboundEventRepo.update.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>
+      ]
+      expect(criteria).toEqual({ id: 'inbound-1' })
+      expect(update).toMatchObject({
+        status: InboundEventStatus.FAILED,
+        lastError: 'Graph API timeout',
+        lastAttemptAt: FIXED_NOW,
+        processedAt: null
+      })
+      expect((update.attempts as () => string)()).toBe('"attempts" + 1')
+    })
+
+    it('reports a missing event without failing', async () => {
+      const { service } = createService([], null)
+      jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined)
+
+      await expect(
+        service.processStored('inbound-404', jest.fn())
+      ).resolves.toBe('missing')
     })
   })
 })

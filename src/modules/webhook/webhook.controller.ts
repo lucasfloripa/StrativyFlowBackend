@@ -14,7 +14,7 @@ import { Throttle, ThrottlerGuard } from '@nestjs/throttler'
 import { WEBHOOK_HANDSHAKE_THROTTLE } from '../rate-limit/rate-limit.constants'
 
 import { MetaWebhookSignatureGuard } from './security/meta-webhook-signature.guard'
-import { WebhookService } from './webhook.service'
+import { WebhookIngestionService } from './webhook-ingestion.service'
 
 import type {
   InstagramDirectWebhookPayload,
@@ -27,27 +27,29 @@ import type { Response } from 'express'
 export class WebhookController {
   private readonly logger = new Logger(WebhookController.name)
 
-  constructor(private readonly webhookService: WebhookService) {}
+  constructor(
+    private readonly webhookIngestionService: WebhookIngestionService
+  ) {}
 
   @Post('whatsapp')
   @UseGuards(MetaWebhookSignatureGuard)
   @HttpCode(200)
   async handleWhatsAppWebhook(@Body() body: WhatsAppWebhookPayload) {
-    return await this.webhookService.handleIncomingMessage(body)
+    return await this.webhookIngestionService.ingestWhatsApp(body)
   }
 
   @Post('messenger')
   @UseGuards(MetaWebhookSignatureGuard)
   @HttpCode(200)
   handleMessengerWebhook(@Body() body: MessengerWebhookPayload) {
-    return this.webhookService.handleMessengerWebhook(body)
+    return this.webhookIngestionService.ingestMessenger(body)
   }
 
   @Post('direct')
   @UseGuards(MetaWebhookSignatureGuard)
   @HttpCode(200)
   async handleDirectWebhook(@Body() body: InstagramDirectWebhookPayload) {
-    return await this.webhookService.handleDirectWebhook(body)
+    return await this.webhookIngestionService.ingestInstagram(body)
   }
 
   @Get('whatsapp')
