@@ -74,7 +74,7 @@ describe('WebhookService', () => {
     conversationContextBuilder?: object
     leadFlowEngine?: object
     leadFlowActionExecutor?: object
-    rabbitPublisherService?: object
+    outboxService?: object
     storageService?: object
     leadsService?: object
     leadChannelIdentityService?: object
@@ -92,7 +92,7 @@ describe('WebhookService', () => {
       (overrides?.conversationContextBuilder ?? {}) as never,
       (overrides?.leadFlowEngine ?? {}) as never,
       (overrides?.leadFlowActionExecutor ?? {}) as never,
-      (overrides?.rabbitPublisherService ?? {}) as never,
+      (overrides?.outboxService ?? {}) as never,
       (overrides?.storageService ?? {}) as never,
       (overrides?.leadsService ?? {}) as never,
       (overrides?.leadChannelIdentityService ?? {}) as never,
@@ -187,7 +187,7 @@ describe('WebhookService', () => {
             })
         )
       }
-      const rabbitPublisherService = {
+      const outboxService = {
         publish: jest
           .fn<Promise<void>, [string, Record<string, unknown>]>()
           .mockResolvedValue(undefined)
@@ -203,7 +203,7 @@ describe('WebhookService', () => {
         leadRepo,
         messageRepo,
         leadChannelIdentityService,
-        rabbitPublisherService,
+        outboxService,
         storageService,
         leadFlowEngine: new LeadFlowEngine(),
         leadFlowActionExecutor: new LeadFlowActionExecutor(),
@@ -229,7 +229,7 @@ describe('WebhookService', () => {
         leadRepo,
         messageRepo,
         leadChannelIdentityService,
-        rabbitPublisherService,
+        outboxService,
         storageService
       }
     }
@@ -263,16 +263,15 @@ describe('WebhookService', () => {
           }
         }
       )
-      expect(dependencies.rabbitPublisherService.publish).toHaveBeenCalledWith(
+      expect(dependencies.outboxService.publish).toHaveBeenCalledWith(
         'lead.created',
         expect.objectContaining({ companyId: 'company-1' })
       )
-      expect(dependencies.rabbitPublisherService.publish).toHaveBeenCalledWith(
+      expect(dependencies.outboxService.publish).toHaveBeenCalledWith(
         'message.received',
         expect.objectContaining({ companyId: 'company-1' })
       )
-      for (const [, event] of dependencies.rabbitPublisherService.publish.mock
-        .calls) {
+      for (const [, event] of dependencies.outboxService.publish.mock.calls) {
         expect(event).not.toHaveProperty('userInformationsId')
         expect(event).not.toHaveProperty('userId')
       }
@@ -918,7 +917,7 @@ describe('WebhookService', () => {
           leadCreated: false
         })
       },
-      rabbitPublisherService: { publish: jest.fn() },
+      outboxService: { publish: jest.fn() },
       storageService: { uploadFile: jest.fn() },
       leadsService: {
         toResponseMessageDto: jest.fn((message: Message) =>
@@ -1032,7 +1031,7 @@ describe('WebhookService', () => {
           Promise.resolve({ lead, recentMessages: [] })
         )
       },
-      rabbitPublisherService: { publish: jest.fn() },
+      outboxService: { publish: jest.fn() },
       leadsService: {
         toResponseMessageDto: jest.fn((message: Message) =>
           Promise.resolve(message)
@@ -1439,7 +1438,7 @@ describe('WebhookService', () => {
         .mockResolvedValueOnce({ data: { message_id: 'messenger-auto-2' } })
         .mockResolvedValueOnce({ data: { message_id: 'messenger-auto-3' } })
     }
-    const rabbitPublisherService = {
+    const outboxService = {
       publish: jest
         .fn<Promise<void>, [string, Record<string, unknown>]>()
         .mockResolvedValue(undefined)
@@ -1467,7 +1466,7 @@ describe('WebhookService', () => {
       conversationContextBuilder,
       leadFlowEngine: new LeadFlowEngine(),
       leadFlowActionExecutor: new LeadFlowActionExecutor(),
-      rabbitPublisherService,
+      outboxService,
       storageService,
       leadsService,
       leadChannelIdentityService,
@@ -1582,7 +1581,7 @@ describe('WebhookService', () => {
     expect(companyRepo.findOne).toHaveBeenCalledWith({
       where: { messengerPageId: 'page-1' }
     })
-    for (const [event, data] of rabbitPublisherService.publish.mock.calls) {
+    for (const [event, data] of outboxService.publish.mock.calls) {
       expect(['lead.created', 'message.received']).toContain(event)
       expect(data.companyId).toBe('company-1')
       expect(data).not.toHaveProperty('userId')
@@ -1695,7 +1694,7 @@ describe('WebhookService', () => {
         })
       }
       const messengerMessagingService = { sendMessengerMessage: jest.fn() }
-      const rabbitPublisherService = { publish: jest.fn() }
+      const outboxService = { publish: jest.fn() }
       const recording = createRecordingInbox()
       const service = createService({
         companyRepo,
@@ -1703,7 +1702,7 @@ describe('WebhookService', () => {
         messageRepo,
         leadChannelIdentityService,
         messengerMessagingService,
-        rabbitPublisherService,
+        outboxService,
         inboundEventInbox: recording.inbox
       })
       return {
@@ -1715,7 +1714,7 @@ describe('WebhookService', () => {
         messageRepo,
         leadChannelIdentityService,
         messengerMessagingService,
-        rabbitPublisherService
+        outboxService
       }
     }
 
@@ -1785,7 +1784,7 @@ describe('WebhookService', () => {
       expect(
         dependencies.messengerMessagingService.sendMessengerMessage
       ).not.toHaveBeenCalled()
-      expect(dependencies.rabbitPublisherService.publish).not.toHaveBeenCalled()
+      expect(dependencies.outboxService.publish).not.toHaveBeenCalled()
       expect(dependencies.userInformationsRepo.findOne).not.toHaveBeenCalled()
     })
 
@@ -1854,7 +1853,7 @@ describe('WebhookService', () => {
             leadCreated: false
           })
         },
-        rabbitPublisherService: { publish: jest.fn() },
+        outboxService: { publish: jest.fn() },
         realtimeService: { emitToLead: jest.fn() },
         leadsService: {
           toResponseMessageDto: jest.fn((message: Message) =>
@@ -2027,7 +2026,7 @@ describe('WebhookService', () => {
         })
       )
     }
-    const rabbitPublisherService = {
+    const outboxService = {
       publish: jest
         .fn<Promise<void>, [string, Record<string, unknown>]>()
         .mockResolvedValue(undefined)
@@ -2051,7 +2050,7 @@ describe('WebhookService', () => {
       conversationContextBuilder,
       leadFlowEngine: new LeadFlowEngine(),
       leadFlowActionExecutor: new LeadFlowActionExecutor(),
-      rabbitPublisherService,
+      outboxService,
       storageService,
       leadsService,
       leadChannelIdentityService,
@@ -2198,7 +2197,7 @@ describe('WebhookService', () => {
       where: { instagramAccountId: '17841436895629883' }
     })
     expect(userInformationsRepo.findOne).not.toHaveBeenCalled()
-    for (const [event, data] of rabbitPublisherService.publish.mock.calls) {
+    for (const [event, data] of outboxService.publish.mock.calls) {
       expect(['lead.created', 'message.received']).toContain(event)
       expect(data.companyId).toBe('company-1')
       expect(data).not.toHaveProperty('userId')
@@ -2308,7 +2307,7 @@ describe('WebhookService', () => {
       const messenger = {
         getInstagramUserProfile: jest.fn().mockResolvedValue(null)
       }
-      const rabbitPublisherService = { publish: jest.fn() }
+      const outboxService = { publish: jest.fn() }
       const recording = createRecordingInbox()
       const service = createService({
         companyRepo,
@@ -2316,7 +2315,7 @@ describe('WebhookService', () => {
         messageRepo,
         leadChannelIdentityService,
         instagramMessagingService: messenger,
-        rabbitPublisherService,
+        outboxService,
         inboundEventInbox: recording.inbox
       })
       return {
@@ -2328,7 +2327,7 @@ describe('WebhookService', () => {
         messageRepo,
         leadChannelIdentityService,
         messenger,
-        rabbitPublisherService
+        outboxService
       }
     }
 
@@ -2386,7 +2385,7 @@ describe('WebhookService', () => {
         dependencies.leadChannelIdentityService.findOrCreateLeadForIdentity
       ).toHaveBeenCalled()
       expect(dependencies.messageRepo.save).not.toHaveBeenCalled()
-      expect(dependencies.rabbitPublisherService.publish).not.toHaveBeenCalled()
+      expect(dependencies.outboxService.publish).not.toHaveBeenCalled()
     })
 
     it('ignores echo events before resolving a Company', async () => {

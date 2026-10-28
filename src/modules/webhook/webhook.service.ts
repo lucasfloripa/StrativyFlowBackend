@@ -23,7 +23,7 @@ import {
 import { LeadsService } from '../leads/leads.service'
 import { LeadChannelIdentityService } from '../leads/services/lead-channel-identity.service'
 import { buildBrazilianPhoneVariants } from '../leads/utils/brazilian-phone'
-import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { OutboxService } from '../outbox/services/outbox.service'
 import { RealtimeService } from '../realtime/realtime.service'
 import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
@@ -138,7 +138,7 @@ export class WebhookService {
     private readonly conversationContextBuilder: ConversationContextBuilder,
     private readonly leadFlowEngine: LeadFlowEngine,
     private readonly leadFlowActionExecutor: LeadFlowActionExecutor,
-    private readonly rabbitPublisherService: RabbitPublisherService,
+    private readonly outboxService: OutboxService,
     private readonly storageService: StorageService,
     private readonly leadsService: LeadsService,
     private readonly leadChannelIdentityService: LeadChannelIdentityService,
@@ -517,7 +517,7 @@ export class WebhookService {
         `[7] Persisting inbound message ${inboundMessageId} for new lead draft`
       )
 
-      await this.rabbitPublisherService.publish('lead.created', {
+      await this.outboxService.publish('lead.created', {
         leadId: lead.id,
         companyId: company.id,
         origin: 'webhook',
@@ -752,7 +752,7 @@ export class WebhookService {
       !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
       this.hasValidLeadName(lead.name)
     ) {
-      await this.rabbitPublisherService.publish('lead.created', {
+      await this.outboxService.publish('lead.created', {
         leadId: lead.id,
         companyId: company.id,
         origin: 'webhook',
@@ -935,7 +935,7 @@ export class WebhookService {
 
       await this.followUpReplyLinkerService.linkReply(savedMessage)
 
-      await this.rabbitPublisherService.publish('message.received', {
+      await this.outboxService.publish('message.received', {
         messageId: savedMessage.id,
         leadId,
         leadName: leadName ?? null,
@@ -1666,7 +1666,7 @@ export class WebhookService {
     })
 
     if (identityResolution.leadCreated) {
-      await this.rabbitPublisherService.publish('lead.created', {
+      await this.outboxService.publish('lead.created', {
         leadId: lead.id,
         companyId: company.id,
         origin: 'webhook',
@@ -1779,7 +1779,7 @@ export class WebhookService {
       !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
       this.hasValidLeadName(lead.name)
     ) {
-      await this.rabbitPublisherService.publish('lead.created', {
+      await this.outboxService.publish('lead.created', {
         leadId: lead.id,
         companyId: company.id,
         origin: 'webhook',
@@ -1855,7 +1855,7 @@ export class WebhookService {
 
       await this.followUpReplyLinkerService.linkReply(savedMessage)
 
-      await this.rabbitPublisherService.publish('message.received', {
+      await this.outboxService.publish('message.received', {
         messageId: savedMessage.id,
         leadId,
         leadName: leadName ?? null,
@@ -2145,7 +2145,7 @@ export class WebhookService {
     })
 
     if (identityResolution.leadCreated) {
-      await this.rabbitPublisherService.publish('lead.created', {
+      await this.outboxService.publish('lead.created', {
         leadId: lead.id,
         companyId: company.id,
         origin: 'webhook',
@@ -2254,7 +2254,7 @@ export class WebhookService {
       !this.hasValidLeadName(leadNameBeforeFlowExecution) &&
       this.hasValidLeadName(lead.name)
     ) {
-      await this.rabbitPublisherService.publish('lead.created', {
+      await this.outboxService.publish('lead.created', {
         leadId: lead.id,
         companyId: company.id,
         origin: 'webhook',

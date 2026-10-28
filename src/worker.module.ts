@@ -14,11 +14,13 @@ import { NegotiationPaymentDomainModule } from './modules/negotiation/negotiatio
 import { Notification } from './modules/notification/entities/notification.entity'
 import { NotificationService } from './modules/notification/notification.service'
 import { NotificationRepository } from './modules/notification/repositories/notification.repository'
+import { OutboxModule } from './modules/outbox/outbox.module'
 import { RabbitModule } from './modules/rabbit/rabbit.module'
 import { UserInformations } from './modules/user/entities/user-informations.entity'
 import { FollowUpExecutionScheduler } from './worker/notifications/followup-execution-scheduler.service'
 import { FollowUpReminderScheduler } from './worker/notifications/followup-reminder-scheduler.service'
 import { NotificationWorker } from './worker/notifications/notification-worker.service'
+import { OutboxRelayScheduler } from './worker/outbox/outbox-relay-scheduler.service'
 import { PaymentScheduler } from './worker/payments/payment-scheduler.service'
 import { PaymentWorker } from './worker/payments/payment-worker.service'
 
@@ -37,6 +39,7 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
     NegotiationPaymentDomainModule,
     MailModule,
     EvolutionModule,
+    OutboxModule,
     RabbitModule,
     ScheduleModule.forRoot()
   ],
@@ -47,7 +50,8 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
     NotificationService,
     FollowUpExecutionScheduler,
     FollowUpReminderScheduler,
-    NotificationWorker
+    NotificationWorker,
+    OutboxRelayScheduler
   ]
 })
 export class WorkerModule {}
