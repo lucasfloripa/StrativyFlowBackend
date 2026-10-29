@@ -31,12 +31,12 @@ describe('RealtimeBridgeConsumer', () => {
     return { consumer, rabbitConsumerService, realtimeService }
   }
 
-  describe('onModuleInit', () => {
+  describe('onApplicationBootstrap', () => {
     it('subscribes to realtime.emit with a queue exclusive to this instance', async () => {
       const { consumer, rabbitConsumerService } = createConsumer()
       const other = createConsumer().consumer
 
-      await consumer.onModuleInit()
+      await consumer.onApplicationBootstrap()
 
       expect(rabbitConsumerService.subscribe).toHaveBeenCalledWith({
         queue: consumer.queue,
