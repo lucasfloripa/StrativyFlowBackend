@@ -32,7 +32,7 @@ As variáveis são lidas de `.env.${NODE_ENV}` (`.env.dev`, `.env.prod`), que n�
 | Storage (R2) | `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_REGION` |
 | WhatsApp (Meta) | `WHATSAPP_API_VERSION`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_TOKEN` |
 | Webhooks Meta | `META_APP_SECRET` (obrigatória; App Secret do app da Meta, ou vários separados por vírgula, usada para validar o `X-Hub-Signature-256`) |
-| Pipeline de webhooks | `WEBHOOK_ASYNC_PROCESSING` (`true` liga o fast-ack: o POST só grava em `inbound_events` e o worker processa; desligada ou ausente, processa na requisição como antes) |
+| Pipeline de webhooks | `WEBHOOK_ASYNC_PROCESSING` (`true` liga o fast-ack: o POST só grava em `inbound_events` e o worker processa; desligada ou ausente, processa na requisição como antes); `INBOUND_EVENTS_RETENTION_DAYS` (padrão 30) e `OUTBOX_RETENTION_DAYS` (padrão 7), retenção diária feita pelo worker) |
 | Evolution API | `EVOLUTION_API_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE` (obrigatórias na API e no worker) |
 | IA | `OPENAI_API_KEY` |
 

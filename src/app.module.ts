@@ -7,6 +7,7 @@ import { ContactsModule } from './modules/contacts/contacts.module'
 import { DashboardModule } from './modules/dashboard/dashboard.module'
 import { FinanceiroModule } from './modules/financeiro/financeiro.module'
 import { FollowUpModule } from './modules/followup/followup.module'
+import { HealthModule } from './modules/health/health.module'
 import { LeadsModule } from './modules/leads/leads.module'
 import { NegotiationModule } from './modules/negotiation/negotiation.module'
 import { NotificationModule } from './modules/notification/notification.module'
@@ -27,6 +28,7 @@ import { WebhookModule } from './modules/webhook/webhook.module'
     DashboardModule,
     FinanceiroModule,
     FollowUpModule,
+    HealthModule,
     LeadsModule,
     NegotiationModule,
     NotificationModule,

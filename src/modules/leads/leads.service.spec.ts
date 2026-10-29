@@ -7,7 +7,7 @@ import {
 import { In, Repository } from 'typeorm'
 
 import { FollowUp } from '../followup/entities/followup.entity'
-import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { OutboxService } from '../outbox/services/outbox.service'
 import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -41,7 +41,7 @@ describe('LeadsService create', () => {
     } as unknown as Repository<UserInformations>
     const rabbitPublisherService = {
       publish: jest.fn()
-    } as unknown as RabbitPublisherService
+    } as unknown as OutboxService
     const service = new LeadsService(
       leadRepository,
       {} as Repository<Message>,
@@ -132,7 +132,7 @@ describe('LeadsService company access', () => {
       {} as Repository<Message>,
       {} as Repository<FollowUp>,
       userInformationsRepository as unknown as Repository<UserInformations>,
-      rabbitPublisher as unknown as RabbitPublisherService,
+      rabbitPublisher as unknown as OutboxService,
       {} as StorageService
     )
 

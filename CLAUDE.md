@@ -28,7 +28,8 @@ npm run test:cov
 
 Before finishing a change: `npm run lint`, `npm test`, `npm run build`.
 CI (`.github/workflows/ci.yml`) runs `npm run lint:check` (no `--fix`), `npm test` and
-`npm run build` on every push to `main` / `big-refactor-backend` and on pull requests.
+`npm run build` on every push to `main` / `big-refactor-backend` and on pull requests, plus
+`npm run test:int` against a Postgres service (`TEST_DATABASE_URL`) in a separate job.
 There is no migration CLI script; migrations run on boot when `DB_MIGRATIONS_RUN=true`.
 
 Local Postgres and RabbitMQ: `../elciess.ms.users/docker-postgres.yml` and `docker-rabbitmq.yml`.
@@ -79,8 +80,9 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   token with `JWT_SECRET` and sets `request.user = { id, userId, role }`.
 - Controllers declare a local `AuthenticatedRequest = Request & { user: { id: string } }` and pass
   `request.user.id` as the **first argument** to the service. Services scope every query by that user.
-- Platform administration routes (today only `POST /user/user-informations`, used to onboard a
-  client) add `AdminApiKeyGuard`: the `X-Admin-Api-Key` header must match `ADMIN_API_KEY`; when the
+- Platform administration routes (`POST /user/user-informations` to onboard a client,
+  `POST /admin/webhook/inbound-events/replay` to replay failed webhook events) add
+  `AdminApiKeyGuard`: the `X-Admin-Api-Key` header must match `ADMIN_API_KEY`; when the
   variable is unset every request is refused.
 - Routes that take ids of company-owned resources add `CompanyAccessGuard`
   (`@UseGuards(JwtAuthGuard, CompanyAccessGuard)`). It checks any `leadId`, `negotiationId`,
@@ -170,6 +172,9 @@ Inside a module: `<area>.module.ts`, `<area>.controller.ts` (or `controllers/`),
   `InboundMediaWorker` when async, inline otherwise); the message is stored first, the file
   follows with `message.updated`. A handler that must wait for data not stored yet throws
   `DeferredInboundEventError`: retried, then recorded as `ignored` (not `failed`).
+- Operation: `failed` events are replayed with `POST /admin/webhook/inbound-events/replay`;
+  `PipelineRetentionScheduler` (worker, daily) purges handled events and published outbox rows;
+  `GET /health` reports `degraded` when either table has work pending for over 5 minutes.
 
 ### Realtime
 

@@ -19,8 +19,9 @@ migrations de que precisa e apaga o schema no fim; use `describeWithDatabase` no
 `describe`.
 
 O CI (`.github/workflows/ci.yml`) roda `lint:check`, os testes unitários e o build em todo
-push para `main` e `big-refactor-backend` e em todo pull request. Integração e E2E entram no
-CI quando os primeiros testes desses níveis existirem.
+push para `main` e `big-refactor-backend` e em todo pull request, e os testes de integração
+num job à parte, com um Postgres 16 de serviço. E2E entra no CI quando os primeiros testes
+desse nível existirem.
 
 ## Estrutura de um teste
 

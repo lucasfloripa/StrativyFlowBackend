@@ -17,6 +17,11 @@ export const WEBHOOK_HANDSHAKE_THROTTLE = {
   default: { ttl: ONE_MINUTE_IN_MS, limit: 10 }
 }
 
+// Load balancer and uptime probes poll every few seconds.
+export const HEALTH_CHECK_THROTTLE = {
+  default: { ttl: ONE_MINUTE_IN_MS, limit: 60 }
+}
+
 // Platform onboarding: a person with Postman, so a tight limit is enough.
 export const ADMIN_ROUTE_THROTTLE = {
   default: { ttl: ONE_MINUTE_IN_MS, limit: 5 }

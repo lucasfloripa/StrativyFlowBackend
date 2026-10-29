@@ -28,6 +28,7 @@ import { PaymentWorker } from './worker/payments/payment-worker.service'
 import { InboundEventWorker } from './worker/webhook/inbound-event-worker.service'
 import { InboundMediaWorker } from './worker/webhook/inbound-media-worker.service'
 import { OutboundReplyWorker } from './worker/webhook/outbound-reply-worker.service'
+import { PipelineRetentionScheduler } from './worker/webhook/pipeline-retention-scheduler.service'
 
 @Module({
   imports: [
@@ -61,7 +62,8 @@ import { OutboundReplyWorker } from './worker/webhook/outbound-reply-worker.serv
     OutboxRelayScheduler,
     InboundEventWorker,
     OutboundReplyWorker,
-    InboundMediaWorker
+    InboundMediaWorker,
+    PipelineRetentionScheduler
   ]
 })
 export class WorkerModule {}

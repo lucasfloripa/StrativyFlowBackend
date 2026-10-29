@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 
+import { WebhookAdminController } from './admin/webhook-admin.controller'
 import {
   metaAppSecretsProvider,
   MetaWebhookSignatureGuard
@@ -15,7 +16,7 @@ import { WebhookController } from './webhook.controller'
     MetaWebhookSignatureGuard,
     WebhookIngestionService
   ],
-  controllers: [WebhookController],
+  controllers: [WebhookController, WebhookAdminController],
   exports: [WebhookProcessingModule]
 })
 export class WebhookModule {}

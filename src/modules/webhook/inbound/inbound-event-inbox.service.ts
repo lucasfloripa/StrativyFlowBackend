@@ -36,6 +36,16 @@ type ReturningRow = { id: string }
 
 export type AcceptResult = { accepted: number; duplicates: number }
 
+export const MAX_REPLAY_BATCH = 500
+
+export type ReplayFilter = {
+  ids?: string[]
+  conversationKey?: string
+  receivedFrom?: Date
+  receivedTo?: Date
+  limit?: number
+}
+
 export type StoredEventResult =
   | InboundEventStatus.PROCESSED
   | InboundEventStatus.IGNORED
@@ -104,6 +114,57 @@ export class InboundEventInboxService {
       }
 
       return result
+    })
+  }
+
+  /**
+   * Puts `failed` events back on the worker queue, oldest first (at most
+   * `MAX_REPLAY_BATCH`). Safe to repeat: every layer of the pipeline is
+   * idempotent, and an event processed meanwhile is skipped by the worker.
+   */
+  async replayFailed(filter: ReplayFilter): Promise<{ replayed: string[] }> {
+    return runInTransaction(this.dataSource, async () => {
+      const query = this.inboundEventRepo
+        .createQueryBuilder('event')
+        .setLock('pessimistic_write')
+        .setOnLocked('skip_locked')
+        .where('event.status = :failed', { failed: InboundEventStatus.FAILED })
+
+      if (filter.ids?.length) {
+        query.andWhere('event.id IN (:...ids)', { ids: filter.ids })
+      }
+      if (filter.conversationKey) {
+        query.andWhere('event.conversationKey = :conversationKey', {
+          conversationKey: filter.conversationKey
+        })
+      }
+      if (filter.receivedFrom) {
+        query.andWhere('event.receivedAt >= :receivedFrom', {
+          receivedFrom: filter.receivedFrom
+        })
+      }
+      if (filter.receivedTo) {
+        query.andWhere('event.receivedAt < :receivedTo', {
+          receivedTo: filter.receivedTo
+        })
+      }
+
+      const events = await query
+        .orderBy('event.receivedAt', 'ASC')
+        .limit(Math.min(filter.limit ?? MAX_REPLAY_BATCH, MAX_REPLAY_BATCH))
+        .getMany()
+
+      for (const event of events) {
+        await this.inboundEventRepo.update(
+          { id: event.id },
+          { status: InboundEventStatus.PENDING }
+        )
+        const job: WebhookInboundJob = { inboundEventId: event.id }
+        await this.outboxService.publish(WEBHOOK_INBOUND_ROUTING_KEY, job)
+      }
+
+      this.logger.log(`Replayed failed inbound events. count=${events.length}`)
+      return { replayed: events.map((event) => event.id) }
     })
   }
 

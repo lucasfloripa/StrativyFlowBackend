@@ -258,6 +258,68 @@ describeWithDatabase('inbound pipeline (Postgres)', () => {
     })
   })
 
+  describe('replayFailed', () => {
+    const storeFailed = async (dedupeKey: string, user?: string) => {
+      await inbox.accept([event(dedupeKey, user)])
+      const repository = dataSource.getRepository(InboundEventRecord)
+      const { id } = await repository.findOneByOrFail({ dedupeKey })
+      await repository.update(
+        { id },
+        { status: InboundEventStatus.FAILED, lastError: 'boom' }
+      )
+      return id
+    }
+
+    it('puts the failed events of a conversation back on the queue', async () => {
+      const first = await storeFailed('wamid.1', '5548000000001')
+      await storeFailed('wamid.2', '5548000000002')
+      await inbox.accept([event('wamid.3', '5548000000001')])
+      published = []
+
+      await expect(
+        inbox.replayFailed({
+          conversationKey: 'whatsapp:phone-number-1:5548000000001'
+        })
+      ).resolves.toEqual({ replayed: [first] })
+
+      const rows = await dataSource
+        .getRepository(InboundEventRecord)
+        .find({ order: { dedupeKey: 'ASC' } })
+      expect(rows.map((row) => [row.dedupeKey, row.status])).toEqual([
+        ['wamid.1', InboundEventStatus.PENDING],
+        ['wamid.2', InboundEventStatus.FAILED],
+        ['wamid.3', InboundEventStatus.PENDING]
+      ])
+      expect(published).toEqual([
+        { routingKey: 'webhook.inbound', payload: { inboundEventId: first } }
+      ])
+
+      // The replayed event is processed normally afterwards.
+      await expect(
+        inbox.processStored(first, () =>
+          Promise.resolve({ status: InboundEventStatus.PROCESSED })
+        )
+      ).resolves.toBe(InboundEventStatus.PROCESSED)
+    })
+
+    it('filters by received period and respects the limit', async () => {
+      await storeFailed('wamid.1')
+      await storeFailed('wamid.2')
+      await storeFailed('wamid.3')
+
+      const future = await inbox.replayFailed({
+        receivedFrom: new Date(Date.now() + 60_000)
+      })
+      const limited = await inbox.replayFailed({
+        receivedTo: new Date(Date.now() + 60_000),
+        limit: 2
+      })
+
+      expect(future.replayed).toEqual([])
+      expect(limited.replayed).toHaveLength(2)
+    })
+  })
+
   describe('outbox relay', () => {
     it('publishes each pending row once when relays run concurrently', async () => {
       const outbox = dataSource.getRepository(OutboxMessage)

@@ -15,7 +15,7 @@ import {
   Notification,
   NotificationReferenceType
 } from '../notification/entities/notification.entity'
-import { RabbitPublisherService } from '../rabbit/services/rabbit-publisher.service'
+import { OutboxService } from '../outbox/services/outbox.service'
 import { StorageService } from '../storage/storage.service'
 import { UserInformations } from '../user/entities/user-informations.entity'
 
@@ -64,7 +64,7 @@ export class LeadsService {
     private readonly followUpRepo: Repository<FollowUp>,
     @InjectRepository(UserInformations)
     private readonly userInformationsRepo: Repository<UserInformations>,
-    private readonly rabbitPublisherService: RabbitPublisherService,
+    private readonly outboxService: OutboxService,
     private readonly storageService: StorageService
   ) {}
 
@@ -347,7 +347,7 @@ export class LeadsService {
       }
     )
 
-    await this.rabbitPublisherService.publish('lead.created', {
+    await this.outboxService.publish('lead.created', {
       leadId: createdLead.id,
       userId,
       origin: 'app',
@@ -865,7 +865,7 @@ export class LeadsService {
 
     const createdLead = await this.leadRepo.save(lead)
 
-    await this.rabbitPublisherService.publish('lead.created', {
+    await this.outboxService.publish('lead.created', {
       leadId: createdLead.id,
       userId,
       origin: 'whatsapp',
